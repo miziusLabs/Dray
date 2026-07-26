@@ -1,0 +1,112 @@
+use crate::claude_code::{self, ClaudeCodeEvent};
+use anyhow::{bail, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::{collections::HashMap, sync::Arc};
+use tauri::AppHandle;
+use tokio::{
+    io::AsyncWriteExt,
+    process::{Child, ChildStdin},
+    sync::Mutex,
+};
+
+#[derive(Debug)]
+pub struct SessionManager {
+    pub sessions: Mutex<HashMap<String, Session>>,
+}
+
+impl Default for SessionManager {
+    fn default() -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl SessionManager {
+    pub async fn send_msg(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        harness: Harness,
+        model: &str,
+        effort: &str,
+        is_new_session: bool,
+        app: &AppHandle,
+    ) -> Result<()> {
+        let _ = app; // reserved for session index / fs later
+
+        if is_new_session {
+            let mut session =
+                Session::init(session_id, harness, model, effort, is_new_session).await?;
+            session.send_msg(prompt).await?;
+            self.sessions
+                .lock()
+                .await
+                .insert(session_id.to_string(), session);
+
+            return Ok(());
+        }
+
+        let mut sessions_guard = self.sessions.lock().await;
+        if let Some(s) = sessions_guard.get_mut(session_id) {
+            s.send_msg(prompt).await?;
+            return Ok(());
+        }
+
+        let mut session =
+            Session::init(session_id, harness, model, effort, is_new_session).await?;
+        session.send_msg(prompt).await?;
+        sessions_guard.insert(session_id.to_string(), session);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum Harness {
+    ClaudeCode,
+    Codex,
+}
+
+#[derive(Debug)]
+pub struct Session {
+    pub id: String,
+    pub child: Child,
+    pub stdin: ChildStdin,
+    pub harness: Harness,
+    pub model: String,
+    pub effort: String,
+    pub events: Arc<Mutex<Vec<ClaudeCodeEvent>>>,
+}
+
+impl Session {
+    pub async fn init(
+        session_id: &str,
+        harness: Harness,
+        model: &str,
+        effort: &str,
+        is_new_session: bool,
+    ) -> Result<Session> {
+        if let Harness::ClaudeCode = harness {
+            claude_code::init(session_id, model, effort, is_new_session).await
+        } else {
+            bail!("unsupported harness {harness:?}")
+        }
+    }
+
+    pub async fn send_msg(&mut self, prompt: &str) -> Result<()> {
+        let prompt = json!({"type":"user","message":{"role":"user","content": prompt}});
+        let line = format!("{prompt}\n");
+
+        let _ = self.stdin.write_all(line.as_bytes()).await?;
+        let _ = self.stdin.flush().await?;
+
+        Ok(())
+    }
+
+    pub async fn kill(mut self) -> Result<()> {
+        let _ = self.child.kill().await?;
+        Ok(())
+    }
+}
