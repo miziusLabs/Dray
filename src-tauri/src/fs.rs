@@ -44,7 +44,7 @@ pub struct SessionIndexByProject {
 
 pub async fn get_sessions_dir(app: &AppHandle) -> Result<PathBuf> {
     let path = app.path().app_data_dir().context("couldnt get")?;
-    fs::create_dir_all(&path);
+    fs::create_dir_all(&path).await?;
 
     Ok(path)
 }
@@ -52,7 +52,7 @@ pub async fn get_sessions_dir(app: &AppHandle) -> Result<PathBuf> {
 pub async fn list_session(app: &AppHandle) -> Result<Vec<SessionIndexItem>> {
     let path = get_sessions_dir(app).await?.join("index.json");
     if !path.exists() {
-        fs::create_dir_all(&path);
+        fs::create_dir_all(&path).await?;
         return Ok(Vec::new());
     }
 

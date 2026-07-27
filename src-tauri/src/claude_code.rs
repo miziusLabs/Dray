@@ -4,6 +4,7 @@ use super::session::Session;
 use anyhow::{Context, Result};
 use std::process::Stdio;
 use std::sync::Arc;
+use tauri::{AppHandle, Emitter};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{ChildStderr, ChildStdout, Command},
@@ -17,6 +18,7 @@ pub async fn init(
     model: &str,
     effort: &str,
     is_new_session: bool,
+    app: &AppHandle,
 ) -> Result<Session> {
     let mut args = vec![
         "-p",
@@ -53,8 +55,9 @@ pub async fn init(
     let events: Arc<Mutex<Vec<ClaudeCodeEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let stdout_events = Arc::clone(&events);
 
+    let app = app.clone();
     tokio::spawn(async move {
-        if let Err(error) = read_stdout(stdout, stdout_events).await {
+        if let Err(error) = read_stdout(stdout, stdout_events, &app).await {
             eprintln!("Failed to read Claude stdout: {error}");
         }
     });
@@ -76,54 +79,11 @@ pub async fn init(
     })
 }
 
-fn event_summary(event: &ClaudeCodeEvent) -> String {
-    match event {
-        ClaudeCodeEvent::System(system) => match system {
-            parser::SystemEvent::Init { model, cwd, .. } => {
-                format!("system/init model={model} cwd={cwd}")
-            }
-            parser::SystemEvent::Status { status, .. } => {
-                format!("system/status status={status}")
-            }
-            parser::SystemEvent::HookStarted { hook_name, .. } => {
-                format!("system/hook_started hook={hook_name}")
-            }
-            parser::SystemEvent::HookResponse {
-                hook_name, outcome, ..
-            } => format!("system/hook_response hook={hook_name} outcome={outcome}"),
-        },
-        ClaudeCodeEvent::StreamEvent { event, ttft_ms, .. } => {
-            let kind = event.get("type").and_then(|v| v.as_str()).unwrap_or("?");
-            match ttft_ms {
-                Some(ms) => format!("stream_event type={kind} ttft_ms={ms}"),
-                None => format!("stream_event type={kind}"),
-            }
-        }
-        ClaudeCodeEvent::Assistant { message, .. } => {
-            let preview = message
-                .pointer("/content/0/text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let preview: String = preview.chars().take(80).collect();
-            format!("assistant text={preview:?}")
-        }
-        ClaudeCodeEvent::Result(result) => match result {
-            parser::ResultEvent::Success {
-                result,
-                duration_ms,
-                total_cost_usd,
-                ..
-            } => {
-                let preview: String = result.chars().take(80).collect();
-                format!(
-                    "result/success duration_ms={duration_ms} cost_usd={total_cost_usd} text={preview:?}"
-                )
-            }
-        },
-    }
-}
-
-async fn read_stdout(stdout: ChildStdout, events: Arc<Mutex<Vec<ClaudeCodeEvent>>>) -> Result<()> {
+async fn read_stdout(
+    stdout: ChildStdout,
+    events: Arc<Mutex<Vec<ClaudeCodeEvent>>>,
+    app: &AppHandle,
+) -> Result<()> {
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
 
@@ -133,7 +93,8 @@ async fn read_stdout(stdout: ChildStdout, events: Arc<Mutex<Vec<ClaudeCodeEvent>
         }
         match parser::parse_line(&line) {
             Ok(value) => {
-                println!("[parse ok] {}", event_summary(&value));
+                // println!("[parse ok] {}", event_summary(&value));
+                app.emit("events", &value)?;
                 events.lock().await.push(value);
             }
             Err(err) => {
@@ -156,3 +117,50 @@ async fn read_stderr(stderr: ChildStderr) -> Result<()> {
 
     Ok(())
 }
+
+// fn event_summary(event: &ClaudeCodeEvent) -> String {
+//     match event {
+//         ClaudeCodeEvent::System(system) => match system {
+//             parser::SystemEvent::Init { model, cwd, .. } => {
+//                 format!("system/init model={model} cwd={cwd}")
+//             }
+//             parser::SystemEvent::Status { status, .. } => {
+//                 format!("system/status status={status}")
+//             }
+//             parser::SystemEvent::HookStarted { hook_name, .. } => {
+//                 format!("system/hook_started hook={hook_name}")
+//             }
+//             parser::SystemEvent::HookResponse {
+//                 hook_name, outcome, ..
+//             } => format!("system/hook_response hook={hook_name} outcome={outcome}"),
+//         },
+//         ClaudeCodeEvent::StreamEvent { event, ttft_ms, .. } => {
+//             let kind = event.get("type").and_then(|v| v.as_str()).unwrap_or("?");
+//             match ttft_ms {
+//                 Some(ms) => format!("stream_event type={kind} ttft_ms={ms}"),
+//                 None => format!("stream_event type={kind}"),
+//             }
+//         }
+//         ClaudeCodeEvent::Assistant { message, .. } => {
+//             let preview = message
+//                 .pointer("/content/0/text")
+//                 .and_then(|v| v.as_str())
+//                 .unwrap_or("");
+//             let preview: String = preview.chars().take(80).collect();
+//             format!("assistant text={preview:?}")
+//         }
+//         ClaudeCodeEvent::Result(result) => match result {
+//             parser::ResultEvent::Success {
+//                 result,
+//                 duration_ms,
+//                 total_cost_usd,
+//                 ..
+//             } => {
+//                 let preview: String = result.chars().take(80).collect();
+//                 format!(
+//                     "result/success duration_ms={duration_ms} cost_usd={total_cost_usd} text={preview:?}"
+//                 )
+//             }
+//         },
+//     }
+// }

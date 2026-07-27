@@ -150,9 +150,8 @@ mod tests {
                 empty += 1;
                 continue;
             }
-            parse_line(line).unwrap_or_else(|err| {
-                panic!("line {} failed to parse: {err}\n{line}", idx + 1)
-            });
+            parse_line(line)
+                .unwrap_or_else(|err| panic!("line {} failed to parse: {err}\n{line}", idx + 1));
             ok += 1;
         }
 

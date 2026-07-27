@@ -34,11 +34,9 @@ impl SessionManager {
         is_new_session: bool,
         app: &AppHandle,
     ) -> Result<()> {
-        let _ = app; // reserved for session index / fs later
-
         if is_new_session {
             let mut session =
-                Session::init(session_id, harness, model, effort, is_new_session).await?;
+                Session::init(session_id, harness, model, effort, is_new_session, app).await?;
             session.send_msg(prompt).await?;
             self.sessions
                 .lock()
@@ -55,7 +53,7 @@ impl SessionManager {
         }
 
         let mut session =
-            Session::init(session_id, harness, model, effort, is_new_session).await?;
+            Session::init(session_id, harness, model, effort, is_new_session, app).await?;
         session.send_msg(prompt).await?;
         sessions_guard.insert(session_id.to_string(), session);
         Ok(())
@@ -87,9 +85,10 @@ impl Session {
         model: &str,
         effort: &str,
         is_new_session: bool,
+        app: &AppHandle,
     ) -> Result<Session> {
         if let Harness::ClaudeCode = harness {
-            claude_code::init(session_id, model, effort, is_new_session).await
+            claude_code::init(session_id, model, effort, is_new_session, app).await
         } else {
             bail!("unsupported harness {harness:?}")
         }

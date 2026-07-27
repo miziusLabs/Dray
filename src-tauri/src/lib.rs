@@ -1,11 +1,6 @@
 use crate::session::{Harness, SessionManager};
-use anyhow::{bail, Result};
 use tauri::{AppHandle, State};
 
-// #[tauri::command]
-// fn greet(name: &str) -> String {
-//     format!("Hello, {}! You've been greeted from Rust!", name)
-// }
 pub mod claude_code;
 mod fs;
 pub mod session;
@@ -20,11 +15,11 @@ async fn send_msg(
     is_new_session: bool,
     app: AppHandle,
     manager: State<'_, SessionManager>,
-) -> Result<()> {
+) -> Result<(), String> {
     let harness = match harness {
         "claude_code" => Harness::ClaudeCode,
         "codex" => Harness::Codex,
-        _ => bail!("invalid harness"),
+        _ => return Err("invalid harness".into()),
     };
 
     manager
@@ -37,9 +32,8 @@ async fn send_msg(
             is_new_session,
             &app,
         )
-        .await?;
-
-    Ok(())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -47,6 +41,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(SessionManager::default())
+        .invoke_handler(tauri::generate_handler![send_msg])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

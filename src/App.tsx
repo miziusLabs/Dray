@@ -1,49 +1,82 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
 import "./App.css";
+import Chat from "./components/Chat";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import ChatInput from "./components/ChatInput";
+
+
+type Harness = "claude_code" | "codex";
+type SessionStatus = "idle" | "in_progress" | "completed";
+
+export type Session = {
+  id: string,
+  harness: Harness,
+  model: string,
+  effort: string,
+  status: SessionStatus,
+  events: string[],
+}
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  const [sessions, setSessions] = useState<Array<Session>>();
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+
+  const selectedSession = selectedSessionId && sessions ? sessions.find((s) => s.id == selectedSessionId) ?? null : null;
+
+  const handleSendMsg = async (message: string) => {
+
+    let sessionId = selectedSessionId;
+    const isNewSession = !sessionId;
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      setSelectedSessionId(sessionId);
+    }
+
+    if(isNewSession){
+      const ns: Session = {
+        id: sessionId,
+        harness: "claude_code",
+        model: "haiku",
+        effort: "low",
+        status: "in_progress",
+        events: []
+      }
+      setSessions((prev) => prev ? [...prev, ns] : [ns]);
+    }
+
+    await invoke("send_msg", {
+      sessionId,
+      prompt: message,
+      harness: "claude_code",
+      model: "haiku",
+      effort: "low",
+      isNewSession,
+    });
+
+  };
+
+  useEffect(() => {
+    const setupListener = async () => {
+      const unlisten = await listen("events", (event) => {
+        console.log(event);
+      });
+      return unlisten;
+    };
+
+    const listenerPromise = setupListener();
+
+    return () => {
+      listenerPromise.then((unlisten) => unlisten());
+    };
+  }, [selectedSessionId]);
+  
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      <Chat sessionId={selectedSessionId} session={selectedSession}/>
+      <ChatInput onSend={handleSendMsg}/>
     </main>
   );
 }
