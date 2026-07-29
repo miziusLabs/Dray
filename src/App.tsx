@@ -10,7 +10,7 @@ type Harness = "claude_code" | "codex";
 type SessionStatus = "idle" | "in_progress" | "completed";
 
 export type Session = {
-  id: string,
+  session_id: string,
   harness: Harness,
   model: string,
   effort: string,
@@ -23,7 +23,7 @@ function App() {
   const [sessions, setSessions] = useState<Array<Session>>();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
-  const selectedSession = selectedSessionId && sessions ? sessions.find((s) => s.id == selectedSessionId) ?? null : null;
+  const selectedSession = selectedSessionId && sessions ? sessions.find((s) => s.session_id == selectedSessionId) ?? null : null;
 
   const handleSendMsg = async (message: string) => {
 
@@ -36,7 +36,7 @@ function App() {
 
     if(isNewSession){
       const ns: Session = {
-        id: sessionId,
+        session_id: sessionId,
         harness: "claude_code",
         model: "haiku",
         effort: "low",

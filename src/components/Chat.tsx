@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Session } from "../App";
-import ChatInput from "./ChatInput";
 
 export default function Chat(
   { sessionId,
