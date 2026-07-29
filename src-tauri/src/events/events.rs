@@ -352,15 +352,23 @@ pub struct SessionInfo {
     pub model: Option<String>,
     pub harness_version: Option<String>,
     pub tools: Vec<String>,
-    pub mcp_servers: Vec<McpServerInfo>,
+    pub mcp_servers: Vec<McpServer>,
     pub subagent_types: Vec<String>,
     pub settings: Option<Settings>,
 }
 
+/// An MCP server and its connection state, as reported at session start.
+///
+/// Shared with the harness parsers rather than duplicated: the shape is the
+/// same on both sides, so the Claude Code parser deserializes straight into
+/// this.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct McpServerInfo {
+pub struct McpServer {
     pub name: String,
+    /// Free-form: observed values include `connected`, `pending`, and
+    /// `needs-auth`, but the set isn't documented and a new one shouldn't fail
+    /// the line.
     pub status: String,
 }
 
@@ -370,13 +378,29 @@ pub struct McpServerInfo {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub model: Option<String>,
-    /// Free-form: Claude Code's `permissionMode` and Codex's `approval_policy`
-    /// use different vocabularies, and neither looks stable enough yet to model
-    /// as a shared enum without a lossy mapping.
-    pub approval_policy: Option<String>,
+    /// How much the agent may do without asking. Modeled on Claude Code's
+    /// `permissionMode`, which is a closed set; Codex's `approval_policy` maps
+    /// onto these, gaining variants if it turns out to need them.
+    pub approval_policy: Option<ApprovalPolicy>,
     pub sandbox: Option<String>,
     pub writable_roots: Vec<String>,
     pub network_access: Option<bool>,
+}
+
+/// Permission stance for a session, in roughly increasing order of autonomy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApprovalPolicy {
+    /// Prompt per action, per the harness's own defaults.
+    Default,
+    /// Edits apply without prompting; other tools still ask.
+    AcceptEdits,
+    /// Read-only: research and propose, change nothing.
+    Plan,
+    Auto,
+    DontAsk,
+    /// Every permission check bypassed.
+    BypassPermissions,
 }
 
 #[cfg(test)]

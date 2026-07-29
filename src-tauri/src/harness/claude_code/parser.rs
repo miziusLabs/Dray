@@ -9,7 +9,7 @@ use serde_json::Value;
 pub enum ClaudeCodeEvent {
     System(SystemEvent),
     StreamEvent {
-        event: Value,
+        event: StreamFrame,
         session_id: String,
         parent_tool_use_id: Option<String>,
         uuid: String,
@@ -165,6 +165,120 @@ pub enum ResultEvent {
     },
 }
 
+/// One Anthropic SSE frame, as carried in `stream_event.event`.
+///
+/// These stream the assistant's response as it is produced. Frames address
+/// content blocks by `index` within the message opened by [`MessageStart`], and
+/// a block's identity (`id`/`name` for a tool call) arrives up front in
+/// [`ContentBlockStart`] — only its *contents* are streamed.
+///
+/// [`MessageStart`]: Self::MessageStart
+/// [`ContentBlockStart`]: Self::ContentBlockStart
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StreamFrame {
+    MessageStart {
+        message: StreamMessage,
+    },
+    ContentBlockStart {
+        index: u32,
+        content_block: ContentBlock,
+    },
+    ContentBlockDelta {
+        index: u32,
+        delta: ContentDelta,
+    },
+    ContentBlockStop {
+        index: u32,
+    },
+    MessageDelta {
+        delta: MessageDelta,
+        #[serde(default)]
+        usage: Option<Value>,
+        #[serde(default)]
+        context_management: Option<Value>,
+    },
+    MessageStop,
+    /// A frame type this build doesn't model. Anthropic adds frame types over
+    /// time, and dropping the whole line over one unknown frame would lose
+    /// content we *can* read.
+    #[serde(other)]
+    Unrecognized,
+}
+
+/// The message envelope opened by [`StreamFrame::MessageStart`]. `content` is
+/// always empty here — blocks arrive as subsequent frames.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamMessage {
+    pub id: String,
+    pub model: String,
+    pub role: String,
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub usage: Option<Value>,
+}
+
+/// A content block's identity, known when the block opens.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentBlock {
+    Text {
+        text: String,
+    },
+    Thinking {
+        #[serde(default)]
+        thinking: String,
+        #[serde(default)]
+        signature: Option<String>,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        #[serde(default)]
+        input: Value,
+        #[serde(default)]
+        caller: Option<Value>,
+    },
+    #[serde(other)]
+    Unrecognized,
+}
+
+/// An incremental update to an open content block.
+///
+/// `input_json_delta` fragments are *not* individually parseable — they only
+/// form valid JSON once every fragment for the block has been concatenated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentDelta {
+    TextDelta {
+        text: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
+    },
+    ThinkingDelta {
+        thinking: String,
+    },
+    SignatureDelta {
+        signature: String,
+    },
+    #[serde(other)]
+    Unrecognized,
+}
+
+/// Terminal metadata for a message, carried on
+/// [`StreamFrame::MessageDelta`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageDelta {
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub stop_sequence: Option<String>,
+    #[serde(default)]
+    pub stop_details: Option<Value>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskUsage {
     pub total_tokens: u64,
@@ -185,28 +299,16 @@ pub struct ResultOrigin {
     pub kind: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpServer {
-    pub name: String,
-    pub status: String,
-}
+// `McpServer` and `PermissionMode` are shared with the normalized model rather
+// than duplicated here — the wire shapes match, so these deserialize straight
+// into the `events` types.
+pub use crate::events::{ApprovalPolicy as PermissionMode, McpServer};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plugin {
     pub name: String,
     pub path: String,
     pub source: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PermissionMode {
-    Default,
-    AcceptEdits,
-    Plan,
-    Auto,
-    DontAsk,
-    BypassPermissions,
 }
 
 pub fn parse_line(line: &str) -> Result<ClaudeCodeEvent> {
@@ -334,6 +436,170 @@ mod tests {
                 ..
             }) if kind == "task-notification"
         )));
+    }
+
+    fn stream_frames(fixture: &str) -> Vec<StreamFrame> {
+        parse_fixture(fixture)
+            .into_iter()
+            .filter_map(|event| match event {
+                ClaudeCodeEvent::StreamEvent { event, .. } => Some(event),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn parses_every_stream_frame_variant() {
+        let frames = stream_frames(include_str!("fixtures/complex.jsonl"));
+
+        // No frame in the fixtures should land in the catch-all: if one does,
+        // it's a shape this build doesn't model yet.
+        assert!(
+            !frames
+                .iter()
+                .any(|f| matches!(f, StreamFrame::Unrecognized)),
+            "a stream frame fell through to Unrecognized"
+        );
+
+        for expected in [
+            "message_start",
+            "message_delta",
+            "message_stop",
+            "content_block_start",
+            "content_block_delta",
+            "content_block_stop",
+        ] {
+            assert!(
+                frames.iter().any(|f| match (f, expected) {
+                    (StreamFrame::MessageStart { .. }, "message_start") => true,
+                    (StreamFrame::MessageDelta { .. }, "message_delta") => true,
+                    (StreamFrame::MessageStop, "message_stop") => true,
+                    (StreamFrame::ContentBlockStart { .. }, "content_block_start") => true,
+                    (StreamFrame::ContentBlockDelta { .. }, "content_block_delta") => true,
+                    (StreamFrame::ContentBlockStop { .. }, "content_block_stop") => true,
+                    _ => false,
+                }),
+                "missing {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn stream_frames_expose_block_identity_and_content() {
+        let frames = stream_frames(include_str!("fixtures/complex.jsonl"));
+
+        // A tool call's id and name arrive when the block opens, before any of
+        // its arguments have streamed — that's what lets the UI label a tool
+        // call immediately.
+        assert!(frames.iter().any(|f| matches!(
+            f,
+            StreamFrame::ContentBlockStart {
+                content_block: ContentBlock::ToolUse { id, name, .. },
+                ..
+            } if id.starts_with("toolu_") && !name.is_empty()
+        )));
+
+        assert!(frames.iter().any(|f| matches!(
+            f,
+            StreamFrame::ContentBlockDelta {
+                delta: ContentDelta::TextDelta { text },
+                ..
+            } if !text.is_empty()
+        )));
+
+        assert!(frames.iter().any(|f| matches!(
+            f,
+            StreamFrame::ContentBlockDelta {
+                delta: ContentDelta::InputJsonDelta { .. },
+                ..
+            }
+        )));
+
+        assert!(frames.iter().any(|f| matches!(
+            f,
+            StreamFrame::MessageStart { message } if message.id.starts_with("msg_")
+        )));
+    }
+
+    /// Concatenated `input_json_delta` fragments reconstruct the tool call's
+    /// arguments. Individually they are not valid JSON.
+    #[test]
+    fn input_json_deltas_concatenate_into_valid_json() {
+        let frames = stream_frames(include_str!("fixtures/complex.jsonl"));
+
+        let mut by_index: std::collections::BTreeMap<u32, String> =
+            std::collections::BTreeMap::new();
+        for frame in &frames {
+            if let StreamFrame::ContentBlockDelta {
+                index,
+                delta: ContentDelta::InputJsonDelta { partial_json },
+            } = frame
+            {
+                by_index.entry(*index).or_default().push_str(partial_json);
+            }
+        }
+
+        assert!(!by_index.is_empty(), "no input_json_delta frames");
+        for (index, json) in by_index {
+            serde_json::from_str::<Value>(&json)
+                .unwrap_or_else(|e| panic!("block {index} did not reassemble: {e}\n{json}"));
+        }
+    }
+
+    /// Unknown frame and delta types degrade instead of failing the line —
+    /// `thinking` blocks appear in neither fixture, so this is the safety net
+    /// for shapes we haven't captured.
+    #[test]
+    fn unknown_stream_shapes_degrade() {
+        let line = r#"{"type":"stream_event","event":{"type":"some_future_frame"},"session_id":"s","parent_tool_use_id":null,"uuid":"u"}"#;
+        assert!(matches!(
+            parse_line(line).unwrap(),
+            ClaudeCodeEvent::StreamEvent {
+                event: StreamFrame::Unrecognized,
+                ..
+            }
+        ));
+
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"some_future_delta","x":1}},"session_id":"s","parent_tool_use_id":null,"uuid":"u"}"#;
+        assert!(matches!(
+            parse_line(line).unwrap(),
+            ClaudeCodeEvent::StreamEvent {
+                event: StreamFrame::ContentBlockDelta {
+                    delta: ContentDelta::Unrecognized,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    /// `thinking` blocks stream as their own block and delta types. Neither
+    /// fixture contains one, so this pins the shape from the documented format.
+    #[test]
+    fn parses_thinking_blocks() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":null}},"session_id":"s","parent_tool_use_id":null,"uuid":"u"}"#;
+        assert!(matches!(
+            parse_line(line).unwrap(),
+            ClaudeCodeEvent::StreamEvent {
+                event: StreamFrame::ContentBlockStart {
+                    content_block: ContentBlock::Thinking { .. },
+                    ..
+                },
+                ..
+            }
+        ));
+
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hm"}},"session_id":"s","parent_tool_use_id":null,"uuid":"u"}"#;
+        assert!(matches!(
+            parse_line(line).unwrap(),
+            ClaudeCodeEvent::StreamEvent {
+                event: StreamFrame::ContentBlockDelta {
+                    delta: ContentDelta::ThinkingDelta { .. },
+                    ..
+                },
+                ..
+            }
+        ));
     }
 
     #[test]
