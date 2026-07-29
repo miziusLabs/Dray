@@ -1,6 +1,7 @@
 use crate::session::{Harness, SessionManager};
 use tauri::{AppHandle, State};
 
+#[path = "events/events.rs"]
 pub mod events;
 mod fs;
 #[path = "harness/harness.rs"]
