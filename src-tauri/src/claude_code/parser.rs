@@ -23,6 +23,24 @@ pub enum ClaudeCodeEvent {
         uuid: String,
         #[serde(default)]
         request_id: Option<String>,
+        #[serde(default)]
+        subagent_type: Option<String>,
+        #[serde(default)]
+        task_description: Option<String>,
+    },
+    User {
+        message: Value,
+        parent_tool_use_id: Option<String>,
+        session_id: String,
+        uuid: String,
+        #[serde(default)]
+        timestamp: Option<String>,
+        #[serde(default)]
+        tool_use_result: Option<Value>,
+        #[serde(default)]
+        subagent_type: Option<String>,
+        #[serde(default)]
+        task_description: Option<String>,
     },
     Result(ResultEvent),
 }
@@ -72,7 +90,45 @@ pub enum SystemEvent {
         fast_mode_state: String,
     },
     Status {
+        status: Option<String>,
+        #[serde(default, rename = "permissionMode")]
+        permission_mode: Option<PermissionMode>,
+        uuid: String,
+        session_id: String,
+    },
+    TaskStarted {
+        task_id: String,
+        tool_use_id: String,
+        description: String,
+        subagent_type: String,
+        task_type: String,
+        prompt: String,
+        uuid: String,
+        session_id: String,
+    },
+    TaskProgress {
+        task_id: String,
+        tool_use_id: String,
+        description: String,
+        subagent_type: String,
+        usage: TaskUsage,
+        last_tool_name: String,
+        uuid: String,
+        session_id: String,
+    },
+    TaskUpdated {
+        task_id: String,
+        patch: TaskPatch,
+        uuid: String,
+        session_id: String,
+    },
+    TaskNotification {
+        task_id: String,
+        tool_use_id: String,
         status: String,
+        output_file: String,
+        summary: String,
+        usage: TaskUsage,
         uuid: String,
         session_id: String,
     },
@@ -103,8 +159,30 @@ pub enum ResultEvent {
         permission_denials: Vec<Value>,
         terminal_reason: String,
         fast_mode_state: String,
+        #[serde(default)]
+        origin: Option<ResultOrigin>,
         uuid: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskUsage {
+    pub total_tokens: u64,
+    pub tool_uses: u32,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskPatch {
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub end_time: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResultOrigin {
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,34 +217,26 @@ pub fn parse_line(line: &str) -> Result<ClaudeCodeEvent> {
 mod tests {
     use super::*;
 
+    fn parse_fixture(fixture: &str) -> Vec<ClaudeCodeEvent> {
+        fixture
+            .lines()
+            .filter(|line| {
+                let line = line.trim();
+                !line.is_empty() && !line.starts_with("//")
+            })
+            .map(|line| parse_line(line).unwrap_or_else(|err| panic!("{err}\n{line}")))
+            .collect()
+    }
+
     #[test]
-    fn parses_fixture_ndjson() {
-        let fixture = include_str!("../claude_code_printed.json");
-        let mut ok = 0usize;
-        let mut empty = 0usize;
-
-        for (idx, line) in fixture.lines().enumerate() {
-            if line.trim().is_empty() {
-                empty += 1;
-                continue;
-            }
-            parse_line(line)
-                .unwrap_or_else(|err| panic!("line {} failed to parse: {err}\n{line}", idx + 1));
-            ok += 1;
-        }
-
-        assert!(ok > 0, "expected at least one event in fixture");
-        println!("parsed {ok} events ({empty} blank lines skipped)");
+    fn parses_simple_fixture() {
+        let events = parse_fixture(include_str!("claude_code_printed.jsonl"));
+        assert!(!events.is_empty(), "expected at least one event");
     }
 
     #[test]
     fn parses_system_init_and_result() {
-        let fixture = include_str!("../claude_code_printed.json");
-        let events: Vec<ClaudeCodeEvent> = fixture
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| parse_line(l).expect("parse"))
-            .collect();
+        let events = parse_fixture(include_str!("claude_code_printed.jsonl"));
 
         assert!(
             events
@@ -192,5 +262,95 @@ mod tests {
                 .any(|e| matches!(e, ClaudeCodeEvent::Result(ResultEvent::Success { .. }))),
             "missing result/success"
         );
+    }
+
+    #[test]
+    fn parses_complex_fixture() {
+        let events = parse_fixture(include_str!("claude_code_complex.jsonl"));
+
+        assert_eq!(events.len(), 177);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ClaudeCodeEvent::User { .. }))
+                .count(),
+            30
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    ClaudeCodeEvent::System(SystemEvent::TaskStarted { .. })
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    ClaudeCodeEvent::System(SystemEvent::TaskProgress { .. })
+                ))
+                .count(),
+            29
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    ClaudeCodeEvent::System(SystemEvent::TaskUpdated { .. })
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    ClaudeCodeEvent::System(SystemEvent::TaskNotification { .. })
+                ))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn parses_nullable_status_and_result_origin() {
+        let events = parse_fixture(include_str!("claude_code_complex.jsonl"));
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::System(SystemEvent::Status { status: None, .. })
+        )));
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::Result(ResultEvent::Success {
+                origin: Some(ResultOrigin { kind }),
+                ..
+            }) if kind == "task-notification"
+        )));
+    }
+
+    #[test]
+    fn parses_object_and_string_tool_results() {
+        let events = parse_fixture(include_str!("claude_code_complex.jsonl"));
+        let tool_results: Vec<&Value> = events
+            .iter()
+            .filter_map(|event| match event {
+                ClaudeCodeEvent::User {
+                    tool_use_result: Some(result),
+                    ..
+                } => Some(result),
+                _ => None,
+            })
+            .collect();
+
+        assert!(tool_results.iter().any(|result| result.is_object()));
+        assert!(tool_results.iter().any(|result| result.is_string()));
     }
 }
