@@ -2,6 +2,7 @@ use crate::session::{Harness, SessionManager};
 use tauri::{AppHandle, State};
 
 pub mod claude_code;
+pub mod events;
 mod fs;
 pub mod session;
 

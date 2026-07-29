@@ -1,7 +1,10 @@
 use crate::claude_code::{self, ClaudeCodeEvent};
 use anyhow::{bail, Result};
-use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+// The one `Harness` definition lives in `events`; re-exported here so existing
+// `crate::session::Harness` imports (lib.rs, fs.rs, claude_code.rs) keep working.
+pub use crate::events::Harness;
 use std::{collections::HashMap, sync::Arc};
 use tauri::AppHandle;
 use tokio::{
@@ -58,13 +61,6 @@ impl SessionManager {
         sessions_guard.insert(session_id.to_string(), session);
         Ok(())
     }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum Harness {
-    ClaudeCode,
-    Codex,
 }
 
 #[derive(Debug)]
