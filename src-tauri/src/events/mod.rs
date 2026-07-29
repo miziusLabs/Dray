@@ -26,12 +26,9 @@ pub mod usage;
 
 pub use usage::{ContextWindow, RateLimit, Usage};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Harness {
-    ClaudeCode,
-    Codex,
-}
+// `Harness` is a harness concept, not an event one; it lives in `crate::harness`
+// and is used here only as a field type.
+use crate::harness::Harness;
 
 /// One normalized event: an envelope (who, when, what order, which conversation)
 /// wrapping a [`payload`](Self::payload) (what happened).

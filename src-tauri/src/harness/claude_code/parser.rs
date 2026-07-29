@@ -230,13 +230,13 @@ mod tests {
 
     #[test]
     fn parses_simple_fixture() {
-        let events = parse_fixture(include_str!("claude_code_printed.jsonl"));
+        let events = parse_fixture(include_str!("fixtures/printed.jsonl"));
         assert!(!events.is_empty(), "expected at least one event");
     }
 
     #[test]
     fn parses_system_init_and_result() {
-        let events = parse_fixture(include_str!("claude_code_printed.jsonl"));
+        let events = parse_fixture(include_str!("fixtures/printed.jsonl"));
 
         assert!(
             events
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn parses_complex_fixture() {
-        let events = parse_fixture(include_str!("claude_code_complex.jsonl"));
+        let events = parse_fixture(include_str!("fixtures/complex.jsonl"));
 
         assert_eq!(events.len(), 177);
         assert_eq!(
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn parses_nullable_status_and_result_origin() {
-        let events = parse_fixture(include_str!("claude_code_complex.jsonl"));
+        let events = parse_fixture(include_str!("fixtures/complex.jsonl"));
 
         assert!(events.iter().any(|event| matches!(
             event,
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn parses_object_and_string_tool_results() {
-        let events = parse_fixture(include_str!("claude_code_complex.jsonl"));
+        let events = parse_fixture(include_str!("fixtures/complex.jsonl"));
         let tool_results: Vec<&Value> = events
             .iter()
             .filter_map(|event| match event {

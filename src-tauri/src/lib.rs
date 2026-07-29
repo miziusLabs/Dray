@@ -1,9 +1,10 @@
 use crate::session::{Harness, SessionManager};
 use tauri::{AppHandle, State};
 
-pub mod claude_code;
 pub mod events;
 mod fs;
+#[path = "harness/harness.rs"]
+pub mod harness;
 pub mod session;
 
 #[tauri::command]

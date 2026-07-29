@@ -1,10 +1,10 @@
-use crate::claude_code::{self, ClaudeCodeEvent};
+use crate::harness::claude_code::{self, ClaudeCodeEvent};
 use anyhow::{bail, Result};
 use serde_json::json;
 
-// The one `Harness` definition lives in `events`; re-exported here so existing
-// `crate::session::Harness` imports (lib.rs, fs.rs, claude_code.rs) keep working.
-pub use crate::events::Harness;
+// `Harness` is defined in `crate::harness`; re-exported so existing
+// `crate::session::Harness` imports keep working.
+pub use crate::harness::Harness;
 use std::{collections::HashMap, sync::Arc};
 use tauri::AppHandle;
 use tokio::{

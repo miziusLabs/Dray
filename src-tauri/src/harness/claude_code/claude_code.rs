@@ -1,6 +1,5 @@
-use crate::session::Harness::ClaudeCode;
-
-use super::session::Session;
+use crate::harness::Harness::ClaudeCode;
+use crate::session::Session;
 use anyhow::{Context, Result};
 use std::process::Stdio;
 use std::sync::Arc;
