@@ -6,17 +6,20 @@
 use crate::{
     events::{
         AgentEvent, AgentEventPayload, BlockKind, BlockRef, DeltaEvent, SessionInfo, Settings,
-        ThreadRef,
+        ThreadRef, ToolKind, TurnStatus, Usage,
     },
     harness::{
         claude_code::{
-            parser::{ContentBlock, ContentDelta, StreamFrame, SystemEvent},
+            parser::{
+                self, AssistantMessage, ContentBlock, ContentDelta, ResultEvent, StreamFrame,
+                SystemEvent,
+            },
             ClaudeCodeEvent,
         },
         Harness,
     },
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use uuid::Uuid;
 
 pub struct Mapper {
@@ -64,6 +67,54 @@ impl Mapper {
                 Ok(payload.map(|p| self.build(session_id, parent_tool_use_id, None, p)))
             }
 
+            ClaudeCodeEvent::Assistant {
+                message,
+                parent_tool_use_id,
+                session_id,
+                uuid,
+                request_id,
+                subagent_type,
+                task_description,
+            } => {
+                let payload = self.handle_assistant_msg(
+                    message,
+                    parent_tool_use_id.clone(),
+                    subagent_type,
+                    task_description,
+                )?;
+
+                Ok(Some(self.build(
+                    session_id,
+                    parent_tool_use_id,
+                    None,
+                    payload,
+                )))
+            }
+
+            ClaudeCodeEvent::User {
+                message,
+                parent_tool_use_id,
+                session_id,
+                uuid,
+                timestamp,
+                tool_use_result,
+                subagent_type,
+                task_description,
+            } => {
+                // again user contains sub agent stuff here so i'm skipping sub ag like i did in Assistant.
+                // the message of ClaudeCodeEvent::User needs parsing first.
+                // the content inside the content is sometimes array and sometimes string in user type. looks like for sub agent initiation where there's prompt in user it returns array in the content with type: text and value in text but for actual tool calls like bash where there's command it directly returns the tool result in the text.
+            }
+
+            ClaudeCodeEvent::Result(result_event) => {
+                let session_id = match &result_event {
+                    ResultEvent::Success { session_id, .. } => session_id.to_string(),
+                };
+
+                let payload = Self::handle_result_event(result_event).context("info")?;
+                Ok(Some(self.build(session_id, None, None, payload)))
+            }
+
             _ => Ok(None),
         }
     }
@@ -102,6 +153,7 @@ impl Mapper {
     fn handle_system_event(&mut self, e: SystemEvent) -> Result<Option<AgentEventPayload>> {
         match e {
             SystemEvent::Init { .. } => Self::handle_init(e).map(Some),
+            // yet to handle the sub agent system events
             _ => Ok(None),
         }
     }
@@ -204,8 +256,79 @@ impl Mapper {
 
             // The committed `assistant` and `result` events carry these facts.
             StreamFrame::MessageDelta { .. } | StreamFrame::MessageStop => Ok(None),
-
+            // Q: don't we need to clear the current msg id from self when msg stops or will the next message start update it so no need to handle it here?
             StreamFrame::Unrecognized => Ok(None),
+        }
+    }
+
+    fn handle_assistant_msg(
+        &self,
+        message: AssistantMessage,
+        parent_tool_use_id: Option<String>,
+        subagent_type: Option<String>,
+        task_description: Option<String>,
+    ) -> Result<AgentEventPayload> {
+        // this is where we handle the assistant type for the usual msgs of type text or tool use or anything on main session and also the sub agents. i'm going to start with the main handling first. I don't know what to do with the assistant results of sub agents, they do have task progress where they inform whats going on from the system event and i'm seeing both the assistant and system event task progress holds the same information, you can verify it , check it with complex.jsonl cause i might have not read it properly, its a lot of lines. oh seems like tool_use_id or parent_tool_use_id is what connects them (assistant texts -> subagent); maybe i'll skip sub agents for now, and come back to it later. the parent assistant text itself don't have the parent_tool_use_id. this is a bit complicated in as sense that its big and lots of pieces to connect. so i'm skking this just for now.
+
+        let block = self.block_ref(0)?;
+        let content_block = match message.content.get(0) {
+            Some(v) => v,
+            None => bail!("as"),
+        };
+
+        let payload = match content_block {
+            ContentBlock::Text { text } => AgentEventPayload::AssistantText {
+                block,
+                text: text.to_string(),
+            },
+            ContentBlock::Thinking { thinking, .. } => AgentEventPayload::AssistantText {
+                block,
+                text: thinking.to_string(),
+            },
+            ContentBlock::ToolUse {
+                id, name, input, ..
+            } => {
+                let tool_kind = serde_json::from_str::<ToolKind>(name)?;
+                AgentEventPayload::ToolCallStarted {
+                    call_id: id.to_string(),
+                    name: name.to_string(),
+                    tool_kind,
+                    input: input.clone(),
+                    raw_input: None,
+                    title: None,
+                }
+            }
+            ContentBlock::Unrecognized => todo!(),
+        };
+
+        Ok(payload)
+    }
+
+    fn handle_result_event(e: ResultEvent) -> Result<AgentEventPayload> {
+        match e {
+            ResultEvent::Success {
+                is_error,
+                duration_ms,
+                usage,
+                total_cost_usd,
+                result,
+                stop_reason,
+                ..
+            } => {
+                let status = if is_error {
+                    TurnStatus::Error
+                } else {
+                    TurnStatus::Success
+                };
+
+                Ok(AgentEventPayload::TurnCompleted {
+                    status,
+                    stop_reason: Some(stop_reason),
+                    final_text: Some(result),
+                    usage: Some(map_usage(&usage, Some(total_cost_usd))),
+                    duration_ms: Some(duration_ms),
+                })
+            }
         }
     }
 
@@ -219,6 +342,26 @@ impl Mapper {
             }),
             None => bail!("content block frame arrived before any message_start"),
         }
+    }
+}
+
+/// `total_cost_usd` is a sibling of `usage` on the wire rather than a member, so
+/// it arrives separately.
+///
+/// Claude Code reports no context window or rate limits, and folds thinking
+/// tokens into `output_tokens`.
+fn map_usage(wire: &parser::Usage, cost_usd: Option<f64>) -> Usage {
+    Usage {
+        input_tokens: Some(wire.input_tokens),
+        output_tokens: Some(wire.output_tokens),
+        cached_input_tokens: Some(wire.cache_read_input_tokens),
+        cache_write_tokens: Some(wire.cache_creation_input_tokens),
+        reasoning_tokens: None,
+        total_tokens: Some(wire.input_tokens + wire.output_tokens),
+        cost_usd,
+        context_window: None,
+        rate_limit: None,
+        model: None,
     }
 }
 
@@ -268,5 +411,54 @@ fn system_event_session_id(e: &SystemEvent) -> &str {
         | SystemEvent::TaskProgress { session_id, .. }
         | SystemEvent::TaskUpdated { session_id, .. }
         | SystemEvent::TaskNotification { session_id, .. } => session_id,
+    }
+}
+
+// fn result_session_id(e: &ResultEvent) -> &str {
+//     match e {
+//         ResultEvent::Success { session_id, .. } => session_id
+//     }
+// }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wire is snake_case and every `Usage` field is `Option`, so a plain
+    /// `from_value::<Usage>()` parses *successfully* into all-`None`. This pins
+    /// real numbers so that silent regression can't return.
+    #[test]
+    fn maps_result_usage_from_wire() {
+        let fixture = include_str!("fixtures/complex.jsonl");
+        let mut mapper = Mapper::new();
+        let mut turns = 0;
+
+        for line in fixture.lines().filter(|line| !line.trim().is_empty()) {
+            let event =
+                match mapper.map(crate::harness::claude_code::parser::parse_line(line).unwrap()) {
+                    Ok(Some(event)) => event,
+                    Ok(None) => continue,
+                    Err(err) => panic!("{err}\n{line}"),
+                };
+
+            if let AgentEventPayload::TurnCompleted {
+                status,
+                usage: Some(usage),
+                ..
+            } = &event.payload
+            {
+                turns += 1;
+                assert_eq!(*status, TurnStatus::Success);
+                assert!(usage.input_tokens.is_some());
+                assert!(usage.output_tokens.is_some());
+                assert!(usage.cached_input_tokens.is_some());
+                assert!(usage.cache_write_tokens.is_some());
+                assert!(usage.cost_usd.is_some());
+                assert!(!usage.is_empty());
+            }
+        }
+
+        // Not a session terminator: one result arrives per completed turn.
+        assert_eq!(turns, 2);
     }
 }

@@ -17,7 +17,7 @@ pub enum ClaudeCodeEvent {
         ttft_ms: Option<u64>,
     },
     Assistant {
-        message: Value,
+        message: AssistantMessage,
         parent_tool_use_id: Option<String>,
         session_id: String,
         uuid: String,
@@ -153,7 +153,9 @@ pub enum ResultEvent {
         stop_reason: String,
         session_id: String,
         total_cost_usd: f64,
-        usage: Value,
+        usage: Usage,
+        /// Per-model breakdown, keyed by model name — a different shape from
+        /// [`Usage`], and nothing consumes it yet.
         #[serde(rename = "modelUsage")]
         model_usage: Value,
         permission_denials: Vec<Value>,
@@ -194,7 +196,7 @@ pub enum StreamFrame {
     MessageDelta {
         delta: MessageDelta,
         #[serde(default)]
-        usage: Option<Value>,
+        usage: Option<Usage>,
         #[serde(default)]
         context_management: Option<Value>,
     },
@@ -204,6 +206,29 @@ pub enum StreamFrame {
     /// content we *can* read.
     #[serde(other)]
     Unrecognized,
+}
+
+/// A committed assistant message.
+///
+/// Claude Code emits one `assistant` event **per content block**, not per
+/// message: `content` is always length 1, and several events share one `id`.
+/// Since the wire carries no block index, a consumer needing one derives it by
+/// counting blocks per `id` in arrival order.
+///
+/// The blocks are the same shapes the stream frames carry, so [`ContentBlock`]
+/// is reused — a streamed block and its committed counterpart deserialize into
+/// the same type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantMessage {
+    pub id: String,
+    pub model: String,
+    pub role: String,
+    pub content: Vec<ContentBlock>,
+    /// Null on every fixture event; the terminal reason arrives on `result`.
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub usage: Option<Usage>,
 }
 
 /// The message envelope opened by [`StreamFrame::MessageStart`]. `content` is
@@ -216,7 +241,7 @@ pub struct StreamMessage {
     #[serde(default)]
     pub stop_reason: Option<String>,
     #[serde(default)]
-    pub usage: Option<Value>,
+    pub usage: Option<Usage>,
 }
 
 /// A content block's identity, known when the block opens.
@@ -277,6 +302,68 @@ pub struct MessageDelta {
     pub stop_sequence: Option<String>,
     #[serde(default)]
     pub stop_details: Option<Value>,
+}
+
+/// Anthropic's token accounting, as it appears on `result`, `assistant.message`,
+/// and the `message_start`/`message_delta` stream frames.
+///
+/// The four token counts are present everywhere; the rest varies by location
+/// (`message_delta` omits the cache-tier breakdown, only `result` carries
+/// `server_tool_use` and `speed`), so everything beyond them is optional.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Usage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    /// Tokens served from cache — cheap, and the bulk of a long session.
+    pub cache_read_input_tokens: u64,
+    /// Tokens written *into* the cache, billed at a premium.
+    pub cache_creation_input_tokens: u64,
+    #[serde(default)]
+    pub cache_creation: Option<CacheCreation>,
+    #[serde(default)]
+    pub server_tool_use: Option<ServerToolUse>,
+    #[serde(default)]
+    pub service_tier: Option<String>,
+    #[serde(default)]
+    pub speed: Option<String>,
+    #[serde(default)]
+    pub inference_geo: Option<String>,
+    /// Per-request breakdown when a turn took several model calls.
+    #[serde(default)]
+    pub iterations: Vec<UsageIteration>,
+}
+
+/// `cache_creation_input_tokens` split by TTL, which are priced differently.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct CacheCreation {
+    #[serde(default)]
+    pub ephemeral_5m_input_tokens: u64,
+    #[serde(default)]
+    pub ephemeral_1h_input_tokens: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct ServerToolUse {
+    #[serde(default)]
+    pub web_search_requests: u64,
+    #[serde(default)]
+    pub web_fetch_requests: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageIteration {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+    #[serde(default)]
+    pub cache_creation: Option<CacheCreation>,
+    #[serde(rename = "type", default)]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -600,6 +687,96 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn parses_assistant_messages_as_single_blocks() {
+        let events = parse_fixture(include_str!("fixtures/complex.jsonl"));
+
+        let messages: Vec<&AssistantMessage> = events
+            .iter()
+            .filter_map(|event| match event {
+                ClaudeCodeEvent::Assistant { message, .. } => Some(message),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(messages.len(), 48);
+
+        // One event per content block, so several share an id — that's what
+        // forces a consumer to derive block indices by arrival order.
+        let distinct_ids: std::collections::HashSet<&str> =
+            messages.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(distinct_ids.len(), 20);
+
+        for message in &messages {
+            assert_eq!(message.content.len(), 1, "expected exactly one block");
+            assert_eq!(message.role, "assistant");
+            assert!(message.usage.is_some());
+        }
+
+        assert!(messages.iter().any(|m| matches!(
+            m.content.first(),
+            Some(ContentBlock::Text { text }) if !text.is_empty()
+        )));
+
+        assert!(messages.iter().any(|m| matches!(
+            m.content.first(),
+            Some(ContentBlock::ToolUse { id, name, input, .. })
+                if id.starts_with("toolu_") && !name.is_empty() && input.is_object()
+        )));
+
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m.content.first(), Some(ContentBlock::Unrecognized))),
+            "an assistant content block fell through to Unrecognized"
+        );
+    }
+
+    #[test]
+    fn parses_usage_including_nested_breakdowns() {
+        let events = parse_fixture(include_str!("fixtures/complex.jsonl"));
+
+        let usages: Vec<&Usage> = events
+            .iter()
+            .filter_map(|event| match event {
+                ClaudeCodeEvent::Result(ResultEvent::Success { usage, .. }) => Some(usage),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(usages.len(), 2);
+        for usage in &usages {
+            assert!(usage.input_tokens > 0);
+            assert!(usage.output_tokens > 0);
+            assert!(usage.cache_read_input_tokens > 0);
+
+            let cache = usage
+                .cache_creation
+                .expect("result usage carries a cache_creation breakdown");
+            assert_eq!(
+                cache.ephemeral_5m_input_tokens + cache.ephemeral_1h_input_tokens,
+                usage.cache_creation_input_tokens,
+                "tier split must sum to the total"
+            );
+
+            assert!(usage.server_tool_use.is_some());
+            assert!(!usage.iterations.is_empty());
+        }
+
+        // message_delta omits the cache-tier breakdown, so the same struct has to
+        // tolerate its absence.
+        let stream_usage = events.iter().find_map(|event| match event {
+            ClaudeCodeEvent::StreamEvent {
+                event: StreamFrame::MessageDelta { usage, .. },
+                ..
+            } => usage.as_ref(),
+            _ => None,
+        });
+        let stream_usage = stream_usage.expect("message_delta carries usage");
+        assert!(stream_usage.output_tokens > 0);
+        assert!(stream_usage.cache_creation.is_none());
     }
 
     #[test]
