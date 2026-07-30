@@ -87,6 +87,9 @@ async fn read_stdout(
 ) -> Result<()> {
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
+    // One mapper per session: it carries state across lines (the open message
+    // id, the seq counter), so it must outlive the loop body.
+    let mut mapper = claude_code::mapper::Mapper::new();
 
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
@@ -94,11 +97,11 @@ async fn read_stdout(
         }
         match parser::parse_line(&line) {
             Ok(cc_event) => {
-                // println!("[parse ok] {}", event_summary(&value));
-                let agent_event = claude_code::mapper::Mapper::map(cc_event)?;
-
-                app.emit("events", &agent_event)?;
-                events.lock().await.push(agent_event);
+                // A line that only advances mapper state emits nothing.
+                if let Some(agent_event) = mapper.map(cc_event)? {
+                    app.emit("events", &agent_event)?;
+                    events.lock().await.push(agent_event);
+                }
             }
             Err(err) => {
                 eprintln!("[parse err] {err}");
