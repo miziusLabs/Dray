@@ -5,14 +5,14 @@
 
 use crate::{
     events::{
-        AgentEvent, AgentEventPayload, BlockKind, BlockRef, DeltaEvent, SessionInfo, Settings,
-        Subagent, ToolKind, TurnStatus, Usage,
+        AgentEvent, AgentEventPayload, BlockKind, BlockRef, DeltaEvent, ErrorSource, SessionInfo,
+        Settings, Subagent, ToolKind, ToolResult, TurnStatus, Usage,
     },
     harness::{
         claude_code::{
             parser::{
                 self, AssistantMessage, ContentBlock, ContentDelta, ResultEvent, StreamFrame,
-                SystemEvent,
+                SystemEvent, UserContent, UserContentBlock, UserMessage,
             },
             ClaudeCodeEvent,
         },
@@ -20,6 +20,7 @@ use crate::{
     },
 };
 use anyhow::{bail, Context, Result};
+use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -93,27 +94,25 @@ impl Mapper {
                 message,
                 parent_tool_use_id,
                 session_id,
-                uuid,
                 timestamp,
                 tool_use_result,
                 subagent_type,
-                task_description,
+                ..
             } => {
-                // again user contains sub agent stuff here so i'm skipping sub ag like i did in Assistant.
-                // the message of ClaudeCodeEvent::User needs parsing first.
-                // the content inside the content is sometimes array and sometimes string in user type. looks like for sub agent initiation where there's prompt in user it returns array in the content with type: text and value in text but for actual tool calls like bash where there's command it directly returns the tool result in the text.
+                let payload = Self::handle_user_msg(message, tool_use_result);
+                let subagent = subagent(parent_tool_use_id, subagent_type);
+                Ok(payload.map(|p| self.build(session_id, subagent, timestamp, p)))
             }
 
             ClaudeCodeEvent::Result(result_event) => {
                 let session_id = match &result_event {
-                    ResultEvent::Success { session_id, .. } => session_id.to_string(),
+                    ResultEvent::Success { session_id, .. }
+                    | ResultEvent::ErrorDuringExecution { session_id, .. } => session_id.clone(),
                 };
 
                 let payload = Self::handle_result_event(result_event).context("info")?;
                 Ok(Some(self.build(session_id, None, None, payload)))
             }
-
-            _ => Ok(None),
         }
     }
 
@@ -307,6 +306,56 @@ impl Mapper {
         Ok(Some(payload))
     }
 
+    /// A `user` event is either the human's prompt or a tool result being fed
+    /// back to the model, told apart by the shape of `content`.
+    ///
+    /// Every user message in the fixtures carries exactly one block (806 of 806
+    /// across captures), so only the first is read; a second block would need
+    /// this to return several payloads.
+    fn handle_user_msg(
+        message: UserMessage,
+        tool_use_result: Option<Value>,
+    ) -> Option<AgentEventPayload> {
+        let block = match message.content {
+            UserContent::Text(text) => return Some(user_message(text)),
+            UserContent::Blocks(blocks) => blocks.into_iter().next()?,
+        };
+
+        match block {
+            // A bare text block here is a prompt the CLI wrapped in an array, or
+            // its own narration of an abort — never a tool result, which is why
+            // no `tool_use_id` accompanies it.
+            UserContentBlock::Text { text } if is_interrupt_notice(&text) => {
+                Some(AgentEventPayload::Error {
+                    source: ErrorSource::Harness,
+                    message: text,
+                    fatal: false,
+                })
+            }
+            UserContentBlock::Text { text } => Some(user_message(text)),
+
+            UserContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => Some(AgentEventPayload::ToolCallCompleted {
+                call_id: tool_use_id,
+                result: ToolResult {
+                    text: content.as_text(),
+                    is_error: is_error.unwrap_or(false),
+                    // The sidecar `tool_use_result` field, whose shape is
+                    // per-tool: a Read carries its file contents, a Task its
+                    // agent id.
+                    structured: tool_use_result,
+                    exit_code: None,
+                    duration_ms: None,
+                },
+            }),
+
+            UserContentBlock::Unrecognized => None,
+        }
+    }
+
     fn handle_result_event(e: ResultEvent) -> Result<AgentEventPayload> {
         match e {
             ResultEvent::Success {
@@ -332,6 +381,23 @@ impl Mapper {
                     duration_ms: Some(duration_ms),
                 })
             }
+
+            // An interrupted turn is still a completed one: same payload, error
+            // status, and `terminal_reason` as the stop reason since the wire's
+            // own `stop_reason` is null here.
+            ResultEvent::ErrorDuringExecution {
+                duration_ms,
+                usage,
+                total_cost_usd,
+                terminal_reason,
+                ..
+            } => Ok(AgentEventPayload::TurnCompleted {
+                status: TurnStatus::Error,
+                stop_reason: Some(terminal_reason),
+                final_text: None,
+                usage: Some(map_usage(&usage, Some(total_cost_usd))),
+                duration_ms: Some(duration_ms),
+            }),
         }
     }
 
@@ -370,6 +436,22 @@ impl Mapper {
 /// A `parent_tool_use_id` is exactly what marks an event as a subagent's, so
 /// its presence decides the whole thing. The label rides along on the same
 /// events (`subagent_type`), needing no lookup against `task_started`.
+/// Whether a `user` text block is the CLI narrating an interruption rather than
+/// something the user said. The block carries no other signal, but matching
+/// prose fails safe: the abort is reported for real on the `result` line
+/// (`terminal_reason`), so a reworded notice costs a stray message, not a lost
+/// turn-end.
+fn is_interrupt_notice(text: &str) -> bool {
+    text.starts_with("[Request interrupted by user")
+}
+
+fn user_message(text: String) -> AgentEventPayload {
+    AgentEventPayload::UserMessage {
+        text,
+        images: vec![],
+    }
+}
+
 fn subagent(parent_tool_use_id: Option<String>, label: Option<String>) -> Option<Subagent> {
     parent_tool_use_id.map(|id| Subagent { id, label })
 }
@@ -541,6 +623,96 @@ mod tests {
         assert_eq!(tool_kind("Agent"), ToolKind::SubagentSpawn);
         assert_eq!(tool_kind("mcp__supabase__query"), ToolKind::Mcp);
         assert_eq!(tool_kind("SomethingNew"), ToolKind::Other);
+    }
+
+    /// Every `user` event in the fixture is a tool result, and each one must
+    /// carry the id of the call it answers — that's the only join back to the
+    /// `ToolCallStarted` the UI is waiting on.
+    #[test]
+    fn maps_tool_results_with_their_call_id() {
+        let mut mapper = Mapper::new();
+        let completions: Vec<(String, ToolResult)> = include_str!("fixtures/complex.jsonl")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| mapper.map(parser::parse_line(line).unwrap()).unwrap())
+            .filter_map(|event| match event.payload {
+                AgentEventPayload::ToolCallCompleted { call_id, result } => Some((call_id, result)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(completions.len(), 30);
+        for (call_id, result) in &completions {
+            assert!(call_id.starts_with("toolu_"), "{call_id} is not a call id");
+            assert!(!result.text.is_empty(), "result text was dropped");
+        }
+        assert_eq!(
+            completions.iter().filter(|(_, r)| r.is_error).count(),
+            2,
+            "is_error is absent on success, not false"
+        );
+        // The per-tool sidecar rides along on the results that carry one.
+        assert!(completions.iter().any(|(_, r)| r.structured.is_some()));
+    }
+
+    /// A prompt reaches the mapper two ways — bare string, or wrapped in a lone
+    /// `text` block — and both are the same user message. The block form has no
+    /// `tool_use_id` because it answers no tool call.
+    #[test]
+    fn maps_both_prompt_shapes_to_user_messages() {
+        for line in [
+            r#"{"type":"user","message":{"role":"user","content":"hi"},"parent_tool_use_id":null,"session_id":"s","uuid":"u"}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"parent_tool_use_id":null,"session_id":"s","uuid":"u"}"#,
+        ] {
+            let event = Mapper::new()
+                .map(parser::parse_line(line).unwrap())
+                .unwrap()
+                .expect("a prompt is an event");
+            assert!(matches!(
+                event.payload,
+                AgentEventPayload::UserMessage { text, .. } if text == "hi"
+            ));
+        }
+    }
+
+    /// An interrupted turn reports the abort twice — as prose in a `user` text
+    /// block, and as `terminal_reason` on the result. The prose must not become
+    /// a `UserMessage`, and the result must still close the turn.
+    #[test]
+    fn maps_an_interrupted_turn() {
+        let mut mapper = Mapper::new();
+        let payloads: Vec<AgentEventPayload> = include_str!("fixtures/interrupted.jsonl")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| mapper.map(parser::parse_line(line).unwrap()).unwrap())
+            .map(|event| event.payload)
+            .collect();
+
+        assert!(
+            !payloads
+                .iter()
+                .any(|p| matches!(p, AgentEventPayload::UserMessage { .. })),
+            "the interrupt notice was attributed to the user"
+        );
+
+        assert!(payloads.iter().any(|p| matches!(
+            p,
+            AgentEventPayload::Error {
+                source: ErrorSource::Harness,
+                fatal: false,
+                ..
+            }
+        )));
+
+        assert!(payloads.iter().any(|p| matches!(
+            p,
+            AgentEventPayload::TurnCompleted {
+                status: TurnStatus::Error,
+                stop_reason: Some(reason),
+                final_text: None,
+                ..
+            } if reason == "aborted_streaming"
+        )));
     }
 
     /// The wire is snake_case and every `Usage` field is `Option`, so a plain

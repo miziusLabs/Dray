@@ -29,7 +29,7 @@ pub enum ClaudeCodeEvent {
         task_description: Option<String>,
     },
     User {
-        message: Value,
+        message: UserMessage,
         parent_tool_use_id: Option<String>,
         session_id: String,
         uuid: String,
@@ -165,6 +165,35 @@ pub enum ResultEvent {
         origin: Option<ResultOrigin>,
         uuid: String,
     },
+    /// A turn that ended without completing — today, the user interrupting a
+    /// streaming response.
+    ///
+    /// Not a field-optional [`Success`]: there is no `result` text to report,
+    /// `stop_reason` is null where `Success` always carries one, and `errors`
+    /// exists nowhere else. Branch on `terminal_reason`, not on the prose the
+    /// CLI emits alongside it as a `user` text block.
+    ///
+    /// [`Success`]: Self::Success
+    ErrorDuringExecution {
+        is_error: bool,
+        duration_ms: u64,
+        duration_api_ms: u64,
+        num_turns: u32,
+        #[serde(default)]
+        stop_reason: Option<String>,
+        session_id: String,
+        total_cost_usd: f64,
+        usage: Usage,
+        #[serde(rename = "modelUsage")]
+        model_usage: Value,
+        permission_denials: Vec<Value>,
+        terminal_reason: String,
+        fast_mode_state: String,
+        /// Diagnostic strings; free-form, and not meant for display.
+        #[serde(default)]
+        errors: Vec<String>,
+        uuid: String,
+    },
 }
 
 /// One Anthropic SSE frame, as carried in `stream_event.event`.
@@ -229,6 +258,75 @@ pub struct AssistantMessage {
     pub stop_reason: Option<String>,
     #[serde(default)]
     pub usage: Option<Usage>,
+}
+
+/// A `user` event's message.
+///
+/// Two unrelated things share this event type: what the human typed, which
+/// arrives as a bare string, and what the CLI feeds back to the model — tool
+/// results, abort notices — which arrives as a block array.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserMessage {
+    pub role: String,
+    pub content: UserContent,
+}
+
+/// Untagged: nothing labels which shape a line uses, so serde picks the arm by
+/// JSON type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum UserContent {
+    Text(String),
+    Blocks(Vec<UserContentBlock>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UserContentBlock {
+    Text {
+        text: String,
+    },
+    ToolResult {
+        tool_use_id: String,
+        #[serde(default)]
+        content: ToolResultContent,
+        /// Absent on success rather than `false`, so this can't be a bare bool.
+        #[serde(default)]
+        is_error: Option<bool>,
+    },
+    /// Images are documented but appear in no capture, so they'd land here
+    /// alongside genuinely unknown blocks.
+    #[serde(other)]
+    Unrecognized,
+}
+
+/// A tool result's payload: usually one flat string, but tools that return
+/// structured output send a block array instead.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolResultContent {
+    Text(String),
+    Blocks(Vec<UserContentBlock>),
+    #[default]
+    Missing,
+}
+
+impl ToolResultContent {
+    /// Flattens either shape to displayable text, dropping non-text blocks.
+    pub fn as_text(&self) -> String {
+        match self {
+            Self::Text(text) => text.clone(),
+            Self::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|block| match block {
+                    UserContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Self::Missing => String::new(),
+        }
+    }
 }
 
 /// The message envelope opened by [`StreamFrame::MessageStart`]. `content` is
@@ -777,6 +875,124 @@ mod tests {
         let stream_usage = stream_usage.expect("message_delta carries usage");
         assert!(stream_usage.output_tokens > 0);
         assert!(stream_usage.cache_creation.is_none());
+    }
+
+    /// Interrupting a streaming response ends the turn with a `result` line
+    /// whose subtype is *not* `success`. Before this variant existed the line
+    /// failed to parse, so an interrupted turn emitted no terminal event at
+    /// all — the swallow-and-continue path turned it into a hung UI.
+    #[test]
+    fn parses_an_interrupted_turn() {
+        let events = parse_fixture(include_str!("fixtures/interrupted.jsonl"));
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::Result(ResultEvent::ErrorDuringExecution {
+                terminal_reason,
+                stop_reason: None,
+                errors,
+                ..
+            }) if terminal_reason == "aborted_streaming" && !errors.is_empty()
+        )));
+
+        // The CLI also narrates the abort as a user text block, which is what
+        // makes it indistinguishable from a prompt at the block level.
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::User { message: UserMessage { content: UserContent::Blocks(blocks), .. }, .. }
+                if matches!(
+                    blocks.first(),
+                    Some(UserContentBlock::Text { text }) if text.starts_with("[Request interrupted")
+                )
+        )));
+    }
+
+    fn user_messages(fixture: &str) -> Vec<UserMessage> {
+        parse_fixture(fixture)
+            .into_iter()
+            .filter_map(|event| match event {
+                ClaudeCodeEvent::User { message, .. } => Some(message),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn parses_user_tool_results() {
+        let messages = user_messages(include_str!("fixtures/complex.jsonl"));
+        assert_eq!(messages.len(), 30);
+
+        let blocks: Vec<&UserContentBlock> = messages
+            .iter()
+            .flat_map(|message| match &message.content {
+                UserContent::Blocks(blocks) => blocks.iter(),
+                UserContent::Text(_) => [].iter(),
+            })
+            .collect();
+
+        assert_eq!(blocks.len(), 30, "every fixture user message is a tool result");
+        assert!(
+            !blocks
+                .iter()
+                .any(|block| matches!(block, UserContentBlock::Unrecognized)),
+            "a user content block fell through to Unrecognized"
+        );
+
+        // Both payload shapes appear, and the flattening covers each.
+        assert!(blocks.iter().any(|block| matches!(
+            block,
+            UserContentBlock::ToolResult { content: ToolResultContent::Text(text), .. }
+                if !text.is_empty()
+        )));
+        assert!(blocks.iter().any(|block| matches!(
+            block,
+            UserContentBlock::ToolResult { content: ToolResultContent::Blocks(inner), .. }
+                if !inner.is_empty()
+        )));
+        for block in &blocks {
+            if let UserContentBlock::ToolResult { tool_use_id, content, .. } = block {
+                assert!(tool_use_id.starts_with("toolu_"));
+                assert!(!content.as_text().is_empty());
+            }
+        }
+
+        // `is_error` is omitted on success rather than sent as false.
+        assert_eq!(
+            blocks
+                .iter()
+                .filter(|block| matches!(
+                    block,
+                    UserContentBlock::ToolResult { is_error: Some(true), .. }
+                ))
+                .count(),
+            2
+        );
+    }
+
+    /// A typed prompt is a bare string, not a block array — the one shape the
+    /// fixtures don't contain, since they start after the prompt was sent.
+    #[test]
+    fn parses_typed_prompts_as_bare_strings() {
+        let line = r#"{"type":"user","message":{"role":"user","content":"hey"},"parent_tool_use_id":null,"session_id":"s","uuid":"u"}"#;
+        let ClaudeCodeEvent::User { message, .. } = parse_line(line).unwrap() else {
+            panic!("expected a user event");
+        };
+        assert!(matches!(message.content, UserContent::Text(text) if text == "hey"));
+    }
+
+    /// An image block would be the realistic unknown here; it must not cost the
+    /// sibling text block on the same message.
+    #[test]
+    fn unknown_user_blocks_degrade() {
+        let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBOR"}},{"type":"text","text":"what is this"}]},"parent_tool_use_id":null,"session_id":"s","uuid":"u"}"#;
+        let ClaudeCodeEvent::User { message, .. } = parse_line(line).unwrap() else {
+            panic!("expected a user event");
+        };
+        let UserContent::Blocks(blocks) = message.content else {
+            panic!("expected blocks");
+        };
+        assert!(matches!(blocks[0], UserContentBlock::Unrecognized));
+        assert!(matches!(&blocks[1], UserContentBlock::Text { text } if text == "what is this"));
     }
 
     #[test]
