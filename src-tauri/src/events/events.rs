@@ -1,23 +1,18 @@
 //! Normalized, harness-agnostic event model.
 //!
-//! Every harness (Claude Code, Codex, …) parses its own wire format, then maps
-//! it onto [`AgentEvent`]. The frontend, the on-disk log, and the session index
-//! only ever see this vocabulary — adding a harness means writing one mapper and
-//! touching nothing else.
+//! Every harness parses its own wire format, then maps it onto [`AgentEvent`].
+//! The frontend, the on-disk log, and the session index only see this
+//! vocabulary, so adding a harness means writing one mapper.
 //!
 //! # Log evolution rules
 //!
-//! Persisted `events.jsonl` files outlive any single build, so this format only
-//! evolves in backward-compatible ways:
+//! Persisted `events.jsonl` outlives any single build, so:
 //!
-//! 1. **Never remove, rename, or retype a shipped field.** Add a new field
-//!    alongside and stop writing the old one. (Old code tolerates new lines for
-//!    free: serde ignores unknown fields.)
-//! 2. **Every field added after this baseline must be `Option<T>` or carry
-//!    `#[serde(default)]`**, so new code tolerates old lines.
-//! 3. **Readers must skip lines they cannot parse** (and count them), mirroring
-//!    the stdout parser's policy. Unknown payload kinds don't even need that:
-//!    they deserialize as [`AgentEventPayload::Unrecognized`].
+//! 1. Never remove, rename, or retype a shipped field — add alongside instead.
+//! 2. Every field added from here on is `Option<T>` or `#[serde(default)]`, so
+//!    new code reads old lines.
+//! 3. Readers skip lines they cannot parse. Unknown payload kinds don't need
+//!    that; they land in [`AgentEventPayload::Unrecognized`].
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -38,25 +33,19 @@ pub struct AgentEvent {
     pub id: String,
     pub session_id: String,
     pub harness: Harness,
-    /// Position in the session's event log: 0, 1, 2, … One counter per session,
-    /// shared by mapped stdout lines and events the app synthesizes itself
-    /// (e.g. [`AgentEventPayload::UserMessage`] when the prompt is sent), and
-    /// seeded from the persisted log on resume.
-    ///
-    /// **The** ordering key, and the cursor for reconnecting a UI to a running
-    /// session ("give me everything after #N"). Never sort by `ts`, which most
-    /// Claude Code events omit.
+    /// Position in the session's event log, and the cursor for reconnecting a UI
+    /// to a running session. One counter per session, shared by mapped stdout
+    /// lines and events the app synthesizes itself, seeded from the persisted log
+    /// on resume. Never sort by `ts` — most Claude Code events omit it.
     pub seq: u64,
     pub ts: String,
     pub turn_id: Option<String>,
-    /// `None` = main conversation, `Some` = subagent branch. Both harnesses
-    /// mark this on the wire under their own name; normalizing it here is what
-    /// lets the UI separate the two without knowing which harness it's reading.
+    /// `None` = main conversation, `Some` = subagent branch.
     pub thread: Option<ThreadRef>,
     pub payload: AgentEventPayload,
-    /// The originating harness line. `None` on the emitted path — raw lines are
-    /// archived separately — but always populated for
-    /// [`AgentEventPayload::Unknown`], which is useless without it.
+    /// `None` on the emitted path — raw lines are archived separately — but
+    /// always populated for [`AgentEventPayload::Unknown`], which is useless
+    /// without it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<Value>,
 }
@@ -135,12 +124,11 @@ pub enum AgentEventPayload {
         /// Named `tool_kind`, not `kind`: this enum is tagged on `kind`, and a
         /// field of that name collides with the tag.
         tool_kind: ToolKind,
-        /// Always an object. Harnesses that pass arguments as a JSON-encoded
-        /// string are parsed here; unparseable input is preserved as
-        /// `{"_unparsed": "…"}` rather than dropped.
+        /// Always an object. JSON-encoded argument strings are parsed here;
+        /// unparseable input becomes `{"_unparsed": "…"}` rather than dropped.
         input: Value,
-        /// Input that isn't JSON at all, kept verbatim — Codex's
-        /// `custom_tool_call.input` is raw JS source.
+        /// Input that isn't JSON at all — Codex's `custom_tool_call.input` is raw
+        /// JS source.
         raw_input: Option<String>,
         title: Option<String>,
     },
@@ -203,13 +191,10 @@ pub enum AgentEventPayload {
         harness_type: String,
     },
 
-    /// Produced by the *deserializer*, never by a mapper: a payload `kind` this
-    /// build doesn't know, i.e. a log written by a newer version of the app.
-    /// The envelope (`seq`, `ts`, `thread`) still survives, so the event keeps
-    /// its place in the log; the UI renders nothing for it.
-    ///
-    /// Distinct from [`Unknown`](Self::Unknown), which is a *harness line* the
-    /// mapper couldn't classify.
+    /// A payload `kind` this build doesn't know — a log written by a newer
+    /// version. Produced by the deserializer, never a mapper; the envelope
+    /// survives so the event keeps its place. Distinct from
+    /// [`Unknown`](Self::Unknown), a harness line the mapper couldn't classify.
     #[serde(other)]
     Unrecognized,
 }
@@ -225,12 +210,10 @@ pub enum TurnStatus {
     Error,
 }
 
-/// Identifies one content block within one assistant message, joining streamed
-/// content to its committed counterpart.
-///
-/// A single message is often `[text, tool_use, …]`, and each block arrives as
-/// its own event. Claude Code's committed events carry no index, so the mapper
-/// derives one by counting blocks per `message_id` in arrival order.
+/// Joins streamed content to its committed counterpart. A message is often
+/// `[text, tool_use, …]` and each block arrives as its own event; Claude Code's
+/// committed events carry no index, so the mapper derives one by counting blocks
+/// per `message_id` in arrival order.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockRef {
@@ -242,9 +225,8 @@ pub struct BlockRef {
 ///
 /// **Deltas are a preview, never the source of truth**: the committed event for
 /// the same [`BlockRef`] supersedes whatever they accumulated. Absent deltas are
-/// the common case rather than an edge case — Codex emits none, and Claude Code
-/// emits none for subagent output — so consumers must render correctly without
-/// them.
+/// the common case — Codex emits none, Claude Code none for subagent output — so
+/// consumers must render correctly without them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     tag = "type",
@@ -256,6 +238,9 @@ pub enum DeltaEvent {
         block: BlockRef,
         block_kind: BlockKind,
     },
+    /// Carries *thinking* text too — the shapes are identical and the block's
+    /// [`BlockStart`](Self::BlockStart) already said which kind it is, so a
+    /// second variant would duplicate that fact.
     TextDelta {
         block: BlockRef,
         text: String,
@@ -271,12 +256,15 @@ pub enum DeltaEvent {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// A tool call's identity rides here rather than on [`BlockRef`], which stays a
+/// cheap map key. It arrives before any arguments have streamed, so the UI can
+/// label the call while [`DeltaEvent::InputDelta`] fragments are still landing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum BlockKind {
     Text,
     Thinking,
-    ToolUse,
+    ToolUse { id: String, name: String },
 }
 
 /// A rendering hint — which icon and component to use. Nothing depends on this
@@ -365,18 +353,13 @@ pub struct SessionInfo {
     pub settings: Option<Settings>,
 }
 
-/// An MCP server and its connection state, as reported at session start.
-///
-/// Shared with the harness parsers rather than duplicated: the shape is the
-/// same on both sides, so the Claude Code parser deserializes straight into
-/// this.
+/// Shared with the harness parsers rather than duplicated — the wire shape
+/// matches, so they deserialize straight into this.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServer {
     pub name: String,
-    /// Free-form: observed values include `connected`, `pending`, and
-    /// `needs-auth`, but the set isn't documented and a new one shouldn't fail
-    /// the line.
+    /// Free-form: `connected`, `pending`, `needs-auth` observed, set undocumented.
     pub status: String,
 }
 
