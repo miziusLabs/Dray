@@ -1,4 +1,7 @@
-use crate::harness::claude_code::{self, ClaudeCodeEvent};
+use crate::{
+    events::AgentEvent,
+    harness::claude_code::{self, ClaudeCodeEvent},
+};
 use anyhow::{bail, Result};
 use serde_json::json;
 
@@ -71,7 +74,7 @@ pub struct Session {
     pub harness: Harness,
     pub model: String,
     pub effort: String,
-    pub events: Arc<Mutex<Vec<ClaudeCodeEvent>>>,
+    pub events: Arc<Mutex<Vec<AgentEvent>>>,
 }
 
 impl Session {

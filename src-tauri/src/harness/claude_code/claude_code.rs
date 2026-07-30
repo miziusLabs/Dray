@@ -1,4 +1,5 @@
-use crate::harness::Harness::ClaudeCode;
+use crate::events::AgentEvent;
+use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::session::Session;
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -11,6 +12,7 @@ use tokio::{
 };
 pub mod parser;
 pub use parser::ClaudeCodeEvent;
+pub mod mapper;
 
 pub async fn init(
     session_id: &str,
@@ -51,7 +53,7 @@ pub async fn init(
     let stdout = child.stdout.take().context("failed to take stdout")?;
     let stderr = child.stderr.take().context("failed to take stderr")?;
 
-    let events: Arc<Mutex<Vec<ClaudeCodeEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let stdout_events = Arc::clone(&events);
 
     let app = app.clone();
@@ -80,7 +82,7 @@ pub async fn init(
 
 async fn read_stdout(
     stdout: ChildStdout,
-    events: Arc<Mutex<Vec<ClaudeCodeEvent>>>,
+    events: Arc<Mutex<Vec<AgentEvent>>>,
     app: &AppHandle,
 ) -> Result<()> {
     let reader = BufReader::new(stdout);
@@ -91,10 +93,12 @@ async fn read_stdout(
             continue;
         }
         match parser::parse_line(&line) {
-            Ok(value) => {
+            Ok(cc_event) => {
                 // println!("[parse ok] {}", event_summary(&value));
-                app.emit("events", &value)?;
-                events.lock().await.push(value);
+                let agent_event = claude_code::mapper::Mapper::map(cc_event)?;
+
+                app.emit("events", &agent_event)?;
+                events.lock().await.push(agent_event);
             }
             Err(err) => {
                 eprintln!("[parse err] {err}");

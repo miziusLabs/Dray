@@ -80,7 +80,11 @@ pub struct ThreadRef {
 /// Permission request/resolve is deliberately absent: no captured fixture shows
 /// their shape, so the variants would be a guess. Add once captured.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum AgentEventPayload {
     // ---------- session / turn lifecycle ----------
     SessionStarted(SessionInfo),
@@ -242,7 +246,11 @@ pub struct BlockRef {
 /// emits none for subagent output — so consumers must render correctly without
 /// them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum DeltaEvent {
     BlockStart {
         block: BlockRef,
@@ -385,6 +393,7 @@ pub struct Settings {
     pub sandbox: Option<String>,
     pub writable_roots: Vec<String>,
     pub network_access: Option<bool>,
+    pub fast_mode: Option<String>,
 }
 
 /// Permission stance for a session, in roughly increasing order of autonomy.
@@ -424,7 +433,10 @@ mod tests {
         .unwrap();
         assert!(matches!(
             v,
-            AgentEventPayload::Reasoning { encrypted: false, .. }
+            AgentEventPayload::Reasoning {
+                encrypted: false,
+                ..
+            }
         ));
     }
 
@@ -439,7 +451,10 @@ mod tests {
         .unwrap();
         assert!(matches!(
             v,
-            AgentEventPayload::TurnCompleted { status: TurnStatus::Success, .. }
+            AgentEventPayload::TurnCompleted {
+                status: TurnStatus::Success,
+                ..
+            }
         ));
 
         let v: AgentEventPayload =
