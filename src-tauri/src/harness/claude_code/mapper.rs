@@ -6,7 +6,7 @@
 use crate::{
     events::{
         AgentEvent, AgentEventPayload, BlockKind, BlockRef, DeltaEvent, SessionInfo, Settings,
-        ThreadRef, ToolKind, TurnStatus, Usage,
+        Subagent, ToolKind, TurnStatus, Usage,
     },
     harness::{
         claude_code::{
@@ -20,11 +20,19 @@ use crate::{
     },
 };
 use anyhow::{bail, Context, Result};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 pub struct Mapper {
     /// Set by `message_start`, read by the block frames that follow it.
     current_msg_id: Option<String>,
+    /// Next block index per message id, for committed `assistant` events.
+    ///
+    /// Claude Code emits one `assistant` event per content block, all sharing a
+    /// `message.id`, and none of them carry an index — so the only way to
+    /// address a block is to count arrivals. Deltas can't supply it either:
+    /// subagent messages get no stream frames at all.
+    block_indices: HashMap<String, u32>,
     /// Events the app synthesizes itself (the user's own prompt) must be
     /// numbered through this same counter, or `seq` develops gaps.
     seq: u64,
@@ -34,6 +42,7 @@ impl Default for Mapper {
     fn default() -> Self {
         Self {
             current_msg_id: None,
+            block_indices: HashMap::new(),
             seq: 0,
         }
     }
@@ -63,32 +72,21 @@ impl Mapper {
                 parent_tool_use_id,
                 ..
             } => {
+                let subagent = subagent(parent_tool_use_id, None);
                 let payload = self.handle_stream_event(event)?;
-                Ok(payload.map(|p| self.build(session_id, parent_tool_use_id, None, p)))
+                Ok(payload.map(|p| self.build(session_id, subagent, None, p)))
             }
 
             ClaudeCodeEvent::Assistant {
                 message,
                 parent_tool_use_id,
                 session_id,
-                uuid,
-                request_id,
                 subagent_type,
-                task_description,
+                ..
             } => {
-                let payload = self.handle_assistant_msg(
-                    message,
-                    parent_tool_use_id.clone(),
-                    subagent_type,
-                    task_description,
-                )?;
-
-                Ok(Some(self.build(
-                    session_id,
-                    parent_tool_use_id,
-                    None,
-                    payload,
-                )))
+                let payload = self.handle_assistant_msg(message, parent_tool_use_id.as_deref())?;
+                let subagent = subagent(parent_tool_use_id, subagent_type);
+                Ok(payload.map(|p| self.build(session_id, subagent, None, p)))
             }
 
             ClaudeCodeEvent::User {
@@ -124,7 +122,7 @@ impl Mapper {
     fn build(
         &mut self,
         session_id: String,
-        parent_tool_use_id: Option<String>,
+        subagent: Option<Subagent>,
         timestamp: Option<String>,
         payload: AgentEventPayload,
     ) -> AgentEvent {
@@ -140,11 +138,7 @@ impl Mapper {
             // No Claude Code line carries one; the session layer opens a turn
             // when it writes a prompt.
             turn_id: None,
-            thread: parent_tool_use_id.map(|thread_id| ThreadRef {
-                thread_id,
-                label: None,
-                depth: 1,
-            }),
+            subagent,
             payload,
             raw: None,
         }
@@ -262,46 +256,55 @@ impl Mapper {
     }
 
     fn handle_assistant_msg(
-        &self,
+        &mut self,
         message: AssistantMessage,
-        parent_tool_use_id: Option<String>,
-        subagent_type: Option<String>,
-        task_description: Option<String>,
-    ) -> Result<AgentEventPayload> {
-        // this is where we handle the assistant type for the usual msgs of type text or tool use or anything on main session and also the sub agents. i'm going to start with the main handling first. I don't know what to do with the assistant results of sub agents, they do have task progress where they inform whats going on from the system event and i'm seeing both the assistant and system event task progress holds the same information, you can verify it , check it with complex.jsonl cause i might have not read it properly, its a lot of lines. oh seems like tool_use_id or parent_tool_use_id is what connects them (assistant texts -> subagent); maybe i'll skip sub agents for now, and come back to it later. the parent assistant text itself don't have the parent_tool_use_id. this is a bit complicated in as sense that its big and lots of pieces to connect. so i'm skking this just for now.
+        parent_tool_use_id: Option<&str>,
+    ) -> Result<Option<AgentEventPayload>> {
+        // Subagent content maps the same way as main-thread content; only the
+        // envelope differs, via `parent_tool_use_id` → `ThreadRef`. The subagent
+        // *lifecycle* (started, progress, finished) arrives on system events
+        // instead.
+        //
+        // Only main-thread content is streamed, so only it has a preview to
+        // supersede. Keyed on `parent_tool_use_id` rather than on whether this
+        // message id matches the open one: subagent events interleave *inside*
+        // a main message's start/stop window, sharing the same stdout.
+        let streamed = parent_tool_use_id.is_none()
+            && self.current_msg_id.as_deref() == Some(message.id.as_str());
+        // Consumed even when unused, so a later block of the same message still
+        // lines up with the index its preview used.
+        let block = self.next_block_ref(&message.id);
+        let block = streamed.then_some(block);
 
-        let block = self.block_ref(0)?;
-        let content_block = match message.content.get(0) {
-            Some(v) => v,
-            None => bail!("as"),
+        let content_block = match message.content.into_iter().next() {
+            Some(block) => block,
+            None => bail!("assistant message carried no content block"),
         };
 
         let payload = match content_block {
-            ContentBlock::Text { text } => AgentEventPayload::AssistantText {
+            ContentBlock::Text { text } => AgentEventPayload::AssistantText { block, text },
+            ContentBlock::Thinking { thinking, .. } => AgentEventPayload::Reasoning {
                 block,
-                text: text.to_string(),
-            },
-            ContentBlock::Thinking { thinking, .. } => AgentEventPayload::AssistantText {
-                block,
-                text: thinking.to_string(),
+                text: thinking,
+                encrypted: false,
             },
             ContentBlock::ToolUse {
                 id, name, input, ..
-            } => {
-                let tool_kind = serde_json::from_str::<ToolKind>(name)?;
-                AgentEventPayload::ToolCallStarted {
-                    call_id: id.to_string(),
-                    name: name.to_string(),
-                    tool_kind,
-                    input: input.clone(),
-                    raw_input: None,
-                    title: None,
-                }
-            }
-            ContentBlock::Unrecognized => todo!(),
+            } => AgentEventPayload::ToolCallStarted {
+                tool_kind: tool_kind(&name),
+                call_id: id,
+                name,
+                input,
+                raw_input: None,
+                title: None,
+            },
+            // A block shape this build doesn't model. Its index was already
+            // consumed above, so later blocks keep their place — dropping the
+            // event is better than failing the line over one unknown block.
+            ContentBlock::Unrecognized => return Ok(None),
         };
 
-        Ok(payload)
+        Ok(Some(payload))
     }
 
     fn handle_result_event(e: ResultEvent) -> Result<AgentEventPayload> {
@@ -332,6 +335,25 @@ impl Mapper {
         }
     }
 
+    /// Address the next block of a committed message.
+    ///
+    /// Counting arrivals reproduces the indices the stream frames use for the
+    /// same message (`text` → 0, `tool_use` → 1), so a committed block and its
+    /// streamed preview agree on their [`BlockRef`].
+    fn next_block_ref(&mut self, message_id: &str) -> BlockRef {
+        let next = self
+            .block_indices
+            .entry(message_id.to_string())
+            .or_insert(0);
+        let index = *next;
+        *next += 1;
+
+        BlockRef {
+            message_id: message_id.to_string(),
+            index,
+        }
+    }
+
     /// Errors rather than substituting a placeholder id — `BlockRef` is the join
     /// key, so a wrong one silently attaches text to the wrong block.
     fn block_ref(&self, index: u32) -> Result<BlockRef> {
@@ -342,6 +364,30 @@ impl Mapper {
             }),
             None => bail!("content block frame arrived before any message_start"),
         }
+    }
+}
+
+/// A `parent_tool_use_id` is exactly what marks an event as a subagent's, so
+/// its presence decides the whole thing. The label rides along on the same
+/// events (`subagent_type`), needing no lookup against `task_started`.
+fn subagent(parent_tool_use_id: Option<String>, label: Option<String>) -> Option<Subagent> {
+    parent_tool_use_id.map(|id| Subagent { id, label })
+}
+
+/// Classify a tool by its Claude Code name.
+///
+/// A rendering hint only — which icon and component the UI reaches for — so an
+/// unrecognized name falls back to [`ToolKind::Other`] rather than failing.
+fn tool_kind(name: &str) -> ToolKind {
+    match name {
+        "Bash" | "BashOutput" | "KillShell" => ToolKind::Shell,
+        "Read" | "NotebookRead" => ToolKind::FileRead,
+        "Write" | "Edit" | "NotebookEdit" => ToolKind::FileEdit,
+        "Grep" | "Glob" => ToolKind::Search,
+        "WebFetch" | "WebSearch" => ToolKind::Web,
+        "Agent" | "Task" => ToolKind::SubagentSpawn,
+        name if name.starts_with("mcp__") => ToolKind::Mcp,
+        _ => ToolKind::Other,
     }
 }
 
@@ -423,6 +469,79 @@ fn system_event_session_id(e: &SystemEvent) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Committed blocks carry no index, so the mapper counts arrivals. The
+    /// indices must be dense per message and agree with the ones the stream
+    /// frames used, or streamed text attaches to the wrong committed block.
+    #[test]
+    fn derives_dense_block_indices_matching_the_stream() {
+        let fixture = include_str!("fixtures/complex.jsonl");
+        let mut mapper = Mapper::new();
+        let mut committed: HashMap<String, Vec<u32>> = HashMap::new();
+        let mut streamed: HashMap<String, Vec<u32>> = HashMap::new();
+
+        for line in fixture.lines().filter(|line| !line.trim().is_empty()) {
+            let Ok(Some(event)) =
+                mapper.map(crate::harness::claude_code::parser::parse_line(line).unwrap())
+            else {
+                continue;
+            };
+
+            match &event.payload {
+                AgentEventPayload::AssistantText {
+                    block: Some(block), ..
+                }
+                | AgentEventPayload::Reasoning {
+                    block: Some(block), ..
+                } => {
+                    committed
+                        .entry(block.message_id.clone())
+                        .or_default()
+                        .push(block.index);
+                }
+                AgentEventPayload::Delta(DeltaEvent::BlockStart { block, .. }) => {
+                    streamed
+                        .entry(block.message_id.clone())
+                        .or_default()
+                        .push(block.index);
+                }
+                _ => {}
+            }
+        }
+
+        assert!(!committed.is_empty());
+        assert_eq!(
+            committed.len(),
+            streamed.len(),
+            "only streamed messages should carry a BlockRef"
+        );
+        for (message_id, indices) in &committed {
+            let expected: Vec<u32> = (0..indices.len() as u32).collect();
+            assert_eq!(indices, &expected, "non-dense indices for {message_id}");
+        }
+
+        // Where a message was also streamed, the first committed block must
+        // share the first streamed block's index.
+        for (message_id, streamed_indices) in &streamed {
+            if let Some(committed_indices) = committed.get(message_id) {
+                assert_eq!(
+                    streamed_indices.first(),
+                    committed_indices.first(),
+                    "streamed and committed disagree for {message_id}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn classifies_tool_kinds_by_name() {
+        assert_eq!(tool_kind("Bash"), ToolKind::Shell);
+        assert_eq!(tool_kind("Read"), ToolKind::FileRead);
+        assert_eq!(tool_kind("Edit"), ToolKind::FileEdit);
+        assert_eq!(tool_kind("Agent"), ToolKind::SubagentSpawn);
+        assert_eq!(tool_kind("mcp__supabase__query"), ToolKind::Mcp);
+        assert_eq!(tool_kind("SomethingNew"), ToolKind::Other);
+    }
 
     /// The wire is snake_case and every `Usage` field is `Option`, so a plain
     /// `from_value::<Usage>()` parses *successfully* into all-`None`. This pins

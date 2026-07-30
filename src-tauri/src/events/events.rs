@@ -40,8 +40,8 @@ pub struct AgentEvent {
     pub seq: u64,
     pub ts: String,
     pub turn_id: Option<String>,
-    /// `None` = main conversation, `Some` = subagent branch.
-    pub thread: Option<ThreadRef>,
+    /// `None` = main conversation, `Some` = the subagent that produced this.
+    pub subagent: Option<Subagent>,
     pub payload: AgentEventPayload,
     /// `None` on the emitted path — raw lines are archived separately — but
     /// always populated for [`AgentEventPayload::Unknown`], which is useless
@@ -50,18 +50,19 @@ pub struct AgentEvent {
     pub raw: Option<Value>,
 }
 
-/// Identifies a subagent branch. Claude Code addresses these by
-/// `parent_tool_use_id`, Codex by `agent_path`.
+/// A running subagent, whose events interleave with the main conversation's on
+/// one stdout stream.
+///
+/// Claude Code identifies these by `parent_tool_use_id` — the id of the tool
+/// call that spawned it, so this equals the `call_id` of the corresponding
+/// [`AgentEventPayload::ToolCallStarted`] and is what nests a subagent's work
+/// under it. Codex uses `agent_path`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadRef {
-    pub thread_id: String,
+pub struct Subagent {
+    pub id: String,
     /// Drives the collapsed subagent card's title.
     pub label: Option<String>,
-    /// Subagents can spawn subagents. The main thread uses `thread: None`
-    /// rather than depth 0.
-    #[serde(default)]
-    pub depth: u8,
 }
 
 /// What happened.
@@ -99,13 +100,19 @@ pub enum AgentEventPayload {
         images: Vec<ImageRef>,
     },
     AssistantText {
-        block: BlockRef,
+        /// `Some` only when this content was also streamed, naming the preview
+        /// it supersedes. `None` — the common case, covering Claude Code
+        /// subagents and all of Codex — means nothing was streamed and the
+        /// event simply appends in `seq` order.
+        #[serde(default)]
+        block: Option<BlockRef>,
         text: String,
     },
     /// `encrypted` records that a reasoning step happened but its content is
     /// unreadable, which is how Codex reports reasoning it won't disclose.
     Reasoning {
-        block: BlockRef,
+        #[serde(default)]
+        block: Option<BlockRef>,
         text: String,
         #[serde(default)]
         encrypted: bool,
@@ -146,19 +153,25 @@ pub enum AgentEventPayload {
     },
 
     // ---------- subagents ----------
+    /// `subagent_id` matches the [`Subagent::id`] on every event that subagent
+    /// produces, and the `call_id` of the tool call that spawned it.
     SubagentStarted {
-        thread_id: String,
+        subagent_id: String,
         label: String,
         description: Option<String>,
         prompt: Option<String>,
     },
     SubagentProgress {
-        thread_id: String,
+        subagent_id: String,
+        /// What the subagent is doing right now — Claude Code rewrites this per
+        /// progress event, so it drives a live status line without expanding
+        /// the subagent's own events.
+        description: Option<String>,
         last_tool: Option<String>,
         usage: Option<Usage>,
     },
     SubagentFinished {
-        thread_id: String,
+        subagent_id: String,
         status: String,
         summary: Option<String>,
         usage: Option<Usage>,
