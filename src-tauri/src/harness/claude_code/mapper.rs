@@ -5,8 +5,8 @@
 
 use crate::{
     events::{
-        AgentEvent, AgentEventPayload, BlockKind, BlockRef, DeltaEvent, ErrorSource, SessionInfo,
-        Settings, Subagent, ToolKind, ToolResult, TurnStatus, Usage,
+        now_rfc3339, AgentEvent, AgentEventPayload, BlockKind, BlockRef, DeltaEvent, ErrorSource,
+        SessionInfo, Settings, Subagent, ToolKind, ToolResult, TurnStatus, Usage,
     },
     harness::{
         claude_code::{
@@ -21,7 +21,14 @@ use crate::{
 };
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering::Relaxed},
+        Arc,
+    },
+};
+
 use uuid::Uuid;
 
 pub struct Mapper {
@@ -36,22 +43,27 @@ pub struct Mapper {
     block_indices: HashMap<String, u32>,
     /// Events the app synthesizes itself (the user's own prompt) must be
     /// numbered through this same counter, or `seq` develops gaps.
-    seq: u64,
+    seq: Arc<AtomicU64>,
+    // tool_use_id/subagent_id as str
+    subagent_seq: HashMap<String, u64>,
 }
 
+/// A mapper with a counter of its own, for tests and one-off mapping. The real
+/// session shares its counter with [`Session`](crate::session::Session).
 impl Default for Mapper {
     fn default() -> Self {
-        Self {
-            current_msg_id: None,
-            block_indices: HashMap::new(),
-            seq: 0,
-        }
+        Self::new(Arc::new(AtomicU64::new(0)))
     }
 }
 
 impl Mapper {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(seq: Arc<AtomicU64>) -> Self {
+        Self {
+            current_msg_id: None,
+            block_indices: HashMap::new(),
+            seq,
+            subagent_seq: HashMap::new(),
+        }
     }
 
     /// Map one parsed line. `Ok(None)` means the line only advanced state.
@@ -124,6 +136,23 @@ impl Mapper {
         }
     }
 
+    /// `&self` because the counter is atomic: `Session` advances the same one
+    /// concurrently when it writes a prompt.
+    fn get_seq(&self) -> u64 {
+        self.seq.fetch_add(1, Relaxed)
+    }
+
+    /// Ordering within one subagent's own stream.
+    fn get_subagent_seq(&mut self, subagent_id: &str) -> u64 {
+        let next = self
+            .subagent_seq
+            .entry(subagent_id.to_string())
+            .or_insert(0);
+        let seq = *next;
+        *next += 1;
+        seq
+    }
+
     /// The only place `AgentEvent`s are built, so `seq` can't be skipped or
     /// double-assigned.
     fn build(
@@ -133,8 +162,15 @@ impl Mapper {
         timestamp: Option<String>,
         payload: AgentEventPayload,
     ) -> AgentEvent {
-        let seq = self.seq;
-        self.seq += 1;
+        let seq = match &subagent {
+            // The spawn announcement is the main thread's, even though it names
+            // a subagent.
+            Some(_) if matches!(payload, AgentEventPayload::SubagentStarted { .. }) => {
+                self.get_seq()
+            }
+            Some(sub) => self.get_subagent_seq(&sub.id),
+            None => self.get_seq(),
+        };
 
         AgentEvent {
             id: Uuid::now_v7().to_string(),
@@ -555,41 +591,6 @@ fn map_usage(wire: &parser::Usage, cost_usd: Option<f64>) -> Usage {
     }
 }
 
-/// Hand-rolled to avoid a date dependency for one display-only field; `seq`, not
-/// `ts`, is the ordering key.
-fn now_rfc3339() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs() as i64;
-    let millis = now.subsec_millis();
-
-    // Days since epoch → civil date, per Howard Hinnant's algorithm.
-    let days = secs.div_euclid(86_400);
-    let secs_of_day = secs.rem_euclid(86_400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        y,
-        m,
-        d,
-        secs_of_day / 3_600,
-        (secs_of_day % 3_600) / 60,
-        secs_of_day % 60,
-        millis
-    )
-}
-
 /// Reaches the `session_id` every variant carries without consuming the event.
 fn system_event_session_id(e: &SystemEvent) -> &str {
     match e {
@@ -627,13 +628,26 @@ fn system_event_subagent_info(e: &SystemEvent) -> (Option<String>, Option<String
 mod tests {
     use super::*;
 
+    fn map_fixture(mapper: &mut Mapper, fixture: &str) -> Vec<AgentEvent> {
+        fixture
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| mapper.map(parser::parse_line(line).unwrap()).unwrap())
+            .collect()
+    }
+
+    fn assert_dense_from_zero(events: &[&AgentEvent]) {
+        let seqs: Vec<u64> = events.iter().map(|event| event.seq).collect();
+        assert_eq!(seqs, (0..seqs.len() as u64).collect::<Vec<_>>());
+    }
+
     /// Committed blocks carry no index, so the mapper counts arrivals. The
     /// indices must be dense per message and agree with the ones the stream
     /// frames used, or streamed text attaches to the wrong committed block.
     #[test]
     fn derives_dense_block_indices_matching_the_stream() {
         let fixture = include_str!("fixtures/complex.jsonl");
-        let mut mapper = Mapper::new();
+        let mut mapper = Mapper::default();
         let mut committed: HashMap<String, Vec<u32>> = HashMap::new();
         let mut streamed: HashMap<String, Vec<u32>> = HashMap::new();
 
@@ -705,7 +719,7 @@ mod tests {
     /// `ToolCallStarted` the UI is waiting on.
     #[test]
     fn maps_tool_results_with_their_call_id() {
-        let mut mapper = Mapper::new();
+        let mut mapper = Mapper::default();
         let completions: Vec<(String, ToolResult)> = include_str!("fixtures/complex.jsonl")
             .lines()
             .filter(|line| !line.trim().is_empty())
@@ -739,7 +753,7 @@ mod tests {
             r#"{"type":"user","message":{"role":"user","content":"hi"},"parent_tool_use_id":null,"session_id":"s","uuid":"u"}"#,
             r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"parent_tool_use_id":null,"session_id":"s","uuid":"u"}"#,
         ] {
-            let event = Mapper::new()
+            let event = Mapper::default()
                 .map(parser::parse_line(line).unwrap())
                 .unwrap()
                 .expect("a prompt is an event");
@@ -750,13 +764,101 @@ mod tests {
         }
     }
 
+    /// A subagent is ordered among its own events: it renders in a separate
+    /// panel and outlives the turn that spawned it, so numbering it against the
+    /// main conversation would order two independent streams as one.
+    #[test]
+    fn numbers_each_subagent_apart_from_the_main_thread() {
+        let mut mapper = Mapper::default();
+        let events = map_fixture(&mut mapper, include_str!("fixtures/complex.jsonl"));
+
+        let (subagent_events, main_events): (Vec<&AgentEvent>, Vec<&AgentEvent>) =
+            events.iter().partition(|event| {
+                event.subagent.is_some()
+                    && !matches!(event.payload, AgentEventPayload::SubagentStarted { .. })
+            });
+
+        assert!(!subagent_events.is_empty() && !main_events.is_empty());
+        assert_dense_from_zero(&main_events);
+        assert_dense_from_zero(&subagent_events);
+
+        // Both restart at 0, so the two sequences are only meaningful apart —
+        // a consumer that merged them would see duplicate keys.
+        let started = events
+            .iter()
+            .find(|e| matches!(e.payload, AgentEventPayload::SubagentStarted { .. }))
+            .expect("the fixture spawns a subagent");
+        assert!(
+            started.subagent.is_some(),
+            "the spawn still names its subagent"
+        );
+        assert!(
+            main_events.iter().any(|e| e.seq == started.seq),
+            "the spawn announcement belongs to the main conversation"
+        );
+    }
+
+    /// Each subagent counts independently, so a second one starts over at 0
+    /// rather than continuing the first's sequence.
+    #[test]
+    fn gives_every_subagent_its_own_sequence() {
+        let mut mapper = Mapper::default();
+        let mut event = |parent: &str, seq_line: String| {
+            mapper
+                .map(parser::parse_line(&seq_line).unwrap())
+                .unwrap()
+                .map(|e| (parent.to_string(), e.seq))
+        };
+
+        let line = |parent: &str| {
+            format!(
+                r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"toolu_x","content":"ok"}}]}},"parent_tool_use_id":"{parent}","session_id":"s","uuid":"u"}}"#
+            )
+        };
+
+        let seqs: Vec<(String, u64)> = ["agent_a", "agent_b", "agent_a", "agent_b", "agent_a"]
+            .iter()
+            .filter_map(|parent| event(parent, line(parent)))
+            .collect();
+
+        let a: Vec<u64> = seqs
+            .iter()
+            .filter(|(p, _)| p == "agent_a")
+            .map(|(_, s)| *s)
+            .collect();
+        let b: Vec<u64> = seqs
+            .iter()
+            .filter(|(p, _)| p == "agent_b")
+            .map(|(_, s)| *s)
+            .collect();
+
+        assert_eq!(a, vec![0, 1, 2]);
+        assert_eq!(b, vec![0, 1]);
+    }
+
+    /// The counter is shared with the session, which numbers the user's own
+    /// prompt through it — the CLI never echoes prompts back, so a second
+    /// counter would hand two events the same `seq`.
+    #[test]
+    fn continues_a_sequence_the_session_has_already_advanced() {
+        let seq = Arc::new(AtomicU64::new(0));
+        // Stands in for `Session::send_msg` writing a prompt.
+        let prompt_seq = seq.fetch_add(1, Relaxed);
+        assert_eq!(prompt_seq, 0);
+
+        let mut mapper = Mapper::new(Arc::clone(&seq));
+        let events = map_fixture(&mut mapper, include_str!("fixtures/printed.jsonl"));
+        let first = events.first().expect("the fixture maps at least one event");
+        assert_eq!(first.seq, 1, "the mapper resumed after the prompt");
+    }
+
     /// The two ids a task event carries are different: `tool_use_id`
     /// correlates the subagent's events, `task_id` is the CLI's internal agent
     /// handle. Only the first appears anywhere else, so it's the one the
     /// envelope must hold.
     #[test]
     fn keys_subagent_events_on_the_spawning_call() {
-        let mut mapper = Mapper::new();
+        let mut mapper = Mapper::default();
         let subagent_events: Vec<AgentEvent> = include_str!("fixtures/complex.jsonl")
             .lines()
             .filter(|line| !line.trim().is_empty())
@@ -812,7 +914,7 @@ mod tests {
     /// a `UserMessage`, and the result must still close the turn.
     #[test]
     fn maps_an_interrupted_turn() {
-        let mut mapper = Mapper::new();
+        let mut mapper = Mapper::default();
         let payloads: Vec<AgentEventPayload> = include_str!("fixtures/interrupted.jsonl")
             .lines()
             .filter(|line| !line.trim().is_empty())
@@ -853,7 +955,7 @@ mod tests {
     #[test]
     fn maps_result_usage_from_wire() {
         let fixture = include_str!("fixtures/complex.jsonl");
-        let mut mapper = Mapper::new();
+        let mut mapper = Mapper::default();
         let mut turns = 0;
 
         for line in fixture.lines().filter(|line| !line.trim().is_empty()) {

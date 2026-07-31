@@ -1,14 +1,24 @@
 use crate::{
-    events::AgentEvent,
-    harness::claude_code::{self, ClaudeCodeEvent},
+    events::{now_rfc3339, AgentEvent, AgentEventPayload},
+    harness::{
+        claude_code::{self, ClaudeCodeEvent},
+        Harness::ClaudeCode,
+    },
 };
 use anyhow::{bail, Result};
 use serde_json::json;
+use uuid::Uuid;
 
 // `Harness` is defined in `crate::harness`; re-exported so existing
 // `crate::session::Harness` imports keep working.
 pub use crate::harness::Harness;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering::Relaxed},
+        Arc,
+    },
+};
 use tauri::AppHandle;
 use tokio::{
     io::AsyncWriteExt,
@@ -75,6 +85,7 @@ pub struct Session {
     pub model: String,
     pub effort: String,
     pub events: Arc<Mutex<Vec<AgentEvent>>>,
+    pub seq: Arc<AtomicU64>,
 }
 
 impl Session {
@@ -94,7 +105,31 @@ impl Session {
     }
 
     pub async fn send_msg(&mut self, prompt: &str) -> Result<()> {
+        let seq = self.seq.fetch_add(1, Relaxed);
+
+        let payload = AgentEventPayload::UserMessage {
+            text: prompt.to_string(),
+            images: Vec::new(),
+        };
+        let agent_event = AgentEvent {
+            id: Uuid::now_v7().to_string(),
+            session_id: self.id.clone(),
+            harness: ClaudeCode,
+            seq,
+            ts: now_rfc3339(),
+            // Nothing tracks turns yet; Claude Code opens one per `init`.
+            turn_id: None,
+            subagent: None,
+            payload,
+            raw: None,
+        };
+
+        let mut events_guard = self.events.lock().await;
+        events_guard.push(agent_event);
+        drop(events_guard);
+
         let prompt = json!({"type":"user","message":{"role":"user","content": prompt}});
+
         let line = format!("{prompt}\n");
 
         let _ = self.stdin.write_all(line.as_bytes()).await?;

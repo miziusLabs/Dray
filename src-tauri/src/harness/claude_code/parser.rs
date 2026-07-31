@@ -1034,7 +1034,11 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(blocks.len(), 30, "every fixture user message is a tool result");
+        assert_eq!(
+            blocks.len(),
+            30,
+            "every fixture user message is a tool result"
+        );
         assert!(
             !blocks
                 .iter()
@@ -1054,7 +1058,12 @@ mod tests {
                 if !inner.is_empty()
         )));
         for block in &blocks {
-            if let UserContentBlock::ToolResult { tool_use_id, content, .. } = block {
+            if let UserContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                ..
+            } = block
+            {
                 assert!(tool_use_id.starts_with("toolu_"));
                 assert!(!content.as_text().is_empty());
             }
@@ -1066,7 +1075,10 @@ mod tests {
                 .iter()
                 .filter(|block| matches!(
                     block,
-                    UserContentBlock::ToolResult { is_error: Some(true), .. }
+                    UserContentBlock::ToolResult {
+                        is_error: Some(true),
+                        ..
+                    }
                 ))
                 .count(),
             2

@@ -3,6 +3,7 @@ use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::session::Session;
 use anyhow::{Context, Result};
 use std::process::Stdio;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::{
@@ -54,11 +55,14 @@ pub async fn init(
     let stderr = child.stderr.take().context("failed to take stderr")?;
 
     let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
-    let stdout_events = Arc::clone(&events);
+    let stdout_events = events.clone();
+
+    let seq = Arc::new(AtomicU64::new(0));
+    let stdout_seq = seq.clone();
 
     let app = app.clone();
     tokio::spawn(async move {
-        if let Err(error) = read_stdout(stdout, stdout_events, &app).await {
+        if let Err(error) = read_stdout(stdout, stdout_events, stdout_seq, &app).await {
             eprintln!("Failed to read Claude stdout: {error}");
         }
     });
@@ -77,19 +81,21 @@ pub async fn init(
         model: model.to_string(),
         effort: effort.to_string(),
         events,
+        seq,
     })
 }
 
 async fn read_stdout(
     stdout: ChildStdout,
     events: Arc<Mutex<Vec<AgentEvent>>>,
+    stdout_seq: Arc<AtomicU64>,
     app: &AppHandle,
 ) -> Result<()> {
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
     // One mapper per session: it carries state across lines (the open message
     // id, the seq counter), so it must outlive the loop body.
-    let mut mapper = claude_code::mapper::Mapper::new();
+    let mut mapper = claude_code::mapper::Mapper::new(stdout_seq);
 
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
