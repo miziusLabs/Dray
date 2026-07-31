@@ -117,6 +117,10 @@ impl Mapper {
                     .with_context(|| format!("mapping result event for session {session_id}"))?;
                 Ok(Some(self.build(session_id, None, None, payload)))
             }
+
+            // Parsed but unmapped: `RateLimit` wants RFC3339 where the wire
+            // sends unix seconds, and nothing consumes it yet.
+            ClaudeCodeEvent::RateLimitEvent { .. } => Ok(None),
         }
     }
 
@@ -596,7 +600,9 @@ fn system_event_session_id(e: &SystemEvent) -> &str {
         | SystemEvent::TaskStarted { session_id, .. }
         | SystemEvent::TaskProgress { session_id, .. }
         | SystemEvent::TaskUpdated { session_id, .. }
-        | SystemEvent::TaskNotification { session_id, .. } => session_id,
+        | SystemEvent::TaskNotification { session_id, .. }
+        | SystemEvent::PostTurnSummary { session_id, .. }
+        | SystemEvent::BackgroundTasksChanged { session_id, .. } => session_id,
     }
 }
 

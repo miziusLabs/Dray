@@ -43,6 +43,30 @@ pub enum ClaudeCodeEvent {
         task_description: Option<String>,
     },
     Result(ResultEvent),
+    RateLimitEvent {
+        rate_limit_info: RateLimitInfo,
+        uuid: String,
+        session_id: String,
+    },
+}
+
+/// Camel-cased on the wire, unlike every other Claude Code payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RateLimitInfo {
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Unix seconds, not RFC3339 like [`crate::events::RateLimit::resets_at`].
+    #[serde(default)]
+    pub resets_at: Option<i64>,
+    #[serde(default)]
+    pub rate_limit_type: Option<String>,
+    #[serde(default)]
+    pub overage_status: Option<String>,
+    #[serde(default)]
+    pub overage_disabled_reason: Option<String>,
+    #[serde(default)]
+    pub is_using_overage: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +156,33 @@ pub enum SystemEvent {
         uuid: String,
         session_id: String,
     },
+    /// A one-line recap of the turn that just ended, emitted just before its
+    /// `result`. `summarizes_uuid` names the assistant message it describes.
+    PostTurnSummary {
+        summarizes_uuid: String,
+        status_category: String,
+        status_detail: String,
+        /// Empty when nothing is wanted from the user.
+        needs_action: String,
+        uuid: String,
+        session_id: String,
+    },
+    /// The full set of outstanding background tasks, republished whenever it
+    /// changes — an empty `tasks` means everything has drained. A turn's
+    /// `result` can arrive while this is non-empty, so the two together are what
+    /// say whether the session is idle.
+    BackgroundTasksChanged {
+        tasks: Vec<BackgroundTask>,
+        uuid: String,
+        session_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackgroundTask {
+    pub task_id: String,
+    pub task_type: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -875,6 +926,59 @@ mod tests {
         let stream_usage = stream_usage.expect("message_delta carries usage");
         assert!(stream_usage.output_tokens > 0);
         assert!(stream_usage.cache_creation.is_none());
+    }
+
+    /// A real stdin-driven session: two prompts, an async subagent, and a third
+    /// turn the agent started for itself when the subagent reported back.
+    #[test]
+    fn parses_a_multi_turn_session() {
+        let events = parse_fixture(include_str!("fixtures/multi_turn.jsonl"));
+        assert_eq!(events.len(), 382);
+
+        // `init` is per turn, not per session — and the tool list grows between
+        // them as deferred tools load.
+        let tool_counts: Vec<usize> = events
+            .iter()
+            .filter_map(|event| match event {
+                ClaudeCodeEvent::System(SystemEvent::Init { tools, .. }) => Some(tools.len()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tool_counts.len(), 3);
+        assert!(tool_counts[0] < tool_counts[1]);
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::System(SystemEvent::PostTurnSummary { status_detail, .. })
+                if !status_detail.is_empty()
+        )));
+
+        // Published non-empty while the subagent runs, then empty once it
+        // drains — the pair is what distinguishes "turn over" from "idle".
+        let task_sets: Vec<usize> = events
+            .iter()
+            .filter_map(|event| match event {
+                ClaudeCodeEvent::System(SystemEvent::BackgroundTasksChanged { tasks, .. }) => {
+                    Some(tasks.len())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(task_sets, vec![1, 0]);
+
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, ClaudeCodeEvent::RateLimitEvent { .. })));
+
+        // The turn the agent started for itself, rather than in response to a
+        // prompt.
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::Result(ResultEvent::Success {
+                origin: Some(ResultOrigin { kind }),
+                ..
+            }) if kind == "task-notification"
+        )));
     }
 
     /// Interrupting a streaming response ends the turn with a `result` line
