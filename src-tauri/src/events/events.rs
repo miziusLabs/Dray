@@ -77,12 +77,13 @@ pub struct Subagent {
 )]
 pub enum AgentEventPayload {
     // ---------- session / turn lifecycle ----------
-    SessionStarted(SessionInfo),
-    /// Claude Code has no equivalent, so its mapper synthesizes one when the
-    /// prompt is written to stdin.
-    TurnStarted {
-        prompt_preview: Option<String>,
-    },
+    /// Claude Code emits one `init` per turn, not per session — the tool list
+    /// grows between them as deferred tools load — so this carries whatever the
+    /// turn was configured with. The first of a session is the session's.
+    ///
+    /// A turn is not the same as a prompt: the agent opens one for itself when
+    /// an async subagent reports back.
+    TurnStarted(SessionInfo),
     /// Not a session terminator — one arrives per completed turn.
     TurnCompleted {
         status: TurnStatus,
@@ -171,7 +172,7 @@ pub enum AgentEventPayload {
         last_tool: Option<String>,
         usage: Option<Usage>,
     },
-    SubagentFinished {
+    SubagentCompleted {
         agent_id: String,
         status: String,
         summary: Option<String>,

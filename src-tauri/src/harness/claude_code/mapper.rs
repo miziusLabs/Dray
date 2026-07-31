@@ -230,7 +230,7 @@ impl Mapper {
                 summary,
                 usage,
                 ..
-            } => Ok(AgentEventPayload::SubagentFinished {
+            } => Ok(AgentEventPayload::SubagentCompleted {
                 agent_id: task_id,
                 status,
                 summary: Some(summary),
@@ -273,7 +273,7 @@ impl Mapper {
                 settings: Some(settings),
             };
 
-            Ok(AgentEventPayload::SessionStarted(session_info))
+            Ok(AgentEventPayload::TurnStarted(session_info))
         } else {
             bail!("handle_init called with a non-init system event")
         }
@@ -868,7 +868,7 @@ mod tests {
                     event.payload,
                     AgentEventPayload::SubagentStarted { .. }
                         | AgentEventPayload::SubagentProgress { .. }
-                        | AgentEventPayload::SubagentFinished { .. }
+                        | AgentEventPayload::SubagentCompleted { .. }
                 )
             })
             .collect();
@@ -904,7 +904,7 @@ mod tests {
 
         assert!(subagent_events.iter().any(|e| matches!(
             &e.payload,
-            AgentEventPayload::SubagentFinished { status, usage: Some(usage), .. }
+            AgentEventPayload::SubagentCompleted { status, usage: Some(usage), .. }
                 if status == "completed" && usage.total_tokens == Some(27160)
         )));
     }
