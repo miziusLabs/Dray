@@ -63,8 +63,11 @@ impl Mapper {
         match event {
             ClaudeCodeEvent::System(system_event) => {
                 let session_id = system_event_session_id(&system_event).to_string();
+                let (tool_use_id, label) = system_event_subagent_info(&system_event);
+
+                let subagent = subagent(tool_use_id, label);
                 let payload = self.handle_system_event(system_event)?;
-                Ok(payload.map(|p| self.build(session_id, None, None, p)))
+                Ok(payload.map(|p| self.build(session_id, subagent, None, p)))
             }
 
             ClaudeCodeEvent::StreamEvent {
@@ -110,7 +113,8 @@ impl Mapper {
                     | ResultEvent::ErrorDuringExecution { session_id, .. } => session_id.clone(),
                 };
 
-                let payload = Self::handle_result_event(result_event).context("info")?;
+                let payload = Self::handle_result_event(result_event)
+                    .with_context(|| format!("mapping result event for session {session_id}"))?;
                 Ok(Some(self.build(session_id, None, None, payload)))
             }
         }
@@ -146,8 +150,53 @@ impl Mapper {
     fn handle_system_event(&mut self, e: SystemEvent) -> Result<Option<AgentEventPayload>> {
         match e {
             SystemEvent::Init { .. } => Self::handle_init(e).map(Some),
-            // yet to handle the sub agent system events
+            SystemEvent::TaskStarted { .. }
+            | SystemEvent::TaskProgress { .. }
+            | SystemEvent::TaskNotification { .. } => Self::handle_task(e).map(Some),
             _ => Ok(None),
+        }
+    }
+
+    fn handle_task(e: SystemEvent) -> Result<AgentEventPayload> {
+        match e {
+            SystemEvent::TaskStarted {
+                task_id,
+                description,
+                prompt,
+                subagent_type,
+                ..
+            } => Ok(AgentEventPayload::SubagentStarted {
+                agent_id: task_id,
+                label: subagent_type,
+                description: Some(description),
+                prompt: Some(prompt),
+            }),
+            SystemEvent::TaskProgress {
+                task_id,
+                description,
+                usage,
+                last_tool_name,
+                ..
+            } => Ok(AgentEventPayload::SubagentProgress {
+                agent_id: task_id,
+                description: Some(description),
+                last_tool: Some(last_tool_name),
+                usage: Some(Usage::from(usage)),
+            }),
+            // SystemEvent::TaskUpdated { task_id, patch, uuid, session_id }
+            SystemEvent::TaskNotification {
+                task_id,
+                status,
+                summary,
+                usage,
+                ..
+            } => Ok(AgentEventPayload::SubagentFinished {
+                agent_id: task_id,
+                status,
+                summary: Some(summary),
+                usage: Some(Usage::from(usage)),
+            }),
+            other => bail!("handle_task called with a non-task system event: {other:?}"),
         }
     }
 
@@ -473,6 +522,15 @@ fn tool_kind(name: &str) -> ToolKind {
     }
 }
 
+impl From<parser::TaskUsage> for Usage {
+    fn from(wire: parser::TaskUsage) -> Self {
+        Self {
+            total_tokens: Some(wire.total_tokens),
+            ..Default::default()
+        }
+    }
+}
+
 /// `total_cost_usd` is a sibling of `usage` on the wire rather than a member, so
 /// it arrives separately.
 ///
@@ -542,11 +600,22 @@ fn system_event_session_id(e: &SystemEvent) -> &str {
     }
 }
 
-// fn result_session_id(e: &ResultEvent) -> &str {
-//     match e {
-//         ResultEvent::Success { session_id, .. } => session_id
-//     }
-// }
+fn system_event_subagent_info(e: &SystemEvent) -> (Option<String>, Option<String>) {
+    match e {
+        SystemEvent::TaskStarted {
+            tool_use_id,
+            subagent_type,
+            ..
+        }
+        | SystemEvent::TaskProgress {
+            tool_use_id,
+            subagent_type,
+            ..
+        } => (Some(tool_use_id.clone()), Some(subagent_type.clone())),
+        SystemEvent::TaskNotification { tool_use_id, .. } => (Some(tool_use_id.clone()), None),
+        _ => (None, None),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -673,6 +742,63 @@ mod tests {
                 AgentEventPayload::UserMessage { text, .. } if text == "hi"
             ));
         }
+    }
+
+    /// The two ids a task event carries are different: `tool_use_id`
+    /// correlates the subagent's events, `task_id` is the CLI's internal agent
+    /// handle. Only the first appears anywhere else, so it's the one the
+    /// envelope must hold.
+    #[test]
+    fn keys_subagent_events_on_the_spawning_call() {
+        let mut mapper = Mapper::new();
+        let subagent_events: Vec<AgentEvent> = include_str!("fixtures/complex.jsonl")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| mapper.map(parser::parse_line(line).unwrap()).unwrap())
+            .filter(|event| {
+                matches!(
+                    event.payload,
+                    AgentEventPayload::SubagentStarted { .. }
+                        | AgentEventPayload::SubagentProgress { .. }
+                        | AgentEventPayload::SubagentFinished { .. }
+                )
+            })
+            .collect();
+
+        assert_eq!(subagent_events.len(), 31);
+        for event in &subagent_events {
+            let subagent = event
+                .subagent
+                .as_ref()
+                .expect("task events name a subagent");
+            assert_eq!(subagent.id, "toolu_01XZvNi7gNM53ByhyDb5LN45");
+        }
+
+        assert!(subagent_events.iter().any(|e| matches!(
+            &e.payload,
+            AgentEventPayload::SubagentStarted { agent_id, label, .. }
+                if agent_id == "aa402df71b1918f96" && label == "Explore"
+        )));
+
+        // `description` is rewritten per progress event, which is what makes it
+        // usable as a live status line.
+        let descriptions: std::collections::HashSet<&str> = subagent_events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                AgentEventPayload::SubagentProgress { description, .. } => description.as_deref(),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            descriptions.len() > 1,
+            "progress descriptions never changed"
+        );
+
+        assert!(subagent_events.iter().any(|e| matches!(
+            &e.payload,
+            AgentEventPayload::SubagentFinished { status, usage: Some(usage), .. }
+                if status == "completed" && usage.total_tokens == Some(27160)
+        )));
     }
 
     /// An interrupted turn reports the abort twice — as prose in a `user` text

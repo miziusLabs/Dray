@@ -153,16 +153,17 @@ pub enum AgentEventPayload {
     },
 
     // ---------- subagents ----------
-    /// `subagent_id` matches the [`Subagent::id`] on every event that subagent
-    /// produces, and the `call_id` of the tool call that spawned it.
+    /// Which subagent these describe is on the envelope's [`Subagent`], as it is
+    /// for every other event a subagent produces. `agent_id` is the harness's
+    /// own internal handle — a *different* id, not a correlation key.
     SubagentStarted {
-        subagent_id: String,
+        agent_id: String,
         label: String,
         description: Option<String>,
         prompt: Option<String>,
     },
     SubagentProgress {
-        subagent_id: String,
+        agent_id: String,
         /// What the subagent is doing right now — Claude Code rewrites this per
         /// progress event, so it drives a live status line without expanding
         /// the subagent's own events.
@@ -171,7 +172,7 @@ pub enum AgentEventPayload {
         usage: Option<Usage>,
     },
     SubagentFinished {
-        subagent_id: String,
+        agent_id: String,
         status: String,
         summary: Option<String>,
         usage: Option<Usage>,
@@ -273,7 +274,11 @@ pub enum DeltaEvent {
 /// cheap map key. It arrives before any arguments have streamed, so the UI can
 /// label the call while [`DeltaEvent::InputDelta`] fragments are still landing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum BlockKind {
     Text,
     Thinking,
