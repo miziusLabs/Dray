@@ -30,23 +30,18 @@ raw: JsonValue | null, };
  * Permission request/resolve is deliberately absent: no captured fixture shows
  * their shape, so the variants would be a guess. Add once captured.
  */
-export type AgentEventPayload = { "kind": "turn_started" } & SessionInfo | { "kind": "turn_completed", status: TurnStatus, stopReason: string | null, finalText: string | null, usage: Usage | null, durationMs: number | null, } | { "kind": "settings_changed" } & Settings | { "kind": "user_message", text: string, images: Array<ImageRef>, } | { "kind": "assistant_text", 
+export type AgentEventPayload = { "type": "turn_started" } & SessionInfo | { "type": "turn_completed", status: TurnStatus, stopReason: string | null, finalText: string | null, usage: Usage | null, durationMs: number | null, } | { "type": "settings_changed" } & Settings | { "type": "user_message", text: string, images: Array<ImageRef>, } | { "type": "assistant_text", 
 /**
  * `Some` only when this content was also streamed, naming the preview
  * it supersedes. `None` — the common case, covering Claude Code
  * subagents and all of Codex — means nothing was streamed and the
  * event simply appends in `seq` order.
  */
-block: BlockRef | null, text: string, } | { "kind": "reasoning", block: BlockRef | null, text: string, encrypted: boolean, } | { "kind": "delta" } & DeltaEvent | { "kind": "tool_call_started", callId: string, 
+block: BlockRef | null, text: string, } | { "type": "reasoning", block: BlockRef | null, text: string, encrypted: boolean, } | { "type": "delta" } & DeltaEvent | { "type": "tool_call_started", callId: string, 
 /**
  * The harness's own tool name, verbatim (`"Bash"`, `"apply_patch"`).
  */
-name: string, 
-/**
- * Named `tool_kind`, not `kind`: this enum is tagged on `kind`, and a
- * field of that name collides with the tag.
- */
-toolKind: ToolKind, 
+name: string, toolKind: ToolKind, 
 /**
  * Always an object. JSON-encoded argument strings are parsed here;
  * unparseable input becomes `{"_unparsed": "…"}` rather than dropped.
@@ -56,13 +51,13 @@ input: JsonValue,
  * Input that isn't JSON at all — Codex's `custom_tool_call.input` is raw
  * JS source.
  */
-rawInput: string | null, title: string | null, } | { "kind": "tool_call_completed", callId: string, result: ToolResult, } | { "kind": "file_edits", callId: string | null, edits: Array<FileEdit>, } | { "kind": "subagent_started", agentId: string, label: string, description: string | null, prompt: string | null, } | { "kind": "subagent_progress", agentId: string, 
+rawInput: string | null, title: string | null, } | { "type": "tool_call_completed", callId: string, result: ToolResult, } | { "type": "file_edits", callId: string | null, edits: Array<FileEdit>, } | { "type": "subagent_started", agentId: string, label: string, description: string | null, prompt: string | null, } | { "type": "subagent_progress", agentId: string, 
 /**
  * What the subagent is doing right now — Claude Code rewrites this per
  * progress event, so it drives a live status line without expanding
  * the subagent's own events.
  */
-description: string | null, lastTool: string | null, usage: Usage | null, } | { "kind": "subagent_completed", agentId: string, status: string, summary: string | null, usage: Usage | null, } | { "kind": "usage_update" } & Usage | { "kind": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "kind": "context_compacted", message: string | null, windowNumber: number | null, } | { "kind": "error", source: ErrorSource, message: string, fatal: boolean, } | { "kind": "unknown", harnessType: string, } | { "kind": "unrecognized" };
+description: string | null, lastTool: string | null, usage: Usage | null, } | { "type": "subagent_completed", agentId: string, status: string, summary: string | null, usage: Usage | null, } | { "type": "usage_update" } & Usage | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compacted", message: string | null, windowNumber: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
 
 /**
  * Permission stance for a session, in roughly increasing order of autonomy.
@@ -74,7 +69,7 @@ export type ApprovalPolicy = "default" | "acceptEdits" | "plan" | "auto" | "dont
  * cheap map key. It arrives before any arguments have streamed, so the UI can
  * label the call while [`DeltaEvent::InputDelta`] fragments are still landing.
  */
-export type BlockKind = { "kind": "text" } | { "kind": "thinking" } | { "kind": "tool_use", id: string, name: string, };
+export type BlockKind = { "type": "text" } | { "type": "thinking" } | { "type": "tool_use", id: string, name: string, };
 
 /**
  * Joins streamed content to its committed counterpart. A message is often
@@ -93,8 +88,11 @@ export type ContextWindow = { usedTokens: number, maxTokens: number, };
  * the same [`BlockRef`] supersedes whatever they accumulated. Absent deltas are
  * the common case — Codex emits none, Claude Code none for subagent output — so
  * consumers must render correctly without them.
+ * Tagged on `delta`, not `type`: [`AgentEventPayload::Delta`] is a newtype
+ * variant, so these fields flatten into the payload object alongside its own
+ * `type` tag. Two tags of the same name serialize but never deserialize.
  */
-export type DeltaEvent = { "type": "block_start", block: BlockRef, blockKind: BlockKind, } | { "type": "text_delta", block: BlockRef, text: string, } | { "type": "input_delta", block: BlockRef, partialJson: string, } | { "type": "block_stop", block: BlockRef, };
+export type DeltaEvent = { "delta": "block_start", block: BlockRef, blockKind: BlockKind, } | { "delta": "text_delta", block: BlockRef, text: string, } | { "delta": "input_delta", block: BlockRef, partialJson: string, } | { "delta": "block_stop", block: BlockRef, };
 
 export type ErrorSource = "harness" | "parser" | "process";
 

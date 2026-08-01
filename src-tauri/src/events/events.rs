@@ -75,7 +75,7 @@ pub struct Subagent {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(
-    tag = "kind",
+    tag = "type",
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
@@ -133,8 +133,6 @@ pub enum AgentEventPayload {
         call_id: String,
         /// The harness's own tool name, verbatim (`"Bash"`, `"apply_patch"`).
         name: String,
-        /// Named `tool_kind`, not `kind`: this enum is tagged on `kind`, and a
-        /// field of that name collides with the tag.
         tool_kind: ToolKind,
         /// Always an object. JSON-encoded argument strings are parsed here;
         /// unparseable input becomes `{"_unparsed": "…"}` rather than dropped.
@@ -248,10 +246,13 @@ pub struct BlockRef {
 /// the same [`BlockRef`] supersedes whatever they accumulated. Absent deltas are
 /// the common case — Codex emits none, Claude Code none for subagent output — so
 /// consumers must render correctly without them.
+/// Tagged on `delta`, not `type`: [`AgentEventPayload::Delta`] is a newtype
+/// variant, so these fields flatten into the payload object alongside its own
+/// `type` tag. Two tags of the same name serialize but never deserialize.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(
-    tag = "type",
+    tag = "delta",
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
@@ -284,7 +285,7 @@ pub enum DeltaEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(
-    tag = "kind",
+    tag = "type",
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
@@ -477,14 +478,14 @@ mod tests {
     #[test]
     fn old_lines_without_defaulted_fields_still_parse() {
         let v: AgentEventPayload =
-            serde_json::from_str(r#"{"kind":"user_message","text":"hi"}"#).unwrap();
+            serde_json::from_str(r#"{"type":"user_message","text":"hi"}"#).unwrap();
         assert!(matches!(
             v,
             AgentEventPayload::UserMessage { ref text, ref images } if text == "hi" && images.is_empty()
         ));
 
         let v: AgentEventPayload = serde_json::from_str(
-            r#"{"kind":"reasoning","block":{"messageId":"m","index":0},"text":"t"}"#,
+            r#"{"type":"reasoning","block":{"messageId":"m","index":0},"text":"t"}"#,
         )
         .unwrap();
         assert!(matches!(
@@ -502,7 +503,7 @@ mod tests {
     #[test]
     fn new_lines_degrade_gracefully() {
         let v: AgentEventPayload = serde_json::from_str(
-            r#"{"kind":"turn_completed","status":"success","someFutureField":42}"#,
+            r#"{"type":"turn_completed","status":"success","someFutureField":42}"#,
         )
         .unwrap();
         assert!(matches!(
@@ -514,7 +515,7 @@ mod tests {
         ));
 
         let v: AgentEventPayload =
-            serde_json::from_str(r#"{"kind":"from_the_future","payload":9001}"#).unwrap();
+            serde_json::from_str(r#"{"type":"from_the_future","payload":9001}"#).unwrap();
         assert!(matches!(v, AgentEventPayload::Unrecognized));
     }
 
@@ -530,7 +531,7 @@ mod tests {
             text: "he".into(),
         });
         let s = serde_json::to_string(&d).unwrap();
-        assert!(s.contains(r#""kind":"delta""#) && s.contains(r#""type":"text_delta""#));
+        assert!(s.contains(r#""type":"delta""#) && s.contains(r#""delta":"text_delta""#));
         let back: AgentEventPayload = serde_json::from_str(&s).unwrap();
         assert_eq!(s, serde_json::to_string(&back).unwrap());
     }
