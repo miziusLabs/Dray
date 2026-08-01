@@ -1,0 +1,4 @@
+allowBuilds:
+  # Fetches the platform-specific binary vite runs; without it, builds fail on a
+  # clean install.
+  esbuild: true
