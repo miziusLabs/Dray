@@ -1,0 +1,6 @@
+[env]
+# `u64` defaults to `bigint`, which `JSON.parse` never produces — every number
+# on the wire arrives as a JS `number`.
+TS_RS_LARGE_INT = "number"
+# Generated bindings belong with the frontend that imports them.
+TS_RS_EXPORT_DIR = { value = "../src/types", relative = true }

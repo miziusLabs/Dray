@@ -7,7 +7,9 @@
 pub mod claude_code;
 
 use serde::{Deserialize, Serialize};
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+use ts_rs::TS;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum Harness {
     ClaudeCode,

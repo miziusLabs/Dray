@@ -7,8 +7,10 @@
 //! [`Usage::context_window`] is set; neither is universal.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
     pub input_tokens: Option<u64>,
@@ -33,14 +35,16 @@ impl Usage {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct ContextWindow {
     pub used_tokens: u64,
     pub max_tokens: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimit {
     pub used_percent: Option<f64>,

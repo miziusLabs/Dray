@@ -16,6 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
 pub mod usage;
 
@@ -27,7 +28,8 @@ use crate::harness::Harness;
 
 /// One normalized event: an envelope (who, when, what order, which conversation)
 /// wrapping a [`payload`](Self::payload) (what happened).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct AgentEvent {
     pub id: String,
@@ -57,7 +59,8 @@ pub struct AgentEvent {
 /// call that spawned it, so this equals the `call_id` of the corresponding
 /// [`AgentEventPayload::ToolCallStarted`] and is what nests a subagent's work
 /// under it. Codex uses `agent_path`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct Subagent {
     pub id: String,
@@ -69,7 +72,8 @@ pub struct Subagent {
 ///
 /// Permission request/resolve is deliberately absent: no captured fixture shows
 /// their shape, so the variants would be a guess. Add once captured.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -218,7 +222,8 @@ pub enum AgentEventPayload {
 /// event; Codex live emits `turn.completed` (a failed turn is uncaptured so
 /// far). A user-abort outcome likely deserves its own variant once one has been
 /// captured.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
     Success,
@@ -229,7 +234,8 @@ pub enum TurnStatus {
 /// `[text, tool_use, …]` and each block arrives as its own event; Claude Code's
 /// committed events carry no index, so the mapper derives one by counting blocks
 /// per `message_id` in arrival order.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct BlockRef {
     pub message_id: String,
@@ -242,7 +248,8 @@ pub struct BlockRef {
 /// the same [`BlockRef`] supersedes whatever they accumulated. Absent deltas are
 /// the common case — Codex emits none, Claude Code none for subagent output — so
 /// consumers must render correctly without them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(
     tag = "type",
     rename_all = "snake_case",
@@ -274,7 +281,8 @@ pub enum DeltaEvent {
 /// A tool call's identity rides here rather than on [`BlockRef`], which stays a
 /// cheap map key. It arrives before any arguments have streamed, so the UI can
 /// label the call while [`DeltaEvent::InputDelta`] fragments are still landing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -288,7 +296,8 @@ pub enum BlockKind {
 
 /// A rendering hint — which icon and component to use. Nothing depends on this
 /// for correctness, and [`ToolKind::Other`] must always render acceptably.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKind {
     Shell,
@@ -301,7 +310,8 @@ pub enum ToolKind {
     Other,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct ToolResult {
     /// Result content flattened to text; harnesses vary between a bare string
@@ -317,7 +327,8 @@ pub struct ToolResult {
     pub duration_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct FileEdit {
     pub path: String,
@@ -325,7 +336,8 @@ pub struct FileEdit {
     pub unified_diff: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum FileChange {
     Add,
@@ -333,14 +345,16 @@ pub enum FileChange {
     Delete,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum HookPhase {
     Started,
     Finished,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorSource {
     /// The harness reported an error of its own.
@@ -351,7 +365,8 @@ pub enum ErrorSource {
     Process,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct ImageRef {
     pub path: Option<String>,
@@ -360,7 +375,8 @@ pub struct ImageRef {
 }
 
 /// Session-level facts, known at startup.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase", default)]
 pub struct SessionInfo {
     pub cwd: Option<String>,
@@ -374,7 +390,8 @@ pub struct SessionInfo {
 
 /// Shared with the harness parsers rather than duplicated — the wire shape
 /// matches, so they deserialize straight into this.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct McpServer {
     pub name: String,
@@ -384,7 +401,8 @@ pub struct McpServer {
 
 /// Settings that can change mid-session, so they arrive as events rather than
 /// living only on [`SessionInfo`].
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub model: Option<String>,
@@ -399,7 +417,8 @@ pub struct Settings {
 }
 
 /// Permission stance for a session, in roughly increasing order of autonomy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub enum ApprovalPolicy {
     /// Prompt per action, per the harness's own defaults.
