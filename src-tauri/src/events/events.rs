@@ -133,7 +133,7 @@ pub enum AgentEventPayload {
         call_id: String,
         /// The harness's own tool name, verbatim (`"Bash"`, `"apply_patch"`).
         name: String,
-        tool_kind: ToolKind,
+        tool_type: ToolType,
         /// Always an object. JSON-encoded argument strings are parsed here;
         /// unparseable input becomes `{"_unparsed": "…"}` rather than dropped.
         input: Value,
@@ -148,7 +148,7 @@ pub enum AgentEventPayload {
     },
     /// Structured file changes. Codex reports these first-class; Claude Code
     /// does not, so its edits currently surface as ordinary
-    /// [`ToolKind::FileEdit`] calls.
+    /// [`ToolType::FileEdit`] calls.
     FileEdits {
         call_id: Option<String>,
         #[serde(default)]
@@ -259,7 +259,7 @@ pub struct BlockRef {
 pub enum DeltaEvent {
     BlockStart {
         block: BlockRef,
-        block_kind: BlockKind,
+        block_type: BlockType,
     },
     /// Carries *thinking* text too — the shapes are identical and the block's
     /// [`BlockStart`](Self::BlockStart) already said which kind it is, so a
@@ -289,18 +289,18 @@ pub enum DeltaEvent {
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
-pub enum BlockKind {
+pub enum BlockType {
     Text,
     Thinking,
     ToolUse { id: String, name: String },
 }
 
 /// A rendering hint — which icon and component to use. Nothing depends on this
-/// for correctness, and [`ToolKind::Other`] must always render acceptably.
+/// for correctness, and [`ToolType::Other`] must always render acceptably.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
-pub enum ToolKind {
+pub enum ToolType {
     Shell,
     FileRead,
     FileEdit,

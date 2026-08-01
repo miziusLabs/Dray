@@ -41,7 +41,7 @@ block: BlockRef | null, text: string, } | { "type": "reasoning", block: BlockRef
 /**
  * The harness's own tool name, verbatim (`"Bash"`, `"apply_patch"`).
  */
-name: string, toolKind: ToolKind, 
+name: string, toolType: ToolType, 
 /**
  * Always an object. JSON-encoded argument strings are parsed here;
  * unparseable input becomes `{"_unparsed": "…"}` rather than dropped.
@@ -65,19 +65,19 @@ description: string | null, lastTool: string | null, usage: Usage | null, } | { 
 export type ApprovalPolicy = "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions";
 
 /**
- * A tool call's identity rides here rather than on [`BlockRef`], which stays a
- * cheap map key. It arrives before any arguments have streamed, so the UI can
- * label the call while [`DeltaEvent::InputDelta`] fragments are still landing.
- */
-export type BlockKind = { "type": "text" } | { "type": "thinking" } | { "type": "tool_use", id: string, name: string, };
-
-/**
  * Joins streamed content to its committed counterpart. A message is often
  * `[text, tool_use, …]` and each block arrives as its own event; Claude Code's
  * committed events carry no index, so the mapper derives one by counting blocks
  * per `message_id` in arrival order.
  */
 export type BlockRef = { messageId: string, index: number, };
+
+/**
+ * A tool call's identity rides here rather than on [`BlockRef`], which stays a
+ * cheap map key. It arrives before any arguments have streamed, so the UI can
+ * label the call while [`DeltaEvent::InputDelta`] fragments are still landing.
+ */
+export type BlockType = { "type": "text" } | { "type": "thinking" } | { "type": "tool_use", id: string, name: string, };
 
 export type ContextWindow = { usedTokens: number, maxTokens: number, };
 
@@ -92,7 +92,7 @@ export type ContextWindow = { usedTokens: number, maxTokens: number, };
  * variant, so these fields flatten into the payload object alongside its own
  * `type` tag. Two tags of the same name serialize but never deserialize.
  */
-export type DeltaEvent = { "delta": "block_start", block: BlockRef, blockKind: BlockKind, } | { "delta": "text_delta", block: BlockRef, text: string, } | { "delta": "input_delta", block: BlockRef, partialJson: string, } | { "delta": "block_stop", block: BlockRef, };
+export type DeltaEvent = { "delta": "block_start", block: BlockRef, blockType: BlockType, } | { "delta": "text_delta", block: BlockRef, text: string, } | { "delta": "input_delta", block: BlockRef, partialJson: string, } | { "delta": "block_stop", block: BlockRef, };
 
 export type ErrorSource = "harness" | "parser" | "process";
 
@@ -154,12 +154,6 @@ export type Subagent = { id: string,
  */
 label: string | null, };
 
-/**
- * A rendering hint — which icon and component to use. Nothing depends on this
- * for correctness, and [`ToolKind::Other`] must always render acceptably.
- */
-export type ToolKind = "shell" | "file_read" | "file_edit" | "search" | "web" | "mcp" | "subagent_spawn" | "other";
-
 export type ToolResult = { 
 /**
  * Result content flattened to text; harnesses vary between a bare string
@@ -175,6 +169,12 @@ isError: boolean,
  * The full result payload when the harness supplies a structured one.
  */
 structured: JsonValue | null, exitCode: number | null, durationMs: number | null, };
+
+/**
+ * A rendering hint — which icon and component to use. Nothing depends on this
+ * for correctness, and [`ToolType::Other`] must always render acceptably.
+ */
+export type ToolType = "shell" | "file_read" | "file_edit" | "search" | "web" | "mcp" | "subagent_spawn" | "other";
 
 /**
  * How a turn ended. Claude Code reports this as `is_error` on its result

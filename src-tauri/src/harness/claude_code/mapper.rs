@@ -5,8 +5,8 @@
 
 use crate::{
     events::{
-        now_rfc3339, AgentEvent, AgentEventPayload, BlockKind, BlockRef, DeltaEvent, ErrorSource,
-        SessionInfo, Settings, Subagent, ToolKind, ToolResult, TurnStatus, Usage,
+        now_rfc3339, AgentEvent, AgentEventPayload, BlockRef, BlockType, DeltaEvent, ErrorSource,
+        SessionInfo, Settings, Subagent, ToolResult, ToolType, TurnStatus, Usage,
     },
     harness::{
         claude_code::{
@@ -290,10 +290,10 @@ impl Mapper {
                 index,
                 content_block,
             } => {
-                let block_kind = match content_block {
-                    ContentBlock::Text { .. } => BlockKind::Text,
-                    ContentBlock::Thinking { .. } => BlockKind::Thinking,
-                    ContentBlock::ToolUse { id, name, .. } => BlockKind::ToolUse { id, name },
+                let block_type = match content_block {
+                    ContentBlock::Text { .. } => BlockType::Text,
+                    ContentBlock::Thinking { .. } => BlockType::Thinking,
+                    ContentBlock::ToolUse { id, name, .. } => BlockType::ToolUse { id, name },
                     // Skip the preview rather than guess a kind; the committed
                     // `assistant` event still carries the content.
                     ContentBlock::Unrecognized => return Ok(None),
@@ -302,7 +302,7 @@ impl Mapper {
                 let block = self.block_ref(index)?;
                 Ok(Some(AgentEventPayload::Delta(DeltaEvent::BlockStart {
                     block,
-                    block_kind,
+                    block_type,
                 })))
             }
 
@@ -379,7 +379,7 @@ impl Mapper {
             ContentBlock::ToolUse {
                 id, name, input, ..
             } => AgentEventPayload::ToolCallStarted {
-                tool_kind: tool_kind(&name),
+                tool_type: tool_type(&name),
                 call_id: id,
                 name,
                 input,
@@ -548,17 +548,17 @@ fn subagent(parent_tool_use_id: Option<String>, label: Option<String>) -> Option
 /// Classify a tool by its Claude Code name.
 ///
 /// A rendering hint only — which icon and component the UI reaches for — so an
-/// unrecognized name falls back to [`ToolKind::Other`] rather than failing.
-fn tool_kind(name: &str) -> ToolKind {
+/// unrecognized name falls back to [`ToolType::Other`] rather than failing.
+fn tool_type(name: &str) -> ToolType {
     match name {
-        "Bash" | "BashOutput" | "KillShell" => ToolKind::Shell,
-        "Read" | "NotebookRead" => ToolKind::FileRead,
-        "Write" | "Edit" | "NotebookEdit" => ToolKind::FileEdit,
-        "Grep" | "Glob" => ToolKind::Search,
-        "WebFetch" | "WebSearch" => ToolKind::Web,
-        "Agent" | "Task" => ToolKind::SubagentSpawn,
-        name if name.starts_with("mcp__") => ToolKind::Mcp,
-        _ => ToolKind::Other,
+        "Bash" | "BashOutput" | "KillShell" => ToolType::Shell,
+        "Read" | "NotebookRead" => ToolType::FileRead,
+        "Write" | "Edit" | "NotebookEdit" => ToolType::FileEdit,
+        "Grep" | "Glob" => ToolType::Search,
+        "WebFetch" | "WebSearch" => ToolType::Web,
+        "Agent" | "Task" => ToolType::SubagentSpawn,
+        name if name.starts_with("mcp__") => ToolType::Mcp,
+        _ => ToolType::Other,
     }
 }
 
@@ -705,13 +705,13 @@ mod tests {
     }
 
     #[test]
-    fn classifies_tool_kinds_by_name() {
-        assert_eq!(tool_kind("Bash"), ToolKind::Shell);
-        assert_eq!(tool_kind("Read"), ToolKind::FileRead);
-        assert_eq!(tool_kind("Edit"), ToolKind::FileEdit);
-        assert_eq!(tool_kind("Agent"), ToolKind::SubagentSpawn);
-        assert_eq!(tool_kind("mcp__supabase__query"), ToolKind::Mcp);
-        assert_eq!(tool_kind("SomethingNew"), ToolKind::Other);
+    fn classifies_tool_types_by_name() {
+        assert_eq!(tool_type("Bash"), ToolType::Shell);
+        assert_eq!(tool_type("Read"), ToolType::FileRead);
+        assert_eq!(tool_type("Edit"), ToolType::FileEdit);
+        assert_eq!(tool_type("Agent"), ToolType::SubagentSpawn);
+        assert_eq!(tool_type("mcp__supabase__query"), ToolType::Mcp);
+        assert_eq!(tool_type("SomethingNew"), ToolType::Other);
     }
 
     /// Every `user` event in the fixture is a tool result, and each one must
