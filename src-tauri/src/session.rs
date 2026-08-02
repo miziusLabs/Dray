@@ -20,7 +20,7 @@ use std::{
         Arc,
     },
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tokio::{
     io::AsyncWriteExt,
     process::{Child, ChildStdin},
@@ -54,7 +54,7 @@ impl SessionManager {
         if is_new_session {
             let mut session =
                 Session::init(session_id, harness, model, effort, is_new_session, app).await?;
-            session.send_msg(prompt).await?;
+            session.send_msg(prompt, app).await?;
             self.sessions
                 .lock()
                 .await
@@ -65,13 +65,13 @@ impl SessionManager {
 
         let mut sessions_guard = self.sessions.lock().await;
         if let Some(s) = sessions_guard.get_mut(session_id) {
-            s.send_msg(prompt).await?;
+            s.send_msg(prompt, app).await?;
             return Ok(());
         }
 
         let mut session =
             Session::init(session_id, harness, model, effort, is_new_session, app).await?;
-        session.send_msg(prompt).await?;
+        session.send_msg(prompt, app).await?;
         sessions_guard.insert(session_id.to_string(), session);
         Ok(())
     }
@@ -105,7 +105,7 @@ impl Session {
         }
     }
 
-    pub async fn send_msg(&mut self, prompt: &str) -> Result<()> {
+    pub async fn send_msg(&mut self, prompt: &str, app: &AppHandle) -> Result<()> {
         let seq = self.seq.fetch_add(1, Relaxed);
 
         let payload = AgentEventPayload::UserMessage {
@@ -124,6 +124,8 @@ impl Session {
             payload,
             raw: None,
         };
+
+        app.emit("agent_event", &agent_event)?;
 
         let mut events_guard = self.events.lock().await;
         events_guard.push(agent_event.clone());

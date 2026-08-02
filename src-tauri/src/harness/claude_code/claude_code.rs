@@ -117,7 +117,7 @@ async fn read_stdout(
             Ok(cc_event) => {
                 // A line that only advances mapper state emits nothing.
                 if let Some(agent_event) = mapper.map(cc_event)? {
-                    app.emit("events", &agent_event)?; //emit
+                    app.emit("agent_event", &agent_event)?; //emit
                     events.lock().await.push(agent_event.clone()); //update in mem
                     append_session_event(session_id, agent_event).await?; // write to file
                 }

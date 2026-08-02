@@ -4,6 +4,7 @@ import Chat from "./components/Chat";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import ChatInput from "./components/ChatInput";
+import type { AgentEvent } from "./types/events";
 
 
 type Harness = "claude_code" | "codex";
@@ -15,7 +16,7 @@ export type Session = {
   model: string,
   effort: string,
   status: SessionStatus,
-  events: string[],
+  events: Array<AgentEvent>,
 }
 
 function App() {
@@ -33,6 +34,7 @@ function App() {
       sessionId = crypto.randomUUID();
       setSelectedSessionId(sessionId);
     }
+
 
     if(isNewSession){
       const ns: Session = {
@@ -59,8 +61,21 @@ function App() {
 
   useEffect(() => {
     const setupListener = async () => {
-      const unlisten = await listen("events", (event) => {
-        console.log(event);
+      const unlisten = await listen<AgentEvent>("agent_event", (event) => {
+        // console.log(event);
+
+        const agentEvent = event.payload;
+        console.log("agent event", agentEvent);
+
+
+          setSessions((prev) =>
+            (prev ?? []).map((s) =>
+              s.session_id === agentEvent.sessionId
+                ? { ...s, events: [...s.events, agentEvent] }
+                : s,
+            ),
+          );
+
       });
       return unlisten;
     };
@@ -70,7 +85,7 @@ function App() {
     return () => {
       listenerPromise.then((unlisten) => unlisten());
     };
-  }, [selectedSessionId]);
+  }, []);
   
 
   return (
