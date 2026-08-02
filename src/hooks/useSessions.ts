@@ -94,11 +94,11 @@ useEffect(() => {
 
              } else if(payload.delta == "text_delta") {
                 setStreamingContentBlock((prev) => 
-                    (prev ?? []).map((b) => b.index == payload.block.index ? {...b, type: "text", text: b.text += payload.text} : b)
+                    (prev ?? []).map((b) => b.index == payload.block.index ? {...b, type: "text", text: b.text + payload.text} : b)
                  )
             } else if(payload.delta == "input_delta") {
                 setStreamingContentBlock((prev) => 
-                    (prev ?? []).map((b) => b.index == payload.block.index ? {...b, type: "tool_use", text: b.text += payload.partialJson} : b)
+                    (prev ?? []).map((b) => b.index == payload.block.index ? {...b, type: "tool_use", text: b.text + payload.partialJson} : b)
                  )
             } else if (payload.delta == "block_stop") {
                 setStreamingContentBlock([])
