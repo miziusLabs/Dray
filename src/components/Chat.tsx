@@ -1,20 +1,23 @@
-import { Session } from "../App";
+import { Session, StreamingBlock } from "../hooks/useSessions";
 import { AgentEvent } from "../types/events";
 
 export default function Chat(
   { sessionId,
     session,
+    streamingBlock
   }:
   { sessionId: string | null,
     session: Session | null,
+    streamingBlock: StreamingBlock[],
   }) {
     const events: AgentEvent[] | null = session?.events ? session?.events : null;
     const id = sessionId;
  
 
   return (
-    <div className="flex mx-24 my-24">
-      <div className="flex flex-row gap-2">
+    <div className="flex flex-col items-start mx-24 my-24">
+      <p>Session id: {id}</p>
+      <div className="flex flex-col items-start gap-2">
         {events?.map((event) => {
           let text: string | null = null;
 
@@ -33,9 +36,11 @@ export default function Chat(
 
             if (text == null) return null;
 
-            return <p key={event.id}>{text}</p>;
+            return <p key={event.id} className="text-left">{text}</p>;
   })}
-        Session id: {id}
+    
+    {streamingBlock?.map((b) => <p key={b.index} className="text-left">{b.text}</p>)}
+
       </div>
    
     </div>
