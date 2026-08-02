@@ -1,5 +1,5 @@
 use crate::events::AgentEvent;
-use crate::fs::append_session_event;
+use crate::fs::{append_session_event, next_seq_by_session_id};
 use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::session::Session;
 use anyhow::{Context, Result};
@@ -58,7 +58,13 @@ pub async fn init(
     let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let stdout_events = events.clone();
 
-    let seq = Arc::new(AtomicU64::new(0));
+    let seq_start: u64 = if is_new_session {
+        0
+    } else {
+        next_seq_by_session_id(session_id).await?
+    };
+
+    let seq = Arc::new(AtomicU64::new(seq_start));
     let stdout_seq = seq.clone();
 
     let stdout_session_id = session_id.to_string();

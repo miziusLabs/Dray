@@ -1,6 +1,6 @@
 use std::{path::PathBuf, vec};
 
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tokio::fs;
@@ -115,9 +115,15 @@ pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> 
 pub async fn get_session_by_id(session_id: &str) -> Result<Vec<AgentEvent>> {
     let path = get_sessions_dir().await?.join(session_id);
 
-    let buffer = fs::read_to_string(&path)
-        .await
-        .context("could not open session file")?;
+    let buffer = match fs::read_to_string(&path).await {
+        Ok(buf) => buf,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e).context("could not open session file"),
+    };
+
+    if buffer.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let events = serde_json::from_str::<Vec<AgentEvent>>(&buffer)?;
 
@@ -136,4 +142,9 @@ pub async fn append_session_event(session_id: &str, event: AgentEvent) -> Result
         .context("failed to append event")?;
 
     Ok(())
+}
+
+pub async fn next_seq_by_session_id(session_id: &str) -> Result<u64> {
+    let events = get_session_by_id(session_id).await?;
+    Ok(events.last().map(|e| e.seq + 1).unwrap_or(0))
 }
