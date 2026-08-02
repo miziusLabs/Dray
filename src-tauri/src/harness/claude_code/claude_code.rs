@@ -1,4 +1,5 @@
 use crate::events::AgentEvent;
+use crate::fs::append_session_event;
 use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::session::Session;
 use anyhow::{Context, Result};
@@ -60,9 +61,13 @@ pub async fn init(
     let seq = Arc::new(AtomicU64::new(0));
     let stdout_seq = seq.clone();
 
+    let stdout_session_id = session_id.to_string();
+
     let app = app.clone();
     tokio::spawn(async move {
-        if let Err(error) = read_stdout(stdout, stdout_events, stdout_seq, &app).await {
+        let session_id = stdout_session_id;
+        if let Err(error) = read_stdout(stdout, &session_id, stdout_events, stdout_seq, &app).await
+        {
             eprintln!("Failed to read Claude stdout: {error}");
         }
     });
@@ -87,6 +92,7 @@ pub async fn init(
 
 async fn read_stdout(
     stdout: ChildStdout,
+    session_id: &str,
     events: Arc<Mutex<Vec<AgentEvent>>>,
     stdout_seq: Arc<AtomicU64>,
     app: &AppHandle,
@@ -105,8 +111,9 @@ async fn read_stdout(
             Ok(cc_event) => {
                 // A line that only advances mapper state emits nothing.
                 if let Some(agent_event) = mapper.map(cc_event)? {
-                    app.emit("events", &agent_event)?;
-                    events.lock().await.push(agent_event);
+                    app.emit("events", &agent_event)?; //emit
+                    events.lock().await.push(agent_event.clone()); //update in mem
+                    append_session_event(session_id, agent_event).await?; // write to file
                 }
             }
             Err(err) => {
@@ -129,50 +136,3 @@ async fn read_stderr(stderr: ChildStderr) -> Result<()> {
 
     Ok(())
 }
-
-// fn event_summary(event: &ClaudeCodeEvent) -> String {
-//     match event {
-//         ClaudeCodeEvent::System(system) => match system {
-//             parser::SystemEvent::Init { model, cwd, .. } => {
-//                 format!("system/init model={model} cwd={cwd}")
-//             }
-//             parser::SystemEvent::Status { status, .. } => {
-//                 format!("system/status status={status}")
-//             }
-//             parser::SystemEvent::HookStarted { hook_name, .. } => {
-//                 format!("system/hook_started hook={hook_name}")
-//             }
-//             parser::SystemEvent::HookResponse {
-//                 hook_name, outcome, ..
-//             } => format!("system/hook_response hook={hook_name} outcome={outcome}"),
-//         },
-//         ClaudeCodeEvent::StreamEvent { event, ttft_ms, .. } => {
-//             let kind = event.get("type").and_then(|v| v.as_str()).unwrap_or("?");
-//             match ttft_ms {
-//                 Some(ms) => format!("stream_event type={kind} ttft_ms={ms}"),
-//                 None => format!("stream_event type={kind}"),
-//             }
-//         }
-//         ClaudeCodeEvent::Assistant { message, .. } => {
-//             let preview = message
-//                 .pointer("/content/0/text")
-//                 .and_then(|v| v.as_str())
-//                 .unwrap_or("");
-//             let preview: String = preview.chars().take(80).collect();
-//             format!("assistant text={preview:?}")
-//         }
-//         ClaudeCodeEvent::Result(result) => match result {
-//             parser::ResultEvent::Success {
-//                 result,
-//                 duration_ms,
-//                 total_cost_usd,
-//                 ..
-//             } => {
-//                 let preview: String = result.chars().take(80).collect();
-//                 format!(
-//                     "result/success duration_ms={duration_ms} cost_usd={total_cost_usd} text={preview:?}"
-//                 )
-//             }
-//         },
-//     }
-// }

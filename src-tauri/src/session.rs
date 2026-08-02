@@ -1,5 +1,6 @@
 use crate::{
     events::{now_rfc3339, AgentEvent, AgentEventPayload},
+    fs::append_session_event,
     harness::{
         claude_code::{self, ClaudeCodeEvent},
         Harness::ClaudeCode,
@@ -125,8 +126,10 @@ impl Session {
         };
 
         let mut events_guard = self.events.lock().await;
-        events_guard.push(agent_event);
+        events_guard.push(agent_event.clone());
         drop(events_guard);
+
+        append_session_event(&self.id, agent_event).await?;
 
         let prompt = json!({"type":"user","message":{"role":"user","content": prompt}});
 
