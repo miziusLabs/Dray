@@ -2,8 +2,13 @@ use std::{path::PathBuf, vec};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
-use tokio::fs;
+use tokio::{
+    fs,
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::Mutex,
+};
 
 use crate::{events::AgentEvent, session::Harness};
 
@@ -39,6 +44,8 @@ pub struct SessionIndexByProject {
     pub indexes: Vec<SessionIndexItem>,
 }
 
+static INDEX_LOCK: Mutex<()> = Mutex::const_new(());
+
 pub async fn get_app_dir(app: &AppHandle) -> Result<PathBuf> {
     let path = app.path().app_data_dir()?;
     fs::create_dir_all(&path).await?;
@@ -65,11 +72,11 @@ pub async fn get_sessions_dir() -> Result<PathBuf> {
 pub async fn list_sessions() -> Result<Vec<SessionIndexItem>> {
     let path = get_sessions_dir().await?.join("index.json");
 
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-
-    let contents = fs::read_to_string(path).await?;
+    let contents = match fs::read_to_string(path).await {
+        Ok(v) => v,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e).context("could not open session file"),
+    };
 
     if contents.is_empty() {
         return Ok(Vec::new());
@@ -99,21 +106,28 @@ pub async fn list_sessions_by_project() -> Result<Vec<SessionIndexByProject>> {
 }
 
 pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> {
+    let _guard = INDEX_LOCK.lock().await;
+
     let mut sessions = list_sessions().await?;
     sessions.push(session);
 
     let path = get_sessions_dir().await?.join("index.json");
     let contents = serde_json::to_string(&sessions)?;
+    let tmp = path.with_extension("json.tmp");
 
-    fs::write(path, contents)
+    fs::write(&tmp, contents)
         .await
         .context("failed to write session index")?;
+
+    fs::rename(&tmp, &path)
+        .await
+        .context("failed to rename session index")?;
 
     Ok(())
 }
 
 pub async fn get_session_by_id(session_id: &str) -> Result<Vec<AgentEvent>> {
-    let path = get_sessions_dir().await?.join(session_id);
+    let path = get_session_path(session_id).await?;
 
     let buffer = match fs::read_to_string(&path).await {
         Ok(buf) => buf,
@@ -121,30 +135,56 @@ pub async fn get_session_by_id(session_id: &str) -> Result<Vec<AgentEvent>> {
         Err(e) => return Err(e).context("could not open session file"),
     };
 
-    if buffer.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let events = serde_json::from_str::<Vec<AgentEvent>>(&buffer)?;
+    let events = buffer
+        .lines()
+        .map(serde_json::from_str::<AgentEvent>)
+        .collect::<Result<Vec<_>, _>>()
+        .context("malformed session file")?;
 
     Ok(events)
 }
 
 pub async fn append_session_event(session_id: &str, event: AgentEvent) -> Result<()> {
-    let mut events = get_session_by_id(session_id).await?;
-    events.push(event);
+    let path = get_session_path(session_id).await?;
 
-    let contents = serde_json::to_string(&events)?;
-
-    let path = get_sessions_dir().await?.join(session_id);
-    fs::write(path, contents)
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
         .await
-        .context("failed to append event")?;
+        .context("failed to open session file")?;
+
+    let line = format!("{}\n", serde_json::to_string(&event)?);
+
+    file.write_all(line.as_bytes()).await?;
 
     Ok(())
 }
 
 pub async fn next_seq_by_session_id(session_id: &str) -> Result<u64> {
-    let events = get_session_by_id(session_id).await?;
-    Ok(events.last().map(|e| e.seq + 1).unwrap_or(0))
+    let path = get_session_path(session_id).await?;
+
+    let buf = match fs::read_to_string(&path).await {
+        Ok(buf) => buf,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e).context("could not read session file"),
+    };
+
+    let seq = match buf.lines().next_back() {
+        Some(v) => {
+            let json: Value = serde_json::from_str(v)?;
+            json.get("seq").and_then(|s| s.as_u64()).unwrap_or(0)
+        }
+        None => 0,
+    };
+
+    Ok(seq + 1)
+}
+
+pub async fn get_session_path(session_id: &str) -> Result<PathBuf> {
+    let path = get_sessions_dir()
+        .await?
+        .join(format!("{session_id}.jsonl"));
+
+    Ok(path)
 }

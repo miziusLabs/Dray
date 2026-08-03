@@ -113,19 +113,32 @@ async fn read_stdout(
         if line.trim().is_empty() {
             continue;
         }
-        match parser::parse_line(&line) {
-            Ok(cc_event) => {
-                // A line that only advances mapper state emits nothing.
-                if let Some(agent_event) = mapper.map(cc_event)? {
-                    app.emit("agent_event", &agent_event)?; //emit
-                    events.lock().await.push(agent_event.clone()); //update in mem
-                    append_session_event(session_id, agent_event).await?; // write to file
-                }
-            }
+
+        let claude_event = match parser::parse_line(&line) {
+            Ok(ev) => ev,
             Err(err) => {
-                eprintln!("[parse err] {err}");
-                eprintln!("[parse err] raw line: {line}");
+                eprintln!("[claude parse err] {err}\n[parse err] raw line: {line}");
+                continue;
             }
+        };
+
+        let agent_event = match mapper.map(claude_event) {
+            Ok(Some(ev)) => ev,
+            Ok(None) => continue,
+            Err(err) => {
+                eprintln!("[claude map err] {err}");
+                continue;
+            }
+        };
+
+        if let Err(err) = app.emit("agent_event", &agent_event) {
+            eprintln!("[claude emit err] {err}");
+        }
+
+        events.lock().await.push(agent_event.clone());
+
+        if let Err(err) = append_session_event(session_id, agent_event).await {
+            eprintln!("[claude write err] {err}");
         }
     }
 
