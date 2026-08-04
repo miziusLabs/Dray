@@ -1,10 +1,10 @@
 use crate::{
     events::{now_rfc3339, AgentEvent, AgentEventPayload},
-    fs::append_session_event,
-    harness::{
-        claude_code::{self, ClaudeCodeEvent},
-        Harness::ClaudeCode,
+    fs::{
+        append_session_event, append_session_index_item, resolve_worktree_name, worktree_path,
+        SessionIndexItem,
     },
+    harness::{claude_code, Harness::ClaudeCode},
 };
 use anyhow::{bail, Result};
 use serde_json::json;
@@ -48,12 +48,47 @@ impl SessionManager {
         harness: Harness,
         model: &str,
         effort: &str,
+        cwd: &str,
+        use_worktree: bool,
+        worktree_name: Option<&str>,
         is_new_session: bool,
         app: &AppHandle,
     ) -> Result<()> {
         if is_new_session {
-            let mut session =
-                Session::init(session_id, harness, model, effort, is_new_session, app).await?;
+            let worktree_name = if use_worktree {
+                Some(resolve_worktree_name(cwd, worktree_name)?)
+            } else {
+                None
+            };
+
+            let session_cwd = match &worktree_name {
+                Some(name) => worktree_path(cwd, name),
+                None => cwd.to_string(),
+            };
+
+            // Indexed before the process spawns, so a session that fails to
+            // start is still visible rather than vanishing without a trace.
+            let item = SessionIndexItem::new(
+                session_id,
+                harness,
+                &session_cwd,
+                cwd,
+                worktree_name.as_deref(),
+                prompt,
+            );
+            append_session_index_item(item).await?;
+
+            let mut session = Session::init(
+                session_id,
+                harness,
+                model,
+                effort,
+                cwd,
+                worktree_name.as_deref(),
+                is_new_session,
+                app,
+            )
+            .await?;
             session.send_msg(prompt, app).await?;
             self.sessions
                 .lock()
@@ -69,8 +104,19 @@ impl SessionManager {
             return Ok(());
         }
 
-        let mut session =
-            Session::init(session_id, harness, model, effort, is_new_session, app).await?;
+        // Resume spawns straight into the recorded `cwd` — the worktree already
+        // exists, and passing `-w` again would try to recreate it.
+        let mut session = Session::init(
+            session_id,
+            harness,
+            model,
+            effort,
+            cwd,
+            None,
+            is_new_session,
+            app,
+        )
+        .await?;
         session.send_msg(prompt, app).await?;
         sessions_guard.insert(session_id.to_string(), session);
         Ok(())
@@ -95,11 +141,22 @@ impl Session {
         harness: Harness,
         model: &str,
         effort: &str,
+        cwd: &str,
+        worktree_name: Option<&str>,
         is_new_session: bool,
         app: &AppHandle,
     ) -> Result<Session> {
         if let Harness::ClaudeCode = harness {
-            claude_code::init(session_id, model, effort, is_new_session, app).await
+            claude_code::init(
+                session_id,
+                model,
+                effort,
+                cwd,
+                worktree_name,
+                is_new_session,
+                app,
+            )
+            .await
         } else {
             bail!("unsupported harness {harness:?}")
         }

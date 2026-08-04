@@ -12,9 +12,21 @@ export type Session = {
   harness: Harness,
   model: string,
   effort: string,
+  /// Where the agent runs — the worktree path for a worktree session.
+  cwd: string,
+  /// Repo root the user picked; `cwd` for a normal session.
+  projectPath: string,
+  worktreeName: string | null,
   status: SessionStatus,
   events: Array<AgentEvent>,
 }
+
+// Until there's a project picker, every session runs here.
+const DEFAULT_CWD = "/Users/yogesh/Documents/ade";
+
+// `claude -w <name>` puts the tree here and names its branch `worktree-<name>`.
+const worktreePath = (projectPath: string, name: string) =>
+  `${projectPath}/.claude/worktrees/${name}`;
 
 export type StreamingBlock = {
     index: number,
@@ -30,7 +42,10 @@ export function useSessions() {
 
 const selectedSession = selectedSessionId && sessions ? sessions.find((s) => s.session_id == selectedSessionId) ?? null : null;
 
-const handleSendMsg = async (message: string) => {
+const handleSendMsg = async (
+  message: string,
+  opts?: { projectPath?: string; useWorktree?: boolean; worktreeName?: string | null },
+) => {
 
   let sessionId = selectedSessionId;
   const isNewSession = !sessionId;
@@ -40,12 +55,27 @@ const handleSendMsg = async (message: string) => {
   }
 
 
+  const existing = sessions.find((s) => s.session_id === sessionId);
+  const projectPath = opts?.projectPath ?? existing?.projectPath ?? DEFAULT_CWD;
+  const useWorktree = isNewSession && (opts?.useWorktree ?? false);
+  const worktreeName = useWorktree ? opts?.worktreeName ?? null : null;
+
+  
+  const cwd = isNewSession ? projectPath : existing?.cwd ?? projectPath;
+
   if(isNewSession){
     const ns: Session = {
       session_id: sessionId,
       harness: "claude_code",
       model: "haiku",
       effort: "low",
+      // The backend names an unnamed worktree, so the real cwd is only known
+      // once `init` reports it.
+      cwd: useWorktree && worktreeName
+        ? worktreePath(projectPath, worktreeName)
+        : projectPath,
+      projectPath,
+      worktreeName,
       status: "in_progress",
       events: []
     }
@@ -58,6 +88,9 @@ const handleSendMsg = async (message: string) => {
     harness: "claude_code",
     model: "haiku",
     effort: "low",
+    cwd,
+    useWorktree,
+    worktreeName,
     isNewSession,
   });
 

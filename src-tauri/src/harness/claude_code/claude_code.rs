@@ -20,6 +20,8 @@ pub async fn init(
     session_id: &str,
     model: &str,
     effort: &str,
+    cwd: &str,
+    worktree_name: Option<&str>,
     is_new_session: bool,
     app: &AppHandle,
 ) -> Result<Session> {
@@ -43,8 +45,16 @@ pub async fn init(
         args.extend(["--resume", session_id]);
     };
 
+    // Only on creation: the CLI resolves the tree relative to its own cwd, so
+    // the child must start at the project root even though the session's
+    // recorded `cwd` is the worktree it ends up in.
+    if let Some(name) = worktree_name {
+        args.extend(["-w", name]);
+    }
+
     let mut child = Command::new("claude")
         .args(args)
+        .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
