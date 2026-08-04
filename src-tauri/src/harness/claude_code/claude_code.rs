@@ -1,4 +1,4 @@
-use crate::events::AgentEvent;
+use crate::events::{AgentEvent, AgentEventPayload};
 use crate::fs::{append_session_event, next_seq_by_session_id};
 use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::session::Session;
@@ -143,6 +143,11 @@ async fn read_stdout(
 
         if let Err(err) = app.emit("agent_event", &agent_event) {
             eprintln!("[claude emit err] {err}");
+        }
+
+        // Deltas are emitted for the live view but never retained
+        if matches!(agent_event.payload, AgentEventPayload::Delta(_)) {
+            continue;
         }
 
         events.lock().await.push(agent_event.clone());

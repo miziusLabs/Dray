@@ -10,8 +10,8 @@ type SessionStatus = "idle" | "in_progress" | "completed";
 export type Session = {
   session_id: string,
   harness: Harness,
-  model: string,
-  effort: string,
+  model: string | null,
+  effort: string | null,
   /// Where the agent runs — the worktree path for a worktree session.
   cwd: string,
   /// Repo root the user picked; `cwd` for a normal session.
@@ -126,6 +126,29 @@ const handleSendMsg = async (
 
 };
 
+const handleSelectSessionIndexItem = async (indexItem: SessionIndexItem) => {
+  setSelectedSessionId(indexItem.sessionId);
+
+  const existingSession = sessions.find((s) => s.session_id == indexItem.sessionId);
+  if (existingSession) {
+    return;
+  }
+
+  const events = await invoke<AgentEvent[]>("get_session_by_id", { sessionId: indexItem.sessionId });
+  const ns: Session = {
+    session_id: indexItem.sessionId,
+    harness: indexItem.harness,
+    model: null,
+    effort: null,
+    cwd: indexItem.cwd,
+    projectPath: indexItem.projectPath,
+    worktreeName: indexItem.worktreeName,
+    status: "idle",
+    events,
+  }
+  setSessions((prev) => prev ? [...prev, ns] : [ns]);
+}
+
 
 
 useEffect(() => {
@@ -192,6 +215,6 @@ useEffect(() => {
   };
 }, []);
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, handleSendMsg};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, handleSendMsg, handleSelectSessionIndexItem};
 
 }
