@@ -31,18 +31,20 @@ That is the real entry point — it builds and runs the Rust app and starts Vite
 
 - `pnpm dev` — frontend only, port 1420 (`strictPort: true`, so a busy port is a hard failure, not a fallback). `invoke` calls do nothing in a plain browser, so this is only useful for pure-CSS/layout work.
 - `pnpm build` — `tsc && vite build`. `pnpm tauri build` for a bundled app.
-- `cd src-tauri && cargo test` — the only tests in the repo (13: parser + event-model compatibility). Single test: `cargo test parses_complex_fixture`.
+- `cd src-tauri && cargo test` — the only tests in the repo (52: parser + mapper + event-model compatibility). Single test: `cargo test parses_complex_fixture`.
 - `cd src-tauri && cargo check` — fast type check without linking the whole app.
 
 ## Architecture: the event pipeline
 
 Messages flow one way out to the CLI and one way back in, and the return path is what most of the Rust code exists to serve. Tracing it end to end:
 
-1. **`src/App.tsx`** calls `invoke("send_msg", {...})` with camelCase keys (`sessionId`, `isNewSession`); Tauri maps them onto the snake_case params of the command in [lib.rs:9](src-tauri/src/lib.rs:9). The frontend mints the session UUID with `crypto.randomUUID()` — Claude Code adopts an id chosen by the app rather than the other way round.
-2. **`SessionManager`** ([session.rs](src-tauri/src/session.rs)) owns a `Mutex<HashMap<String, Session>>`. On send it spawns a process for a new session, reuses the live one when present, and re-inits from `--resume` when the id is known but its process is gone.
-3. **`claude_code::init`** ([claude_code.rs](src-tauri/src/harness/claude_code/claude_code.rs)) spawns `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages`, adding `--session-id` for new sessions or `--resume` for existing ones.
-4. Two `tokio::spawn` tasks drain stdout and stderr. Each non-empty stdout line goes through `parser::parse_line` → `Mapper::map` → `app.emit("events", &agent_event)`, with a copy pushed onto `Session.events`.
-5. **`src/App.tsx`** listens for `"events"`.
+1. **`useSessions`** ([useSessions.ts](src/hooks/useSessions.ts)) calls `invoke("send_msg", {...})` with camelCase keys (`sessionId`, `isNewSession`); Tauri maps them onto the snake_case params of the command in [lib.rs](src-tauri/src/lib.rs). The frontend mints the session UUID with `crypto.randomUUID()` — Claude Code adopts an id chosen by the app rather than the other way round.
+2. **`SessionManager`** ([session.rs](src-tauri/src/session.rs)) owns a `Mutex<HashMap<String, Session>>`. On send it spawns a process for a new session, reuses the live one when present, and re-inits from `--resume` when the id is known but its process is gone. New sessions are written to the index before the spawn, so one that fails to start is still visible.
+3. **`claude_code::init`** ([claude_code.rs](src-tauri/src/harness/claude_code/claude_code.rs)) spawns `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages`, adding `--session-id` for new sessions or `--resume` for existing ones, and `-w <name>` on creation for a worktree session.
+4. Two `tokio::spawn` tasks drain stdout and stderr. Each non-empty stdout line goes through `parser::parse_line` → `Mapper::map` → `app.emit("agent_event", &agent_event)`, with a copy pushed onto `Session.events` and appended to the session's JSONL.
+5. **`useSessions`** listens for `"agent_event"`, routing deltas into `streamingContentBlock` and everything else onto the session's `events`. `Chat.tsx` renders both.
+
+**Worktrees.** `claude -w <name>` puts the tree at `<project>/.claude/worktrees/<name>` on branch `worktree-<name>`. The child must spawn at the **project root** — a directory that doesn't exist yet can't be `chdir`ed into, and the CLI creates the tree and moves itself in after launch. So the spawn dir and the session's recorded `cwd` differ for worktree sessions, and only the latter points at the tree.
 
 ## The normalized event model
 
@@ -57,17 +59,26 @@ Per-harness code lives under `harness/<name>/` with a deliberate seam: `parser.r
 
 Module entry files are named after their directory (`events/events.rs`, `harness/harness.rs`) rather than `mod.rs`, declared with `#[path]`. Only entry files need the attribute.
 
-Prompts travel the other direction as a single JSON line written to the child's stdin ([session.rs:97](src-tauri/src/session.rs:97)).
+Prompts travel the other direction as a single JSON line written to the child's stdin ([session.rs:193](src-tauri/src/session.rs:193)).
+
+## Persistence
+
+Everything lives under `~/.automedon/sessions/` ([fs.rs](src-tauri/src/fs.rs)):
+
+- **`<session-id>.jsonl`** — one mapped `AgentEvent` per line, append-only. Single writer per file, so `O_APPEND` alone is enough; no lock. On resume, `next_seq_by_session_id` tail-reads the last line to continue the counter.
+- **`index.json`** — one `SessionIndexItem` per session, holding both `cwd` (where the agent runs) and `project_path` (the repo root, used as the grouping key so worktree sessions still list under their project). Rewritten whole, so it takes a process-wide lock and lands via write-temp + `rename`.
+
+The asymmetry is the point: appending to a private file is atomic, rewriting a shared one is not.
 
 ## Parser conventions
 
-[parser.rs](src-tauri/src/claude_code/parser.rs) is the file most likely to need extending, and it has firm conventions:
+[parser.rs](src-tauri/src/harness/claude_code/parser.rs) is the file most likely to need extending, and it has firm conventions:
 
 - `ClaudeCodeEvent` is an externally-tagged enum on `type` (`#[serde(tag = "type", rename_all = "snake_case")]`). `SystemEvent` and `ResultEvent` nest a **second** tag on `subtype`. Adding a new CLI event means adding a variant at the correct level.
 - `stream_event.event` is fully modeled as `StreamFrame`. Every stream enum carries a `#[serde(other)]` catch-all so one unknown frame type doesn't cost the whole line.
 - Genuinely volatile payloads (`message`, `usage`) stay as `serde_json::Value`.
 - Fields the CLI may omit need `#[serde(default)]`. CamelCase wire fields need an explicit rename — see `permissionMode`, `apiKeySource`, `modelUsage`.
-- **Parse failures are swallowed.** `read_stdout` logs to stderr and continues rather than propagating, so a schema mismatch presents as a missing UI update, not an error. Check stderr for `[parse err]` when events go missing. (Better would be emitting an `Error` event — not done yet.)
+- **Failures are swallowed, per line.** `read_stdout` logs and continues rather than propagating — one bad line can't kill the loop — so a schema mismatch presents as a missing UI update, not an error. Grep stderr for `[claude parse err]`, `[claude map err]`, `[claude emit err]`, `[claude write err]` when events go missing. (Better would be emitting an `Error` event — not done yet.)
 - `McpServer` and `ApprovalPolicy`/`PermissionMode` are defined once in `events` and re-exported by the parser. Don't reintroduce per-harness copies.
 
 ## Test fixtures
@@ -75,7 +86,8 @@ Prompts travel the other direction as a single JSON line written to the child's 
 Tests use `include_str!` against real captured CLI output under `harness/<name>/fixtures/`:
 
 - `claude_code/fixtures/printed.jsonl` — small smoke fixture.
-- `claude_code/fixtures/complex.jsonl` — 176 lines with subagent/task traffic. Assertions hard-code exact counts (177 events, 30 `User`, 29 `TaskProgress`), so editing this file breaks tests by design.
+- `claude_code/fixtures/complex.jsonl` — 176 lines with subagent/task traffic. Assertions hard-code exact counts, so editing this file breaks tests by design.
+- `claude_code/fixtures/multi_turn.jsonl`, `interrupted.jsonl` — turn boundaries and a mid-turn interrupt.
 - `codex/fixtures/rollout.jsonl` — a session *replay* log, not the live protocol. Do not write the Codex parser against this.
 - `codex/fixtures/live_simple.jsonl`, `live_tools.jsonl` — real `codex exec --json` output, which is what the Codex parser must target: a much simpler item lifecycle (`thread.started`, `item.started`/`item.completed`, `turn.completed`).
 
@@ -85,9 +97,20 @@ To add coverage, follow the same pattern: capture real CLI output, commit it as 
 
 Several things are deliberately unfinished — don't mistake them for bugs:
 
-- **The UI renders nothing.** The `"events"` listener in `App.tsx` only `console.log`s, and `Chat.tsx` maps over a local `useState` array that is never written to. This is the active seam.
-- **`fs.rs` is dead code.** It implements session-index persistence (`SessionIndexItem`, `list_session_by_project`, `append_session_index_item`) against `index.json` in the app data dir, but no Tauri command exposes it and nothing calls it. Two known bugs to fix when reviving it: `list_session` calls `create_dir_all` on the *file* path when `index.json` is missing (creating a directory by that name, permanently breaking writes), and `append_session_index_item` is an unlocked read-modify-write.
-- **The mapper is partial.** `system/init` and the stream frames are wired; `assistant`, `user`, `result`, and the subagent/hook system events still fall through to `None`. `turn_id` is always `None` and `ThreadRef.label` is unset (the label needs a `tool_use_id → subagent_type` map from `system/task_started`).
+- **The UI is a bare seam.** `Chat.tsx` renders text off a handful of payload types and `ChatInput` sends; there is no session list, project picker, or tool-call rendering. This is the active area.
+- **The mapper is partial.** `assistant`, `user`, `result`, `system/init`, tasks, and the stream frames are wired; the remaining system events fall through to `None`. `turn_id` is always `None` and `ThreadRef.label` is unset (the label needs a `tool_use_id → subagent_type` map from `system/task_started`).
 - **Codex is a stub.** `Harness::Codex` parses from the frontend, but `Session::init` bails on it.
-- **Model and effort are hardcoded** to `"haiku"` / `"low"` in `App.tsx`.
+- **Model and effort are hardcoded** to `"haiku"` / `"low"` in `useSessions.ts`, as is `DEFAULT_CWD` — there's no project picker yet.
+- **`get_app_dir`** in `fs.rs` is orphaned from the move to `~/.automedon` and unused.
 - **The TS event types are generated, not written.** `ts-rs` derives them from the Rust model into `src/types/events.ts`, which is checked in so the frontend build needs no Rust toolchain. `cargo test` regenerates; never edit the output. Two settings live in `src-tauri/.cargo/config.toml`: the export path, and `TS_RS_LARGE_INT = "number"` because `u64` otherwise becomes `bigint`, which `JSON.parse` never produces.
+
+## Known issues
+
+Diagnosed defects, not yet fixed. Unlike *Current state* above, these are broken rather than unbuilt. Delete the entry when you fix it.
+
+- **Nothing loads the index on startup.** The commands are registered but the frontend never calls them, so `existing?.cwd` falls back to the project root — a worktree session resumed after a restart spawns in the wrong dir.
+- **Backend-generated worktree names never reach the frontend.** `send_msg` returns `()`, so the in-memory `Session.cwd` stays at the project root. Disk is right, memory isn't.
+- **Deltas are persisted and kept in memory.** Filter them from the JSONL and `Session.events`; the committed event supersedes them. Leave `seq` a `u64` — gaps are fine.
+- **`modified` never updates** after creation, so sort-by-recent is wrong.
+- **Worktree paths are computed, not verified.** `worktree_path()` joins the convention instead of reading `init`'s `cwd`. Correct as of now; reading it back isn't worth it — `init` fires repeatedly, so each would need a re-write plus dedup.
+- **`Session.status` never leaves `"in_progress"`** — the `result` event that should advance it isn't mapped.
