@@ -66,7 +66,7 @@ pub async fn get_sessions_dir() -> Result<PathBuf> {
     Ok(path)
 }
 
-pub async fn list_sessions() -> Result<Vec<SessionIndexItem>> {
+pub async fn list_session_index_items() -> Result<Vec<SessionIndexItem>> {
     let path = get_sessions_dir().await?.join("index.json");
 
     let contents = match fs::read_to_string(path).await {
@@ -85,7 +85,7 @@ pub async fn list_sessions() -> Result<Vec<SessionIndexItem>> {
 }
 
 pub async fn list_sessions_by_project() -> Result<Vec<SessionIndexByProject>> {
-    let sessions = list_sessions().await?;
+    let sessions = list_session_index_items().await?;
     let mut sessions_grouped: Vec<SessionIndexByProject> = Vec::new();
 
     for session in sessions {
@@ -151,8 +151,8 @@ const ADJECTIVES: [&str; 16] = [
 ];
 
 const COLORS: [&str; 16] = [
-    "azure", "bronze", "crimson", "denim", "emerald", "fuchsia", "gold", "hazel", "indigo",
-    "jade", "khaki", "lilac", "maroon", "navy", "olive", "plum",
+    "azure", "bronze", "crimson", "denim", "emerald", "fuchsia", "gold", "hazel", "indigo", "jade",
+    "khaki", "lilac", "maroon", "navy", "olive", "plum",
 ];
 
 const NOUNS: [&str; 16] = [
@@ -211,7 +211,7 @@ fn title_from_prompt(prompt: &str) -> String {
 pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> {
     let _guard = INDEX_LOCK.lock().await;
 
-    let mut sessions = list_sessions().await?;
+    let mut sessions = list_session_index_items().await?;
     sessions.push(session);
 
     let path = get_sessions_dir().await?.join("index.json");

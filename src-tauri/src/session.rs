@@ -53,7 +53,7 @@ impl SessionManager {
         worktree_name: Option<&str>,
         is_new_session: bool,
         app: &AppHandle,
-    ) -> Result<()> {
+    ) -> Result<Option<SessionIndexItem>> {
         if is_new_session {
             let worktree_name = if use_worktree {
                 Some(resolve_worktree_name(cwd, worktree_name)?)
@@ -76,7 +76,7 @@ impl SessionManager {
                 worktree_name.as_deref(),
                 prompt,
             );
-            append_session_index_item(item).await?;
+            append_session_index_item(item.clone()).await?;
 
             let mut session = Session::init(
                 session_id,
@@ -95,13 +95,15 @@ impl SessionManager {
                 .await
                 .insert(session_id.to_string(), session);
 
-            return Ok(());
+            // Returned so the frontend learns the resolved worktree name and
+            // the backend-truncated title rather than guessing either.
+            return Ok(Some(item));
         }
 
         let mut sessions_guard = self.sessions.lock().await;
         if let Some(s) = sessions_guard.get_mut(session_id) {
             s.send_msg(prompt, app).await?;
-            return Ok(());
+            return Ok(None);
         }
 
         // Resume spawns straight into the recorded `cwd` — the worktree already
@@ -119,7 +121,7 @@ impl SessionManager {
         .await?;
         session.send_msg(prompt, app).await?;
         sessions_guard.insert(session_id.to_string(), session);
-        Ok(())
+        Ok(None)
     }
 }
 

@@ -39,7 +39,7 @@ That is the real entry point — it builds and runs the Rust app and starts Vite
 Messages flow one way out to the CLI and one way back in, and the return path is what most of the Rust code exists to serve. Tracing it end to end:
 
 1. **`useSessions`** ([useSessions.ts](src/hooks/useSessions.ts)) calls `invoke("send_msg", {...})` with camelCase keys (`sessionId`, `isNewSession`); Tauri maps them onto the snake_case params of the command in [lib.rs](src-tauri/src/lib.rs). The frontend mints the session UUID with `crypto.randomUUID()` — Claude Code adopts an id chosen by the app rather than the other way round.
-2. **`SessionManager`** ([session.rs](src-tauri/src/session.rs)) owns a `Mutex<HashMap<String, Session>>`. On send it spawns a process for a new session, reuses the live one when present, and re-inits from `--resume` when the id is known but its process is gone. New sessions are written to the index before the spawn, so one that fails to start is still visible.
+2. **`SessionManager`** ([session.rs](src-tauri/src/session.rs)) owns a `Mutex<HashMap<String, Session>>`. On send it spawns a process for a new session, reuses the live one when present, and re-inits from `--resume` when the id is known but its process is gone. New sessions are written to the index before the spawn, so one that fails to start is still visible, and the created `SessionIndexItem` is returned to the frontend — `Some` on creation, `None` on resume — so the resolved worktree name and truncated title come from one source rather than being guessed twice.
 3. **`claude_code::init`** ([claude_code.rs](src-tauri/src/harness/claude_code/claude_code.rs)) spawns `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages`, adding `--session-id` for new sessions or `--resume` for existing ones, and `-w <name>` on creation for a worktree session.
 4. Two `tokio::spawn` tasks drain stdout and stderr. Each non-empty stdout line goes through `parser::parse_line` → `Mapper::map` → `app.emit("agent_event", &agent_event)`, with a copy pushed onto `Session.events` and appended to the session's JSONL.
 5. **`useSessions`** listens for `"agent_event"`, routing deltas into `streamingContentBlock` and everything else onto the session's `events`. `Chat.tsx` renders both.
@@ -108,8 +108,7 @@ Several things are deliberately unfinished — don't mistake them for bugs:
 
 Diagnosed defects, not yet fixed. Unlike *Current state* above, these are broken rather than unbuilt. Delete the entry when you fix it.
 
-- **Nothing loads the index on startup.** The commands are registered but the frontend never calls them, so `existing?.cwd` falls back to the project root — a worktree session resumed after a restart spawns in the wrong dir.
-- **Backend-generated worktree names never reach the frontend.** `send_msg` returns `()`, so the in-memory `Session.cwd` stays at the project root. Disk is right, memory isn't.
+- **Sessions load on startup but their events don't.** The sidebar reads `list_session_index_items`, but nothing calls `get_session_by_id`, so selecting an older session shows an empty chat and `sessions` still only holds what this run created.
 - **Deltas are persisted and kept in memory.** Filter them from the JSONL and `Session.events`; the committed event supersedes them. Leave `seq` a `u64` — gaps are fine.
 - **`modified` never updates** after creation, so sort-by-recent is wrong.
 - **Worktree paths are computed, not verified.** `worktree_path()` joins the convention instead of reading `init`'s `cwd`. Correct as of now; reading it back isn't worth it — `init` fires repeatedly, so each would need a re-write plus dedup.

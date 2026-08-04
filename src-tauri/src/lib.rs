@@ -1,6 +1,6 @@
 use crate::{
     events::AgentEvent,
-    fs::SessionIndexByProject,
+    fs::{SessionIndexByProject, SessionIndexItem},
     session::{Harness, SessionManager},
 };
 use tauri::{AppHandle, State};
@@ -25,7 +25,7 @@ async fn send_msg(
     is_new_session: bool,
     app: AppHandle,
     manager: State<'_, SessionManager>,
-) -> Result<(), String> {
+) -> Result<Option<SessionIndexItem>, String> {
     let harness = match harness {
         "claude_code" => Harness::ClaudeCode,
         "codex" => Harness::Codex,
@@ -57,6 +57,13 @@ async fn list_sessions_by_project() -> Result<Vec<SessionIndexByProject>, String
 }
 
 #[tauri::command]
+async fn list_session_index_items() -> Result<Vec<SessionIndexItem>, String> {
+    fs::list_session_index_items()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn get_session_by_id(session_id: &str) -> Result<Vec<AgentEvent>, String> {
     fs::get_session_by_id(session_id)
         .await
@@ -71,6 +78,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             send_msg,
             list_sessions_by_project,
+            list_session_index_items,
             get_session_by_id,
         ])
         .run(tauri::generate_context!())

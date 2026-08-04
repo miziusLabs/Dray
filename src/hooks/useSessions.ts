@@ -21,6 +21,22 @@ export type Session = {
   events: Array<AgentEvent>,
 }
 
+export type SessionIndexItem = {
+  sessionId: string,
+  harness: Harness,
+  cwd: string,
+  projectPath: string,
+  branch: string | null,
+  worktreeName: string | null,
+  title: string,
+  created: string,
+  modified: string,
+  archived: boolean,
+  pinned: boolean,
+};
+
+
+
 // Until there's a project picker, every session runs here.
 const DEFAULT_CWD = "/Users/yogesh/Documents/ade";
 
@@ -39,6 +55,7 @@ export function useSessions() {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [streamingContentBlock, setStreamingContentBlock] = useState<StreamingBlock[]>([]);
+    const [sessionIndexItems, setSessionIndexItems] = useState<SessionIndexItem[]>([]);
 
 const selectedSession = selectedSessionId && sessions ? sessions.find((s) => s.session_id == selectedSessionId) ?? null : null;
 
@@ -82,7 +99,7 @@ const handleSendMsg = async (
     setSessions((prev) => prev ? [...prev, ns] : [ns]);
   }
 
-  await invoke("send_msg", {
+  const indexItem = await invoke<SessionIndexItem | null>("send_msg", {
     sessionId,
     prompt: message,
     harness: "claude_code",
@@ -94,7 +111,31 @@ const handleSendMsg = async (
     isNewSession,
   });
 
+  // Only a new session yields an item. It carries the resolved worktree name
+  // and the truncated title, so it supersedes what we guessed above.
+  if (indexItem) {
+    setSessionIndexItems((prev) => [...prev, indexItem]);
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.session_id === indexItem.sessionId
+          ? { ...s, cwd: indexItem.cwd, worktreeName: indexItem.worktreeName }
+          : s,
+      ),
+    );
+  }
+
 };
+
+
+
+useEffect(() => {
+  const listSessionIndexItems = async () => {
+    return await invoke<SessionIndexItem[]>("list_session_index_items");
+  };
+
+  listSessionIndexItems().then((items) => setSessionIndexItems(items));
+
+}, [])
 
 useEffect(() => {
   const setupListener = async () => {
@@ -151,6 +192,6 @@ useEffect(() => {
   };
 }, []);
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, handleSendMsg};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, handleSendMsg};
 
 }
