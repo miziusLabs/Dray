@@ -65,7 +65,7 @@ Prompts travel the other direction as a single JSON line written to the child's 
 
 ## Persistence
 
-Everything lives under `~/.automedon/sessions/` ([fs.rs](src-tauri/src/fs.rs)):
+Everything lives under `~/.automedon/sessions/` ([store.rs](src-tauri/src/store.rs)):
 
 - **`<session-id>.jsonl`** — one mapped `AgentEvent` per line, append-only. Single writer per file, so `O_APPEND` alone is enough; no lock. On resume, `next_seq_by_session_id` tail-reads the last line to continue the counter.
 - **`index.json`** — one `SessionIndexItem` per session, holding both `cwd` (where the agent runs) and `project_path` (the repo root, used as the grouping key so worktree sessions still list under their project). Rewritten whole, so it takes a process-wide lock and lands via write-temp + `rename`.

@@ -1,5 +1,5 @@
 use crate::{
-    fs::{SessionIndexByProject, SessionIndexItem, SessionSnapshot},
+    store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot},
     models::{Effort, Model, ModelId},
     session::{Harness, SessionManager},
 };
@@ -7,12 +7,12 @@ use tauri::{AppHandle, State};
 
 #[path = "events/events.rs"]
 pub mod events;
-mod fs;
 #[path = "harness/harness.rs"]
 pub mod harness;
 #[path = "models/models.rs"]
 pub mod models;
 pub mod session;
+mod store;
 
 #[tauri::command]
 async fn send_msg(
@@ -58,21 +58,21 @@ fn list_models() -> Vec<Model> {
 
 #[tauri::command]
 async fn list_sessions_by_project() -> Result<Vec<SessionIndexByProject>, String> {
-    fs::list_sessions_by_project()
+    store::list_sessions_by_project()
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn list_session_index_items() -> Result<Vec<SessionIndexItem>, String> {
-    fs::list_session_index_items()
+    store::list_session_index_items()
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn get_session_by_id(session_id: &str) -> Result<Option<SessionSnapshot>, String> {
-    fs::get_session_by_id(session_id)
+    store::get_session_by_id(session_id)
         .await
         .map_err(|e| e.to_string())
 }

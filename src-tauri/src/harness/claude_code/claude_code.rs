@@ -1,5 +1,5 @@
 use crate::events::{AgentEvent, AgentEventPayload};
-use crate::fs::{append_session_event, next_seq_by_session_id};
+use crate::store::{append_session_event, next_seq_by_session_id};
 use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::models::{Effort, Model};
 use crate::session::Session;

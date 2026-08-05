@@ -1,11 +1,11 @@
 use crate::{
     events::{now_rfc3339, AgentEvent, AgentEventPayload},
-    fs::{
+    harness::{claude_code, Harness::ClaudeCode},
+    models::{find_model, resolve_effort, Effort, Model, ModelId},
+    store::{
         append_session_event, append_session_index_item, list_session_events, resolve_worktree_name,
         touch_session_index_item, worktree_path, SessionIndexItem, SessionSnapshot,
     },
-    harness::{claude_code, Harness::ClaudeCode},
-    models::{find_model, resolve_effort, Effort, Model, ModelId},
 };
 use anyhow::{bail, Context, Result};
 use serde_json::json;
