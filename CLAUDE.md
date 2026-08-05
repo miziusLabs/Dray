@@ -12,8 +12,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Good reasons to comment: a non-obvious wire-format fact, an invariant a future edit could silently break, why a simpler-looking alternative was rejected, a deliberate omission.
 - Don't restate the type signature, don't add banner separators (`// ---- helpers ----`), don't leave a doc comment on every field of an obvious struct.
 - Prefer one dense sentence over a three-paragraph doc comment. If an explanation is long enough to need paragraphs, it probably belongs in this file or a plan doc.
+- Write plainly. Short sentences, plain words. No jargon or fancy phrasing where a simple word does the job.
 
 **Stay out of files being actively edited.** When the user says they're working on something, review and advise but don't rewrite it — a `todo!()` or a missing match arm is work in progress, not a defect to fix.
+
+**`///` doc comments show on hover, so add one to every `pub fn` and any non-obvious private fn** — one line, same "why not what" bar as inline comments. Skip trivial helpers/getters where the name says it all.
 
 ## What this is
 

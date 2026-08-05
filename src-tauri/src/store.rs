@@ -85,6 +85,7 @@ pub struct SessionIndexByProject {
 
 static INDEX_LOCK: Mutex<()> = Mutex::const_new(());
 
+/// `~/.automedon`, creating it if this is the first run.
 pub async fn get_home_app_dir() -> Result<PathBuf> {
     let path = dirs::home_dir()
         .context("could not resolve home directory")?
@@ -93,6 +94,7 @@ pub async fn get_home_app_dir() -> Result<PathBuf> {
     Ok(path)
 }
 
+/// `~/.automedon/sessions`, creating it if needed.
 pub async fn get_sessions_dir() -> Result<PathBuf> {
     let path = get_home_app_dir().await?.join("sessions");
 
@@ -101,6 +103,8 @@ pub async fn get_sessions_dir() -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Reads and parses `index.json`. Missing or empty file reads as no sessions,
+/// not an error.
 pub async fn list_session_index_items() -> Result<Vec<SessionIndexItem>> {
     let path = get_sessions_dir().await?.join("index.json");
 
@@ -119,6 +123,7 @@ pub async fn list_session_index_items() -> Result<Vec<SessionIndexItem>> {
     Ok(items)
 }
 
+/// All sessions, bucketed by `project_path` — the sidebar's project grouping.
 pub async fn list_sessions_by_project() -> Result<Vec<SessionIndexByProject>> {
     let sessions = list_session_index_items().await?;
     let mut sessions_grouped: Vec<SessionIndexByProject> = Vec::new();
@@ -248,6 +253,7 @@ fn title_from_prompt(prompt: &str) -> String {
     format!("{}…", truncated.trim_end())
 }
 
+/// Adds one entry to the index and rewrites it to disk.
 pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> {
     let _guard = INDEX_LOCK.lock().await;
 
@@ -297,6 +303,7 @@ async fn write_session_index(sessions: &[SessionIndexItem]) -> Result<()> {
     Ok(())
 }
 
+/// Looks up one session's index entry by id.
 pub async fn get_session_index_item(session_id: &str) -> Result<Option<SessionIndexItem>> {
     let items = list_session_index_items().await?;
 
@@ -316,6 +323,8 @@ pub async fn get_session_by_id(session_id: &str) -> Result<Option<SessionSnapsho
     Ok(Some(SessionSnapshot { index_item, events }))
 }
 
+/// Replays a session's `.jsonl` log into its full event list. Missing file
+/// reads as no events, not an error.
 pub async fn list_session_events(session_id: &str) -> Result<Vec<AgentEvent>> {
     let path = get_session_path(session_id).await?;
 
@@ -334,6 +343,7 @@ pub async fn list_session_events(session_id: &str) -> Result<Vec<AgentEvent>> {
     Ok(events)
 }
 
+/// Appends one event as a line to the session's `.jsonl` log.
 pub async fn append_session_event(session_id: &str, event: AgentEvent) -> Result<()> {
     let path = get_session_path(session_id).await?;
 
@@ -351,6 +361,7 @@ pub async fn append_session_event(session_id: &str, event: AgentEvent) -> Result
     Ok(())
 }
 
+/// Tail-reads the log's last line to continue its `seq` counter on resume.
 pub async fn next_seq_by_session_id(session_id: &str) -> Result<u64> {
     let path = get_session_path(session_id).await?;
 
@@ -371,6 +382,7 @@ pub async fn next_seq_by_session_id(session_id: &str) -> Result<u64> {
     Ok(seq + 1)
 }
 
+/// Path to a session's `.jsonl` log under the sessions dir.
 pub async fn get_session_path(session_id: &str) -> Result<PathBuf> {
     let path = get_sessions_dir()
         .await?

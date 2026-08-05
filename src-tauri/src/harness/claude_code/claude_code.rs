@@ -119,6 +119,8 @@ pub async fn init(
     })
 }
 
+/// Reads the child's stdout line by line: parses, maps, emits, and saves each
+/// one. Logs and skips a bad line instead of stopping the loop.
 async fn read_stdout(
     stdout: ChildStdout,
     session_id: &str,
@@ -173,6 +175,7 @@ async fn read_stdout(
     Ok(())
 }
 
+/// Copies the child's stderr to this process's, for logging only.
 async fn read_stderr(stderr: ChildStderr) -> Result<()> {
     let reader = BufReader::new(stderr);
     let mut lines = reader.lines();

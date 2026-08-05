@@ -187,6 +187,8 @@ impl Mapper {
         }
     }
 
+    /// Routes a system event by subtype. Most subtypes have no mapping yet
+    /// and fall through to `None`.
     fn handle_system_event(&mut self, e: SystemEvent) -> Result<Option<AgentEventPayload>> {
         match e {
             SystemEvent::Init { .. } => Self::handle_init(e).map(Some),
@@ -197,6 +199,8 @@ impl Mapper {
         }
     }
 
+    /// Maps a subagent lifecycle event: `TaskStarted`, `TaskProgress`, or
+    /// `TaskNotification`. Errors on any other variant.
     fn handle_task(e: SystemEvent) -> Result<AgentEventPayload> {
         match e {
             SystemEvent::TaskStarted {
@@ -240,6 +244,8 @@ impl Mapper {
         }
     }
 
+    /// Maps `system/init` into `TurnStarted`. This is per turn, not just per
+    /// session — Claude Code sends `init` again for every turn.
     fn handle_init(e: SystemEvent) -> Result<AgentEventPayload> {
         if let SystemEvent::Init {
             cwd,
@@ -279,6 +285,7 @@ impl Mapper {
         }
     }
 
+    /// Maps one SSE frame to a `Delta`, tracking `current_msg_id` as frames arrive.
     fn handle_stream_event(&mut self, event: StreamFrame) -> Result<Option<AgentEventPayload>> {
         match event {
             StreamFrame::MessageStart { message } => {
@@ -445,6 +452,8 @@ impl Mapper {
         }
     }
 
+    /// Maps a turn's terminal `result` line — success or an interrupted turn —
+    /// into `TurnCompleted`.
     fn handle_result_event(e: ResultEvent) -> Result<AgentEventPayload> {
         match e {
             ResultEvent::Success {

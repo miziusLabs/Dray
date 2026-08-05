@@ -19,6 +19,7 @@ pub enum Effort {
 }
 
 impl Effort {
+    /// The `--effort` flag value.
     pub fn as_arg(self) -> &'static str {
         match self {
             Effort::Low => "low",
@@ -78,6 +79,7 @@ pub struct Model {
     pub default_effort: Option<Effort>,
 }
 
+/// The full model list the UI's picker is built from.
 pub fn claude_models() -> Vec<Model> {
     use Effort::*;
 

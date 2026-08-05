@@ -42,6 +42,8 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
+    /// Routes a prompt to a session: spawns a new child, reuses a live one, or
+    /// respawns via `--resume` when the id is known but its process is gone.
     pub async fn send_msg(
         &self,
         session_id: &str,
@@ -175,6 +177,8 @@ pub struct Session {
 }
 
 impl Session {
+    /// Spawns the child process for the given harness. Only `ClaudeCode` is
+    /// implemented; other harnesses bail.
     pub async fn init(
         session_id: &str,
         harness: Harness,
@@ -201,6 +205,8 @@ impl Session {
         }
     }
 
+    /// Builds and saves the user's own prompt event, then writes it to the
+    /// child's stdin — the CLI never echoes it back.
     pub async fn send_msg(&mut self, prompt: &str, app: &AppHandle) -> Result<()> {
         let seq = self.seq.fetch_add(1, Relaxed);
 
@@ -259,6 +265,8 @@ impl Session {
         Ok(())
     }
 
+    /// Kills the child process. Takes `self` by value — a killed session can't
+    /// be reused.
     pub async fn kill(mut self) -> Result<()> {
         let _ = self.child.kill().await?;
         Ok(())
