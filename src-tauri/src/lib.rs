@@ -1,7 +1,7 @@
 use crate::{
-    store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot},
     models::{Effort, Model, ModelId},
     session::{Harness, SessionManager},
+    store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot},
 };
 use tauri::{AppHandle, State};
 
