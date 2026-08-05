@@ -113,6 +113,6 @@ Diagnosed defects, not yet fixed. Unlike *Current state* above, these are broken
 - **Deltas are persisted and kept in memory.** Filter them from the JSONL and `Session.events`; the committed event supersedes them. Leave `seq` a `u64` — gaps are fine.
 - **`modified` only updates on send.** The AI side has no completion signal yet, so it reads as "last time the user typed" rather than last activity.
 
-- **Changing effort mid-session respawns the child.** The CLI has no `set_effort` control request (`set_model` exists and works), so the session is killed and resumed by id. The conversation survives; anything mid-flight does not.
+- **Changing effort respawns the child.** The CLI has no `set_effort` control request (`set_model` exists and works), so the session is killed and resumed by id. Harmless today — the respawn happens inside `send_msg`, which only runs when the user types, so no turn is in flight. Revisit when queued/mid-turn messages land.
 - **Worktree paths are computed, not verified.** `worktree_path()` joins the convention instead of reading `init`'s `cwd`. Correct as of now; reading it back isn't worth it — `init` fires repeatedly, so each would need a re-write plus dedup.
 - **`Session.status` never leaves `"in_progress"`** — the `result` event that should advance it isn't mapped.
