@@ -1,6 +1,6 @@
 use crate::{
     fs::{SessionIndexByProject, SessionIndexItem, SessionSnapshot},
-    models::{Effort, Model},
+    models::{Effort, Model, ModelId},
     session::{Harness, SessionManager},
 };
 use tauri::{AppHandle, State};
@@ -19,7 +19,7 @@ async fn send_msg(
     session_id: &str,
     prompt: &str,
     harness: &str,
-    model: &str,
+    model: ModelId,
     effort: Option<Effort>,
     cwd: &str,
     use_worktree: bool,

@@ -122,13 +122,21 @@ export type Model = {
 /**
  * What `--model` receives.
  */
-id: string, label: string, 
+id: ModelId, label: string, 
 /**
  * Empty means the model has no effort levels. The CLI tolerates `--effort`
  * on such a model and ignores it, so this drives the UI and keeps the
  * persisted value honest rather than preventing a crash.
  */
 efforts: Array<Effort>, defaultEffort: Effort | null, };
+
+/**
+ * The `--model` alias, typed. `Unknown` exists so an index entry naming a
+ * model this build no longer lists still deserializes — losing one session's
+ * model beats failing the whole index read and emptying the sidebar. It maps
+ * to no alias, so [`find_model`] rejects it and it can't reach a spawn.
+ */
+export type ModelId = "opus" | "sonnet" | "haiku" | "unknown";
 
 export type RateLimit = { usedPercent: number | null, windowMinutes: number | null, 
 /**
@@ -156,7 +164,7 @@ worktreeName: string | null, title: string,
  * Remembered per session so switching between sessions restores the model
  * the user last picked instead of resetting to a default.
  */
-model: string, 
+model: ModelId, 
 /**
  * `None` for models that take no effort flag.
  */
@@ -196,7 +204,7 @@ worktreeName: string | null, title: string,
  * Remembered per session so switching between sessions restores the model
  * the user last picked instead of resetting to a default.
  */
-model: string, 
+model: ModelId, 
 /**
  * `None` for models that take no effort flag.
  */

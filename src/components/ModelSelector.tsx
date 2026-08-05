@@ -8,7 +8,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Effort, Model } from "@/types/events";
+import type { Effort, Model, ModelId } from "@/types/events";
 
 const EFFORT_LABELS: Record<Effort, string> = {
   low: "Low",
@@ -25,9 +25,9 @@ export default function ModelSelector({
   onChange,
 }: {
   models: Model[];
-  modelId: string;
+  modelId: ModelId;
   effort: Effort | null;
-  onChange: (modelId: string, effort: Effort | null) => void;
+  onChange: (modelId: ModelId, effort: Effort | null) => void;
 }) {
   const selected = models.find((m) => m.id === modelId) ?? null;
 

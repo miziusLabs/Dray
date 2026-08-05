@@ -30,12 +30,46 @@ impl Effort {
     }
 }
 
+/// The `--model` alias, typed. `Unknown` exists so an index entry naming a
+/// model this build no longer lists still deserializes — losing one session's
+/// model beats failing the whole index read and emptying the sidebar. It maps
+/// to no alias, so [`find_model`] rejects it and it can't reach a spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "snake_case")]
+pub enum ModelId {
+    Opus,
+    Sonnet,
+    Haiku,
+    #[serde(other)]
+    Unknown,
+}
+
+impl Default for ModelId {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+impl ModelId {
+    /// `None` for [`ModelId::Unknown`] — there is no alias to pass the CLI.
+    /// Callers hold a [`Model`] by then, so this is unreachable in practice.
+    pub fn as_arg(self) -> Option<&'static str> {
+        match self {
+            ModelId::Opus => Some("opus"),
+            ModelId::Sonnet => Some("sonnet"),
+            ModelId::Haiku => Some("haiku"),
+            ModelId::Unknown => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct Model {
     /// What `--model` receives.
-    pub id: String,
+    pub id: ModelId,
     pub label: String,
     /// Empty means the model has no effort levels. The CLI tolerates `--effort`
     /// on such a model and ignores it, so this drives the UI and keeps the
@@ -49,19 +83,19 @@ pub fn claude_models() -> Vec<Model> {
 
     vec![
         Model {
-            id: "opus".into(),
+            id: ModelId::Opus,
             label: "Opus 5".into(),
             efforts: vec![Low, Medium, High, Xhigh, Max],
             default_effort: Some(High),
         },
         Model {
-            id: "sonnet".into(),
+            id: ModelId::Sonnet,
             label: "Sonnet 5".into(),
             efforts: vec![Low, Medium, High, Xhigh, Max],
             default_effort: Some(High),
         },
         Model {
-            id: "haiku".into(),
+            id: ModelId::Haiku,
             label: "Haiku 4.5".into(),
             efforts: Vec::new(),
             default_effort: None,
@@ -69,9 +103,10 @@ pub fn claude_models() -> Vec<Model> {
     ]
 }
 
-/// `None` for an unknown id, so a session persisted with a model this build
-/// dropped fails loudly at the spawn rather than silently running another.
-pub fn find_model(id: &str) -> Option<Model> {
+/// `None` for anything this build doesn't list, including `Unknown` read back
+/// from an older index entry — so it fails loudly at the spawn rather than
+/// silently running a different model.
+pub fn find_model(id: ModelId) -> Option<Model> {
     claude_models().into_iter().find(|m| m.id == id)
 }
 
@@ -96,7 +131,7 @@ mod tests {
     /// so this pins a UI/persistence rule, not a spawn failure.
     #[test]
     fn haiku_never_takes_an_effort() {
-        let haiku = find_model("haiku").unwrap();
+        let haiku = find_model(ModelId::Haiku).unwrap();
 
         assert_eq!(resolve_effort(&haiku, Some(Effort::Max)), None);
         assert_eq!(resolve_effort(&haiku, None), None);
@@ -104,21 +139,34 @@ mod tests {
 
     #[test]
     fn unsupported_effort_falls_back_to_the_model_default() {
-        let opus = find_model("opus").unwrap();
+        let opus = find_model(ModelId::Opus).unwrap();
 
         assert_eq!(resolve_effort(&opus, Some(Effort::Low)), Some(Effort::Low));
         assert_eq!(resolve_effort(&opus, None), Some(Effort::High));
     }
 
+    /// The serialized id is what `--model` receives, so it must stay a bare
+    /// alias — a dated name would freeze sessions to a model that stops
+    /// receiving updates.
     #[test]
-    fn model_ids_are_aliases_not_dated_names() {
+    fn model_ids_serialize_as_bare_aliases() {
         for model in claude_models() {
+            let wire = serde_json::to_string(&model.id).unwrap();
             assert!(
-                !model.id.contains('-'),
-                "{} looks like a dated id; the CLI wants an alias",
-                model.id
+                !wire.contains('-'),
+                "{wire} looks like a dated id; the CLI wants an alias"
             );
         }
+    }
+
+    /// An index entry naming a model this build dropped must not fail the whole
+    /// index read, and must not reach a spawn either.
+    #[test]
+    fn a_retired_model_reads_back_as_unknown_and_is_rejected() {
+        let id: ModelId = serde_json::from_str("\"opus-4-1-20250805\"").unwrap();
+
+        assert_eq!(id, ModelId::Unknown);
+        assert!(find_model(id).is_none());
     }
 }
 
@@ -149,3 +197,4 @@ mod wire_tests {
         }
     }
 }
+

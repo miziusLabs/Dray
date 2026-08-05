@@ -1,6 +1,6 @@
 import { useState } from "react";
 import ModelSelector from "./ModelSelector";
-import type { Effort, Model } from "../types/events";
+import type { Effort, Model, ModelId } from "../types/events";
 
 export default function ChatInput({
     onSend,
@@ -11,9 +11,9 @@ export default function ChatInput({
 }: {
     onSend: (message: string) => void,
     models: Model[],
-    modelId: string,
+    modelId: ModelId,
     effort: Effort | null,
-    onModelChange: (modelId: string, effort: Effort | null) => void,
+    onModelChange: (modelId: ModelId, effort: Effort | null) => void,
 }) {
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");

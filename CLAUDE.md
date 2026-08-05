@@ -103,7 +103,6 @@ Several things are deliberately unfinished — don't mistake them for bugs:
 - **The mapper is partial.** `assistant`, `user`, `result`, `system/init`, tasks, and the stream frames are wired; the remaining system events fall through to `None`. `turn_id` is always `None` and `ThreadRef.label` is unset (the label needs a `tool_use_id → subagent_type` map from `system/task_started`).
 - **Codex is a stub.** `Harness::Codex` parses from the frontend, but `Session::init` bails on it.
 - **`DEFAULT_CWD` is hardcoded** in `useSessions.ts` — there's no project picker yet. Model and effort now come from `ModelSelector`, backed by `models/models.rs`.
-- **`get_app_dir`** in `fs.rs` is orphaned from the move to `~/.automedon` and unused.
 - **The TS event types are generated, not written.** `ts-rs` derives them from the Rust model into `src/types/events.ts`, which is checked in so the frontend build needs no Rust toolchain. `cargo test` regenerates; never edit the output. Two settings live in `src-tauri/.cargo/config.toml`: the export path, and `TS_RS_LARGE_INT = "number"` because `u64` otherwise becomes `bigint`, which `JSON.parse` never produces.
 
 ## Known issues

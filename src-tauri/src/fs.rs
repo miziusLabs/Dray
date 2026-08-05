@@ -3,14 +3,13 @@ use std::{path::PathBuf, vec};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
 use tokio::{fs, io::AsyncWriteExt, sync::Mutex};
 use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
     events::{now_rfc3339, AgentEvent},
-    models::Effort,
+    models::{Effort, ModelId},
     session::Harness,
 };
 
@@ -51,7 +50,7 @@ pub struct SessionIndexItem {
     /// Remembered per session so switching between sessions restores the model
     /// the user last picked instead of resetting to a default.
     #[serde(default)]
-    pub model: String,
+    pub model: ModelId,
     /// `None` for models that take no effort flag.
     #[serde(default)]
     pub effort: Option<Effort>,
@@ -85,13 +84,6 @@ pub struct SessionIndexByProject {
 }
 
 static INDEX_LOCK: Mutex<()> = Mutex::const_new(());
-
-pub async fn get_app_dir(app: &AppHandle) -> Result<PathBuf> {
-    let path = app.path().app_data_dir()?;
-    fs::create_dir_all(&path).await?;
-
-    Ok(path)
-}
 
 pub async fn get_home_app_dir() -> Result<PathBuf> {
     let path = dirs::home_dir()
@@ -158,7 +150,7 @@ impl SessionIndexItem {
         project_path: &str,
         worktree_name: Option<&str>,
         first_prompt: &str,
-        model: &str,
+        model: ModelId,
         effort: Option<Effort>,
     ) -> Self {
         let now = now_rfc3339();
@@ -171,7 +163,7 @@ impl SessionIndexItem {
             branch: worktree_name.map(|name| format!("worktree-{name}")),
             worktree_name: worktree_name.map(str::to_string),
             title: title_from_prompt(first_prompt),
-            model: model.to_string(),
+            model,
             effort,
             status: SessionStatus::default(),
             created: now.clone(),
@@ -270,7 +262,7 @@ pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> 
 /// the whole index is serialized on every write.
 pub async fn touch_session_index_item(
     session_id: &str,
-    model: &str,
+    model: ModelId,
     effort: Option<Effort>,
 ) -> Result<()> {
     let _guard = INDEX_LOCK.lock().await;
@@ -281,7 +273,7 @@ pub async fn touch_session_index_item(
     };
 
     item.modified = now_rfc3339();
-    item.model = model.to_string();
+    item.model = model;
     item.effort = effort;
 
     write_session_index(&sessions).await
@@ -392,13 +384,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn index_entries_written_before_status_default_to_idle() {
+    fn index_entries_written_before_these_fields_still_read() {
         let legacy = r#"{"sessionId":"a","harness":"claude_code","cwd":"/p","projectPath":"/p",
             "branch":null,"worktreeName":null,"title":"t","created":"c","modified":"m",
             "archived":false,"pinned":false}"#;
 
         let item: SessionIndexItem = serde_json::from_str(legacy).unwrap();
+
         assert_eq!(item.status, SessionStatus::Idle);
+        // Reads back as a model no build lists, so it can never reach a spawn.
+        assert_eq!(item.model, ModelId::Unknown);
+        assert!(crate::models::find_model(item.model).is_none());
     }
 
     #[test]
@@ -410,7 +406,7 @@ mod tests {
             "/p",
             None,
             "hi",
-            "opus",
+            ModelId::Opus,
             Some(Effort::High),
         );
         let json = serde_json::to_value(SessionSnapshot { index_item: item, events: vec![] }).unwrap();

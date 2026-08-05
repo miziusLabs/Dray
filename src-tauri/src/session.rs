@@ -5,7 +5,7 @@ use crate::{
         touch_session_index_item, worktree_path, SessionIndexItem, SessionSnapshot,
     },
     harness::{claude_code, Harness::ClaudeCode},
-    models::{find_model, resolve_effort, Effort, Model},
+    models::{find_model, resolve_effort, Effort, Model, ModelId},
 };
 use anyhow::{bail, Context, Result};
 use serde_json::json;
@@ -47,7 +47,7 @@ impl SessionManager {
         session_id: &str,
         prompt: &str,
         harness: Harness,
-        model: &str,
+        model: ModelId,
         effort: Option<Effort>,
         cwd: &str,
         use_worktree: bool,
@@ -55,7 +55,8 @@ impl SessionManager {
         is_new_session: bool,
         app: &AppHandle,
     ) -> Result<Option<SessionSnapshot>> {
-        let model_spec = find_model(model).with_context(|| format!("unknown model '{model}'"))?;
+        let model_spec =
+            find_model(model).with_context(|| format!("unknown model {model:?}"))?;
         let effort = resolve_effort(&model_spec, effort);
 
         if is_new_session {
@@ -133,7 +134,7 @@ impl SessionManager {
             // the child fails — the prompt event is persisted ahead of stdin too.
             touch_session_index_item(session_id, model, effort).await?;
             if s.model != model {
-                s.set_model(model).await?;
+                s.set_model(&model_spec).await?;
             }
 
             s.send_msg(prompt, app).await?;
@@ -167,7 +168,7 @@ pub struct Session {
     pub child: Child,
     pub stdin: ChildStdin,
     pub harness: Harness,
-    pub model: String,
+    pub model: ModelId,
     pub effort: Option<Effort>,
     pub events: Arc<Mutex<Vec<AgentEvent>>>,
     pub seq: Arc<AtomicU64>,
@@ -242,18 +243,18 @@ impl Session {
     /// reply after this arrives from the new model, so no respawn is needed.
     /// There is no `set_effort` counterpart — the CLI rejects that subtype, and
     /// an `effort` field on this request is accepted but ignored.
-    pub async fn set_model(&mut self, model: &str) -> Result<()> {
+    pub async fn set_model(&mut self, model: &Model) -> Result<()> {
         let request = json!({
             "type": "control_request",
             "request_id": Uuid::now_v7().to_string(),
-            "request": {"subtype": "set_model", "model": model},
+            "request": {"subtype": "set_model", "model": model.id.as_arg()},
         });
 
         self.stdin
             .write_all(format!("{request}\n").as_bytes())
             .await?;
         self.stdin.flush().await?;
-        self.model = model.to_string();
+        self.model = model.id;
 
         Ok(())
     }

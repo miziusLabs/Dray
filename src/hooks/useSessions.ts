@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
-import { AgentEvent, Effort, Model, SessionIndexItem, SessionSnapshot } from "../types/events";
+import { AgentEvent, Effort, Model, ModelId, SessionIndexItem, SessionSnapshot } from "../types/events";
 
 // Until there's a project picker, every session runs here.
 const DEFAULT_CWD = "/Users/yogesh/Documents/ade";
 
-const DEFAULT_MODEL = "haiku";
+const DEFAULT_MODEL: ModelId = "haiku";
 
 export type StreamingBlock = {
     index: number,
@@ -21,10 +21,10 @@ export function useSessions() {
     const [streamingContentBlock, setStreamingContentBlock] = useState<StreamingBlock[]>([]);
     const [sessionIndexItems, setSessionIndexItems] = useState<SessionIndexItem[]>([]);
     const [models, setModels] = useState<Model[]>([]);
-    const [modelId, setModelId] = useState<string>(DEFAULT_MODEL);
+    const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL);
     const [effort, setEffort] = useState<Effort | null>(null);
 
-const handleModelChange = (nextModelId: string, nextEffort: Effort | null) => {
+const handleModelChange = (nextModelId: ModelId, nextEffort: Effort | null) => {
   setModelId(nextModelId);
   setEffort(nextEffort);
 };
@@ -99,7 +99,8 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
   // user last picked there instead of resetting to a default.
   const indexItem = sessionIndexItems.find((i) => i.sessionId === sessionId);
   if (indexItem) {
-    setModelId(indexItem.model || DEFAULT_MODEL);
+    // Sessions indexed before the model was recorded read back as "unknown".
+    setModelId(indexItem.model === "unknown" ? DEFAULT_MODEL : indexItem.model);
     setEffort(indexItem.effort);
   }
 
