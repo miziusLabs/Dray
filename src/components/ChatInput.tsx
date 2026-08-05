@@ -1,6 +1,20 @@
 import { useState } from "react";
+import ModelSelector from "./ModelSelector";
+import type { Effort, Model } from "../types/events";
 
-export default function ChatInput({onSend}: {onSend: (message:string) => void}) {
+export default function ChatInput({
+    onSend,
+    models,
+    modelId,
+    effort,
+    onModelChange,
+}: {
+    onSend: (message: string) => void,
+    models: Model[],
+    modelId: string,
+    effort: Effort | null,
+    onModelChange: (modelId: string, effort: Effort | null) => void,
+}) {
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
 
@@ -34,6 +48,12 @@ export default function ChatInput({onSend}: {onSend: (message:string) => void}) 
         />
         {error && <p>{error}</p>}
         </div>
+        <ModelSelector
+          models={models}
+          modelId={modelId}
+          effort={effort}
+          onChange={onModelChange}
+        />
         <button type="submit">Send</button>
       </form>
         </div>

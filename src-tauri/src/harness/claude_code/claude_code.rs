@@ -1,6 +1,7 @@
 use crate::events::{AgentEvent, AgentEventPayload};
 use crate::fs::{append_session_event, next_seq_by_session_id};
 use crate::harness::{claude_code, Harness::ClaudeCode};
+use crate::models::{Effort, Model};
 use crate::session::Session;
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -16,10 +17,13 @@ pub mod parser;
 pub use parser::ClaudeCodeEvent;
 pub mod mapper;
 
+/// Takes a resolved [`Model`] rather than an id: there's no way to build one
+/// outside `models`, so an unknown model can't reach the spawn and this doesn't
+/// re-validate what the caller already checked.
 pub async fn init(
     session_id: &str,
-    model: &str,
-    effort: &str,
+    model: &Model,
+    effort: Option<Effort>,
     cwd: &str,
     worktree_name: Option<&str>,
     is_new_session: bool,
@@ -34,10 +38,14 @@ pub async fn init(
         "--verbose",
         "--include-partial-messages",
         "--model",
-        model,
-        "--effort",
-        effort,
+        model.id.as_str(),
     ];
+
+    // Omitted for models with no effort levels. The CLI accepts and ignores the
+    // flag there, so this is about not recording an effort the session never had.
+    if let Some(effort) = effort {
+        args.extend(["--effort", effort.as_arg()]);
+    }
 
     if is_new_session {
         args.extend(["--session-id", session_id]);
@@ -99,8 +107,8 @@ pub async fn init(
         child,
         stdin,
         harness: ClaudeCode,
-        model: model.to_string(),
-        effort: effort.to_string(),
+        model: model.id.clone(),
+        effort,
         events,
         seq,
     })

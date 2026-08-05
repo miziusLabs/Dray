@@ -1,5 +1,6 @@
 use crate::{
     fs::{SessionIndexByProject, SessionIndexItem, SessionSnapshot},
+    models::{Effort, Model},
     session::{Harness, SessionManager},
 };
 use tauri::{AppHandle, State};
@@ -9,6 +10,8 @@ pub mod events;
 mod fs;
 #[path = "harness/harness.rs"]
 pub mod harness;
+#[path = "models/models.rs"]
+pub mod models;
 pub mod session;
 
 #[tauri::command]
@@ -17,7 +20,7 @@ async fn send_msg(
     prompt: &str,
     harness: &str,
     model: &str,
-    effort: &str,
+    effort: Option<Effort>,
     cwd: &str,
     use_worktree: bool,
     worktree_name: Option<&str>,
@@ -49,6 +52,11 @@ async fn send_msg(
 }
 
 #[tauri::command]
+fn list_models() -> Vec<Model> {
+    models::claude_models()
+}
+
+#[tauri::command]
 async fn list_sessions_by_project() -> Result<Vec<SessionIndexByProject>, String> {
     fs::list_sessions_by_project()
         .await
@@ -76,6 +84,7 @@ pub fn run() {
         .manage(SessionManager::default())
         .invoke_handler(tauri::generate_handler![
             send_msg,
+            list_models,
             list_sessions_by_project,
             list_session_index_items,
             get_session_by_id,

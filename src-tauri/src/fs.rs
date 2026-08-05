@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     events::{now_rfc3339, AgentEvent},
+    models::Effort,
     session::Harness,
 };
 
@@ -47,6 +48,13 @@ pub struct SessionIndexItem {
     /// `worktree-<name>`.
     pub worktree_name: Option<String>,
     pub title: String,
+    /// Remembered per session so switching between sessions restores the model
+    /// the user last picked instead of resetting to a default.
+    #[serde(default)]
+    pub model: String,
+    /// `None` for models that take no effort flag.
+    #[serde(default)]
+    pub effort: Option<Effort>,
     /// Defaulted so index entries written before this field parse as `Idle`.
     #[serde(default)]
     pub status: SessionStatus,
@@ -150,6 +158,8 @@ impl SessionIndexItem {
         project_path: &str,
         worktree_name: Option<&str>,
         first_prompt: &str,
+        model: &str,
+        effort: Option<Effort>,
     ) -> Self {
         let now = now_rfc3339();
 
@@ -161,6 +171,8 @@ impl SessionIndexItem {
             branch: worktree_name.map(|name| format!("worktree-{name}")),
             worktree_name: worktree_name.map(str::to_string),
             title: title_from_prompt(first_prompt),
+            model: model.to_string(),
+            effort,
             status: SessionStatus::default(),
             created: now.clone(),
             modified: now,
@@ -250,8 +262,36 @@ pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> 
     let mut sessions = list_session_index_items().await?;
     sessions.push(session);
 
+    write_session_index(&sessions).await
+}
+
+/// Bumps `modified`, and `model`/`effort` when they changed. Callers hold the
+/// live session's values, so an unchanged send skips the rewrite entirely —
+/// the whole index is serialized on every write.
+pub async fn touch_session_index_item(
+    session_id: &str,
+    model: &str,
+    effort: Option<Effort>,
+) -> Result<()> {
+    let _guard = INDEX_LOCK.lock().await;
+
+    let mut sessions = list_session_index_items().await?;
+    let Some(item) = sessions.iter_mut().find(|i| i.session_id == session_id) else {
+        return Ok(());
+    };
+
+    item.modified = now_rfc3339();
+    item.model = model.to_string();
+    item.effort = effort;
+
+    write_session_index(&sessions).await
+}
+
+/// Caller must hold `INDEX_LOCK`: this rewrites the whole file, so a concurrent
+/// writer would drop the other's entry.
+async fn write_session_index(sessions: &[SessionIndexItem]) -> Result<()> {
     let path = get_sessions_dir().await?.join("index.json");
-    let contents = serde_json::to_string(&sessions)?;
+    let contents = serde_json::to_string(sessions)?;
     let tmp = path.with_extension("json.tmp");
 
     fs::write(&tmp, contents)
@@ -363,7 +403,16 @@ mod tests {
 
     #[test]
     fn snapshot_flattens_index_fields_beside_events() {
-        let item = SessionIndexItem::new("a", Harness::ClaudeCode, "/p", "/p", None, "hi");
+        let item = SessionIndexItem::new(
+            "a",
+            Harness::ClaudeCode,
+            "/p",
+            "/p",
+            None,
+            "hi",
+            "opus",
+            Some(Effort::High),
+        );
         let json = serde_json::to_value(SessionSnapshot { index_item: item, events: vec![] }).unwrap();
 
         assert_eq!(json["sessionId"], "a");

@@ -59,7 +59,9 @@ Per-harness code lives under `harness/<name>/` with a deliberate seam: `parser.r
 
 Module entry files are named after their directory (`events/events.rs`, `harness/harness.rs`) rather than `mod.rs`, declared with `#[path]`. Only entry files need the attribute.
 
-Prompts travel the other direction as a single JSON line written to the child's stdin ([session.rs:193](src-tauri/src/session.rs:193)).
+Prompts travel the other direction as a single JSON line written to the child's stdin ([session.rs](src-tauri/src/session.rs)). The same pipe carries `control_request` lines — `set_model` switches a running child's model in place, verified against the CLI. `set_effort` does not exist, and an `effort` field on `set_model` is accepted and ignored, so effort changes require a respawn.
+
+**Models.** [models/models.rs](src-tauri/src/models/models.rs) is the single source for the model list, its effort levels, and the defaults; the frontend builds its picker from `list_models` rather than a hardcoded array. Ids are bare aliases (`opus`, not a dated name) so sessions follow the latest model. Haiku has no effort levels — the CLI tolerates `--effort` there and ignores it, so omitting it keeps the persisted value honest rather than avoiding a crash.
 
 ## Persistence
 
@@ -100,7 +102,7 @@ Several things are deliberately unfinished — don't mistake them for bugs:
 - **The UI is a bare seam.** `Chat.tsx` renders text off a handful of payload types and `ChatInput` sends; there is no session list, project picker, or tool-call rendering. This is the active area.
 - **The mapper is partial.** `assistant`, `user`, `result`, `system/init`, tasks, and the stream frames are wired; the remaining system events fall through to `None`. `turn_id` is always `None` and `ThreadRef.label` is unset (the label needs a `tool_use_id → subagent_type` map from `system/task_started`).
 - **Codex is a stub.** `Harness::Codex` parses from the frontend, but `Session::init` bails on it.
-- **Model and effort are hardcoded** to `"haiku"` / `"low"` in `useSessions.ts`, as is `DEFAULT_CWD` — there's no project picker yet.
+- **`DEFAULT_CWD` is hardcoded** in `useSessions.ts` — there's no project picker yet. Model and effort now come from `ModelSelector`, backed by `models/models.rs`.
 - **`get_app_dir`** in `fs.rs` is orphaned from the move to `~/.automedon` and unused.
 - **The TS event types are generated, not written.** `ts-rs` derives them from the Rust model into `src/types/events.ts`, which is checked in so the frontend build needs no Rust toolchain. `cargo test` regenerates; never edit the output. Two settings live in `src-tauri/.cargo/config.toml`: the export path, and `TS_RS_LARGE_INT = "number"` because `u64` otherwise becomes `bigint`, which `JSON.parse` never produces.
 
@@ -110,6 +112,8 @@ Diagnosed defects, not yet fixed. Unlike *Current state* above, these are broken
 
 - **Sessions load on startup but their events don't.** The sidebar reads `list_session_index_items`, but nothing calls `get_session_by_id`, so selecting an older session shows an empty chat and `sessions` still only holds what this run created.
 - **Deltas are persisted and kept in memory.** Filter them from the JSONL and `Session.events`; the committed event supersedes them. Leave `seq` a `u64` — gaps are fine.
-- **`modified` never updates** after creation, so sort-by-recent is wrong.
+- **`modified` only updates on send.** The AI side has no completion signal yet, so it reads as "last time the user typed" rather than last activity.
+
+- **Changing effort mid-session respawns the child.** The CLI has no `set_effort` control request (`set_model` exists and works), so the session is killed and resumed by id. The conversation survives; anything mid-flight does not.
 - **Worktree paths are computed, not verified.** `worktree_path()` joins the convention instead of reading `init`'s `cwd`. Correct as of now; reading it back isn't worth it — `init` fires repeatedly, so each would need a re-write plus dedup.
 - **`Session.status` never leaves `"in_progress"`** — the `result` event that should advance it isn't mapped.

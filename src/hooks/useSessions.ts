@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
-import { AgentEvent, SessionIndexItem, SessionSnapshot } from "../types/events";
-
-export type { SessionIndexItem, SessionSnapshot };
+import { AgentEvent, Effort, Model, SessionIndexItem, SessionSnapshot } from "../types/events";
 
 // Until there's a project picker, every session runs here.
 const DEFAULT_CWD = "/Users/yogesh/Documents/ade";
+
+const DEFAULT_MODEL = "haiku";
 
 export type StreamingBlock = {
     index: number,
@@ -20,6 +20,14 @@ export function useSessions() {
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [streamingContentBlock, setStreamingContentBlock] = useState<StreamingBlock[]>([]);
     const [sessionIndexItems, setSessionIndexItems] = useState<SessionIndexItem[]>([]);
+    const [models, setModels] = useState<Model[]>([]);
+    const [modelId, setModelId] = useState<string>(DEFAULT_MODEL);
+    const [effort, setEffort] = useState<Effort | null>(null);
+
+const handleModelChange = (nextModelId: string, nextEffort: Effort | null) => {
+  setModelId(nextModelId);
+  setEffort(nextEffort);
+};
 
 const selectedSession = selectedSessionId ? sessions.find((s) => s.sessionId === selectedSessionId) ?? null : null;
 
@@ -57,8 +65,8 @@ const handleSendMsg = async (
     sessionId,
     prompt: message,
     harness: "claude_code",
-    model: "haiku",
-    effort: "low",
+    model: modelId,
+    effort,
     cwd,
     useWorktree,
     worktreeName,
@@ -70,11 +78,30 @@ const handleSendMsg = async (
   if (snapshot) {
     upsertSession(snapshot);
     setSessionIndexItems((prev) => [...prev, snapshot]);
+    return;
   }
+
+  // The backend just bumped `modified` and the model on an existing session's
+  // index entry; mirror it so the sidebar doesn't need a refetch.
+  setSessionIndexItems((prev) =>
+    prev.map((i) =>
+      i.sessionId === sessionId
+        ? { ...i, model: modelId, effort, modified: new Date().toISOString() }
+        : i,
+    ),
+  );
 };
 
 const handleSelectSessionIndexItem = async (sessionId: string) => {
   setSelectedSessionId(sessionId);
+
+  // The point of persisting model/effort: switching sessions restores what the
+  // user last picked there instead of resetting to a default.
+  const indexItem = sessionIndexItems.find((i) => i.sessionId === sessionId);
+  if (indexItem) {
+    setModelId(indexItem.model || DEFAULT_MODEL);
+    setEffort(indexItem.effort);
+  }
 
   if (sessions.some((s) => s.sessionId === sessionId)) {
     return;
@@ -95,6 +122,10 @@ useEffect(() => {
 
   listSessionIndexItems().then((items) => setSessionIndexItems(items));
 
+}, [])
+
+useEffect(() => {
+  invoke<Model[]>("list_models").then(setModels);
 }, [])
 
 useEffect(() => {
@@ -152,6 +183,6 @@ useEffect(() => {
   };
 }, []);
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, handleSendMsg, handleSelectSessionIndexItem};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, handleModelChange, handleSendMsg, handleSelectSessionIndexItem};
 
 }

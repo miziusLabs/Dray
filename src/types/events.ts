@@ -94,6 +94,8 @@ export type ContextWindow = { usedTokens: number, maxTokens: number, };
  */
 export type DeltaEvent = { "delta": "block_start", block: BlockRef, blockType: BlockType, } | { "delta": "text_delta", block: BlockRef, text: string, } | { "delta": "input_delta", block: BlockRef, partialJson: string, } | { "delta": "block_stop", block: BlockRef, };
 
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+
 export type ErrorSource = "harness" | "parser" | "process";
 
 export type FileChange = "add" | "update" | "delete";
@@ -115,6 +117,18 @@ export type McpServer = { name: string,
  * Free-form: `connected`, `pending`, `needs-auth` observed, set undocumented.
  */
 status: string, };
+
+export type Model = { 
+/**
+ * What `--model` receives.
+ */
+id: string, label: string, 
+/**
+ * Empty means the model has no effort levels. The CLI tolerates `--effort`
+ * on such a model and ignores it, so this drives the UI and keeps the
+ * persisted value honest rather than preventing a crash.
+ */
+efforts: Array<Effort>, defaultEffort: Effort | null, };
 
 export type RateLimit = { usedPercent: number | null, windowMinutes: number | null, 
 /**
@@ -138,6 +152,15 @@ projectPath: string, branch: string | null,
  * `worktree-<name>`.
  */
 worktreeName: string | null, title: string, 
+/**
+ * Remembered per session so switching between sessions restores the model
+ * the user last picked instead of resetting to a default.
+ */
+model: string, 
+/**
+ * `None` for models that take no effort flag.
+ */
+effort: Effort | null, 
 /**
  * Defaulted so index entries written before this field parse as `Idle`.
  */
@@ -169,6 +192,15 @@ projectPath: string, branch: string | null,
  * `worktree-<name>`.
  */
 worktreeName: string | null, title: string, 
+/**
+ * Remembered per session so switching between sessions restores the model
+ * the user last picked instead of resetting to a default.
+ */
+model: string, 
+/**
+ * `None` for models that take no effort flag.
+ */
+effort: Effort | null, 
 /**
  * Defaulted so index entries written before this field parse as `Idle`.
  */

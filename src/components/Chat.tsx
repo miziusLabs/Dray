@@ -1,5 +1,5 @@
-import { SessionSnapshot, StreamingBlock } from "../hooks/useSessions";
-import { AgentEvent } from "../types/events";
+import { StreamingBlock } from "../hooks/useSessions";
+import { AgentEvent, SessionSnapshot } from "../types/events";
 
 export default function Chat(
   { sessionId,

@@ -2,11 +2,12 @@ use crate::{
     events::{now_rfc3339, AgentEvent, AgentEventPayload},
     fs::{
         append_session_event, append_session_index_item, list_session_events, resolve_worktree_name,
-        worktree_path, SessionIndexItem, SessionSnapshot,
+        touch_session_index_item, worktree_path, SessionIndexItem, SessionSnapshot,
     },
     harness::{claude_code, Harness::ClaudeCode},
+    models::{find_model, resolve_effort, Effort, Model},
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -47,13 +48,16 @@ impl SessionManager {
         prompt: &str,
         harness: Harness,
         model: &str,
-        effort: &str,
+        effort: Option<Effort>,
         cwd: &str,
         use_worktree: bool,
         worktree_name: Option<&str>,
         is_new_session: bool,
         app: &AppHandle,
     ) -> Result<Option<SessionSnapshot>> {
+        let model_spec = find_model(model).with_context(|| format!("unknown model '{model}'"))?;
+        let effort = resolve_effort(&model_spec, effort);
+
         if is_new_session {
             let worktree_name = if use_worktree {
                 Some(resolve_worktree_name(cwd, worktree_name)?)
@@ -75,13 +79,15 @@ impl SessionManager {
                 cwd,
                 worktree_name.as_deref(),
                 prompt,
+                model,
+                effort,
             );
             append_session_index_item(item.clone()).await?;
 
             let mut session = Session::init(
                 session_id,
                 harness,
-                model,
+                &model_spec,
                 effort,
                 cwd,
                 worktree_name.as_deref(),
@@ -108,17 +114,40 @@ impl SessionManager {
         }
 
         let mut sessions_guard = self.sessions.lock().await;
+
+        // Effort is fixed at spawn — the CLI has no `set_effort` control request
+        // — so changing it means replacing the child. Resuming by id keeps the
+        // conversation, and the log continues from the persisted seq.
+        let effort_changed = sessions_guard
+            .get(session_id)
+            .is_some_and(|s| s.effort != effort);
+
+        if effort_changed {
+            if let Some(s) = sessions_guard.remove(session_id) {
+                s.kill().await?;
+            }
+        }
+
         if let Some(s) = sessions_guard.get_mut(session_id) {
+            // Before the send, so the index reflects intent even if writing to
+            // the child fails — the prompt event is persisted ahead of stdin too.
+            touch_session_index_item(session_id, model, effort).await?;
+            if s.model != model {
+                s.set_model(model).await?;
+            }
+
             s.send_msg(prompt, app).await?;
             return Ok(None);
         }
+
+        touch_session_index_item(session_id, model, effort).await?;
 
         // Resume spawns straight into the recorded `cwd` — the worktree already
         // exists, and passing `-w` again would try to recreate it.
         let mut session = Session::init(
             session_id,
             harness,
-            model,
+            &model_spec,
             effort,
             cwd,
             None,
@@ -139,7 +168,7 @@ pub struct Session {
     pub stdin: ChildStdin,
     pub harness: Harness,
     pub model: String,
-    pub effort: String,
+    pub effort: Option<Effort>,
     pub events: Arc<Mutex<Vec<AgentEvent>>>,
     pub seq: Arc<AtomicU64>,
 }
@@ -148,8 +177,8 @@ impl Session {
     pub async fn init(
         session_id: &str,
         harness: Harness,
-        model: &str,
-        effort: &str,
+        model: &Model,
+        effort: Option<Effort>,
         cwd: &str,
         worktree_name: Option<&str>,
         is_new_session: bool,
@@ -205,6 +234,26 @@ impl Session {
 
         let _ = self.stdin.write_all(line.as_bytes()).await?;
         let _ = self.stdin.flush().await?;
+
+        Ok(())
+    }
+
+    /// Switches the model of a running child. Verified against the CLI: the
+    /// reply after this arrives from the new model, so no respawn is needed.
+    /// There is no `set_effort` counterpart — the CLI rejects that subtype, and
+    /// an `effort` field on this request is accepted but ignored.
+    pub async fn set_model(&mut self, model: &str) -> Result<()> {
+        let request = json!({
+            "type": "control_request",
+            "request_id": Uuid::now_v7().to_string(),
+            "request": {"subtype": "set_model", "model": model},
+        });
+
+        self.stdin
+            .write_all(format!("{request}\n").as_bytes())
+            .await?;
+        self.stdin.flush().await?;
+        self.model = model.to_string();
 
         Ok(())
     }

@@ -1,4 +1,4 @@
-import type { SessionIndexItem } from "../hooks/useSessions"
+import type { SessionIndexItem } from "../types/events"
 
 export default function Sidebar({items, onSelect} : {items: SessionIndexItem[], onSelect: (sessionId: string) => Promise<void>}) {
     return <div className="border-r max-w-50 p-4">
