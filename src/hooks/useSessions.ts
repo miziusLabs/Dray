@@ -1,48 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
-import { AgentEvent } from "../types/events";
+import { AgentEvent, SessionIndexItem, SessionSnapshot } from "../types/events";
 
-
-type Harness = "claude_code" | "codex";
-type SessionStatus = "idle" | "in_progress" | "completed";
-
-export type Session = {
-  session_id: string,
-  harness: Harness,
-  model: string | null,
-  effort: string | null,
-  /// Where the agent runs — the worktree path for a worktree session.
-  cwd: string,
-  /// Repo root the user picked; `cwd` for a normal session.
-  projectPath: string,
-  worktreeName: string | null,
-  status: SessionStatus,
-  events: Array<AgentEvent>,
-}
-
-export type SessionIndexItem = {
-  sessionId: string,
-  harness: Harness,
-  cwd: string,
-  projectPath: string,
-  branch: string | null,
-  worktreeName: string | null,
-  title: string,
-  created: string,
-  modified: string,
-  archived: boolean,
-  pinned: boolean,
-};
-
-
+export type { SessionIndexItem, SessionSnapshot };
 
 // Until there's a project picker, every session runs here.
 const DEFAULT_CWD = "/Users/yogesh/Documents/ade";
-
-// `claude -w <name>` puts the tree here and names its branch `worktree-<name>`.
-const worktreePath = (projectPath: string, name: string) =>
-  `${projectPath}/.claude/worktrees/${name}`;
 
 export type StreamingBlock = {
     index: number,
@@ -52,12 +16,22 @@ export type StreamingBlock = {
 
 export function useSessions() {
     
-    const [sessions, setSessions] = useState<Session[]>([]);
+    const [sessions, setSessions] = useState<SessionSnapshot[]>([]);
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [streamingContentBlock, setStreamingContentBlock] = useState<StreamingBlock[]>([]);
     const [sessionIndexItems, setSessionIndexItems] = useState<SessionIndexItem[]>([]);
 
-const selectedSession = selectedSessionId && sessions ? sessions.find((s) => s.session_id == selectedSessionId) ?? null : null;
+const selectedSession = selectedSessionId ? sessions.find((s) => s.sessionId === selectedSessionId) ?? null : null;
+
+// Dedupes against the queued array, not the render snapshot: two fast clicks
+// both miss an `existing` check made before their `await`, and would otherwise
+// each append the same session.
+const upsertSession = (snapshot: SessionSnapshot) =>
+  setSessions((prev) =>
+    prev.some((s) => s.sessionId === snapshot.sessionId)
+      ? prev.map((s) => (s.sessionId === snapshot.sessionId ? snapshot : s))
+      : [...prev, snapshot],
+  );
 
 const handleSendMsg = async (
   message: string,
@@ -72,34 +46,14 @@ const handleSendMsg = async (
   }
 
 
-  const existing = sessions.find((s) => s.session_id === sessionId);
+  const existing = sessions.find((s) => s.sessionId === sessionId);
   const projectPath = opts?.projectPath ?? existing?.projectPath ?? DEFAULT_CWD;
   const useWorktree = isNewSession && (opts?.useWorktree ?? false);
   const worktreeName = useWorktree ? opts?.worktreeName ?? null : null;
 
-  
   const cwd = isNewSession ? projectPath : existing?.cwd ?? projectPath;
 
-  if(isNewSession){
-    const ns: Session = {
-      session_id: sessionId,
-      harness: "claude_code",
-      model: "haiku",
-      effort: "low",
-      // The backend names an unnamed worktree, so the real cwd is only known
-      // once `init` reports it.
-      cwd: useWorktree && worktreeName
-        ? worktreePath(projectPath, worktreeName)
-        : projectPath,
-      projectPath,
-      worktreeName,
-      status: "in_progress",
-      events: []
-    }
-    setSessions((prev) => prev ? [...prev, ns] : [ns]);
-  }
-
-  const indexItem = await invoke<SessionIndexItem | null>("send_msg", {
+  const snapshot = await invoke<SessionSnapshot | null>("send_msg", {
     sessionId,
     prompt: message,
     harness: "claude_code",
@@ -111,42 +65,25 @@ const handleSendMsg = async (
     isNewSession,
   });
 
-  // Only a new session yields an item. It carries the resolved worktree name
-  // and the truncated title, so it supersedes what we guessed above.
-  if (indexItem) {
-    setSessionIndexItems((prev) => [...prev, indexItem]);
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.session_id === indexItem.sessionId
-          ? { ...s, cwd: indexItem.cwd, worktreeName: indexItem.worktreeName }
-          : s,
-      ),
-    );
+  // Only a new session yields a snapshot. Built by the backend, so the resolved
+  // worktree name and truncated title come from disk rather than a guess here.
+  if (snapshot) {
+    upsertSession(snapshot);
+    setSessionIndexItems((prev) => [...prev, snapshot]);
   }
-
 };
 
-const handleSelectSessionIndexItem = async (indexItem: SessionIndexItem) => {
-  setSelectedSessionId(indexItem.sessionId);
+const handleSelectSessionIndexItem = async (sessionId: string) => {
+  setSelectedSessionId(sessionId);
 
-  const existingSession = sessions.find((s) => s.session_id == indexItem.sessionId);
-  if (existingSession) {
+  if (sessions.some((s) => s.sessionId === sessionId)) {
     return;
   }
 
-  const events = await invoke<AgentEvent[]>("get_session_by_id", { sessionId: indexItem.sessionId });
-  const ns: Session = {
-    session_id: indexItem.sessionId,
-    harness: indexItem.harness,
-    model: null,
-    effort: null,
-    cwd: indexItem.cwd,
-    projectPath: indexItem.projectPath,
-    worktreeName: indexItem.worktreeName,
-    status: "idle",
-    events,
+  const snapshot = await invoke<SessionSnapshot | null>("get_session_by_id", { sessionId });
+  if (snapshot) {
+    upsertSession(snapshot);
   }
-  setSessions((prev) => prev ? [...prev, ns] : [ns]);
 }
 
 
@@ -170,8 +107,8 @@ useEffect(() => {
 
         if (agentEvent.payload.type != "delta") {
             setSessions((prev) =>
-            (prev ?? []).map((s) =>
-                s.session_id === agentEvent.sessionId
+            prev.map((s) =>
+                s.sessionId === agentEvent.sessionId
                 ? { ...s, events: [...s.events, agentEvent] }
                 : s,
             ),

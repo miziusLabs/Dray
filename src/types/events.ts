@@ -122,10 +122,63 @@ export type RateLimit = { usedPercent: number | null, windowMinutes: number | nu
  */
 resetsAt: string | null, planType: string | null, };
 
+export type SessionIndexItem = { sessionId: string, harness: Harness, 
+/**
+ * Where the agent actually runs. Equals `project_path` for a normal
+ * session; points inside `.claude/worktrees/<name>` for a worktree one.
+ */
+cwd: string, 
+/**
+ * Repo root — the grouping key, so worktree sessions still list under
+ * their project rather than each becoming a project of their own.
+ */
+projectPath: string, branch: string | null, 
+/**
+ * `Some` marks this a worktree session; Claude Code names the branch
+ * `worktree-<name>`.
+ */
+worktreeName: string | null, title: string, 
+/**
+ * Defaulted so index entries written before this field parse as `Idle`.
+ */
+status: SessionStatus, created: string, modified: string, archived: boolean, pinned: boolean, };
+
 /**
  * Session-level facts, known at startup.
  */
 export type SessionInfo = { cwd: string | null, model: string | null, harnessVersion: string | null, tools: Array<string>, mcpServers: Array<McpServer>, subagentTypes: Array<string>, settings: Settings | null, };
+
+/**
+ * What crosses the IPC boundary for one session: its index entry plus the
+ * replayed event log. Distinct from [`crate::session::Session`], which owns a
+ * child process and cannot be serialized.
+ */
+export type SessionSnapshot = { events: Array<AgentEvent>, sessionId: string, harness: Harness, 
+/**
+ * Where the agent actually runs. Equals `project_path` for a normal
+ * session; points inside `.claude/worktrees/<name>` for a worktree one.
+ */
+cwd: string, 
+/**
+ * Repo root — the grouping key, so worktree sessions still list under
+ * their project rather than each becoming a project of their own.
+ */
+projectPath: string, branch: string | null, 
+/**
+ * `Some` marks this a worktree session; Claude Code names the branch
+ * `worktree-<name>`.
+ */
+worktreeName: string | null, title: string, 
+/**
+ * Defaulted so index entries written before this field parse as `Idle`.
+ */
+status: SessionStatus, created: string, modified: string, archived: boolean, pinned: boolean, };
+
+/**
+ * Nothing advances this past `Idle` yet — no turn-completion signal is mapped.
+ * It ships now so the on-disk index doesn't need a migration once one is.
+ */
+export type SessionStatus = "idle" | "in_progress" | "completed";
 
 /**
  * Settings that can change mid-session, so they arrive as events rather than

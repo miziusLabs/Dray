@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 use tokio::{fs, io::AsyncWriteExt, sync::Mutex};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
@@ -12,7 +13,25 @@ use crate::{
     session::Harness,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// Nothing advances this past `Idle` yet — no turn-completion signal is mapped.
+/// It ships now so the on-disk index doesn't need a migration once one is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "snake_case")]
+pub enum SessionStatus {
+    Idle,
+    InProgress,
+    Completed,
+}
+
+impl Default for SessionStatus {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct SessionIndexItem {
     pub session_id: String,
@@ -28,10 +47,26 @@ pub struct SessionIndexItem {
     /// `worktree-<name>`.
     pub worktree_name: Option<String>,
     pub title: String,
+    /// Defaulted so index entries written before this field parse as `Idle`.
+    #[serde(default)]
+    pub status: SessionStatus,
     pub created: String,
     pub modified: String,
     pub archived: bool,
     pub pinned: bool,
+}
+
+/// What crosses the IPC boundary for one session: its index entry plus the
+/// replayed event log. Distinct from [`crate::session::Session`], which owns a
+/// child process and cannot be serialized.
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSnapshot {
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub index_item: SessionIndexItem,
+    pub events: Vec<AgentEvent>,
 }
 
 #[derive(Debug, Serialize)]
@@ -126,6 +161,7 @@ impl SessionIndexItem {
             branch: worktree_name.map(|name| format!("worktree-{name}")),
             worktree_name: worktree_name.map(str::to_string),
             title: title_from_prompt(first_prompt),
+            status: SessionStatus::default(),
             created: now.clone(),
             modified: now,
             archived: false,
@@ -229,7 +265,26 @@ pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> 
     Ok(())
 }
 
-pub async fn get_session_by_id(session_id: &str) -> Result<Vec<AgentEvent>> {
+pub async fn get_session_index_item(session_id: &str) -> Result<Option<SessionIndexItem>> {
+    let items = list_session_index_items().await?;
+
+    Ok(items.into_iter().find(|i| i.session_id == session_id))
+}
+
+/// `None` means the id isn't in the index. An indexed session with no log yet
+/// is normal — it was written before its process spawned — and yields empty
+/// `events` rather than `None`.
+pub async fn get_session_by_id(session_id: &str) -> Result<Option<SessionSnapshot>> {
+    let Some(index_item) = get_session_index_item(session_id).await? else {
+        return Ok(None);
+    };
+
+    let events = list_session_events(session_id).await?;
+
+    Ok(Some(SessionSnapshot { index_item, events }))
+}
+
+pub async fn list_session_events(session_id: &str) -> Result<Vec<AgentEvent>> {
     let path = get_session_path(session_id).await?;
 
     let buffer = match fs::read_to_string(&path).await {
@@ -290,4 +345,30 @@ pub async fn get_session_path(session_id: &str) -> Result<PathBuf> {
         .join(format!("{session_id}.jsonl"));
 
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_entries_written_before_status_default_to_idle() {
+        let legacy = r#"{"sessionId":"a","harness":"claude_code","cwd":"/p","projectPath":"/p",
+            "branch":null,"worktreeName":null,"title":"t","created":"c","modified":"m",
+            "archived":false,"pinned":false}"#;
+
+        let item: SessionIndexItem = serde_json::from_str(legacy).unwrap();
+        assert_eq!(item.status, SessionStatus::Idle);
+    }
+
+    #[test]
+    fn snapshot_flattens_index_fields_beside_events() {
+        let item = SessionIndexItem::new("a", Harness::ClaudeCode, "/p", "/p", None, "hi");
+        let json = serde_json::to_value(SessionSnapshot { index_item: item, events: vec![] }).unwrap();
+
+        assert_eq!(json["sessionId"], "a");
+        assert_eq!(json["status"], "idle");
+        assert!(json["events"].is_array());
+        assert!(json.get("indexItem").is_none(), "must stay flat for the generated TS type");
+    }
 }

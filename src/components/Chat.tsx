@@ -1,4 +1,4 @@
-import { Session, StreamingBlock } from "../hooks/useSessions";
+import { SessionSnapshot, StreamingBlock } from "../hooks/useSessions";
 import { AgentEvent } from "../types/events";
 
 export default function Chat(
@@ -7,7 +7,7 @@ export default function Chat(
     streamingBlock
   }:
   { sessionId: string | null,
-    session: Session | null,
+    session: SessionSnapshot | null,
     streamingBlock: StreamingBlock[],
   }) {
     const events: AgentEvent[] | null = session?.events ? session?.events : null;

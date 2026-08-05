@@ -1,8 +1,8 @@
 use crate::{
     events::{now_rfc3339, AgentEvent, AgentEventPayload},
     fs::{
-        append_session_event, append_session_index_item, resolve_worktree_name, worktree_path,
-        SessionIndexItem,
+        append_session_event, append_session_index_item, list_session_events, resolve_worktree_name,
+        worktree_path, SessionIndexItem, SessionSnapshot,
     },
     harness::{claude_code, Harness::ClaudeCode},
 };
@@ -53,7 +53,7 @@ impl SessionManager {
         worktree_name: Option<&str>,
         is_new_session: bool,
         app: &AppHandle,
-    ) -> Result<Option<SessionIndexItem>> {
+    ) -> Result<Option<SessionSnapshot>> {
         if is_new_session {
             let worktree_name = if use_worktree {
                 Some(resolve_worktree_name(cwd, worktree_name)?)
@@ -90,6 +90,10 @@ impl SessionManager {
             )
             .await?;
             session.send_msg(prompt, app).await?;
+            // The prompt event is synthesized by `send_msg`, so read the log
+            // back rather than returning empty — otherwise the frontend's first
+            // render drops the user's own message.
+            let events = list_session_events(session_id).await?;
             self.sessions
                 .lock()
                 .await
@@ -97,7 +101,10 @@ impl SessionManager {
 
             // Returned so the frontend learns the resolved worktree name and
             // the backend-truncated title rather than guessing either.
-            return Ok(Some(item));
+            return Ok(Some(SessionSnapshot {
+                index_item: item,
+                events,
+            }));
         }
 
         let mut sessions_guard = self.sessions.lock().await;
