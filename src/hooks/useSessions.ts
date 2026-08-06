@@ -29,6 +29,10 @@ export function useSessions() {
     const [models, setModels] = useState<Model[]>([]);
     const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL);
     const [effortByModel, setEffortByModel] = useState<EffortByModel>({});
+    // Per-session, not global: sessions run concurrently and all of their events
+    // arrive on the same channel, so a single flag would clear on another's turn.
+    const [busyBySession, setBusyBySession] = useState<Record<string, boolean>>({});
+    const [error, setError] = useState<string | null>(null);
 
 // What actually gets sent for the current model: its remembered pick, else its
 // own default, and null for a model that takes no effort flag at all.
@@ -81,35 +85,45 @@ const handleSendMsg = async (
 
   const cwd = isNewSession ? projectPath : existing?.cwd ?? projectPath;
 
-  const snapshot = await invoke<SessionSnapshot | null>("send_msg", {
-    sessionId,
-    prompt: message,
-    harness: "claude_code",
-    model: modelId,
-    effort,
-    cwd,
-    useWorktree,
-    worktreeName,
-    isNewSession,
-  });
+  setError(null);
+  setBusyBySession((prev) => ({ ...prev, [sessionId]: true }));
 
-  // Only a new session yields a snapshot. Built by the backend, so the resolved
-  // worktree name and truncated title come from disk rather than a guess here.
-  if (snapshot) {
-    upsertSession(snapshot);
-    setSessionIndexItems((prev) => [...prev, snapshot]);
-    return;
+  try {
+    const snapshot = await invoke<SessionSnapshot | null>("send_msg", {
+      sessionId,
+      prompt: message,
+      harness: "claude_code",
+      model: modelId,
+      effort,
+      cwd,
+      useWorktree,
+      worktreeName,
+      isNewSession,
+    });
+
+    // Only a new session yields a snapshot. Built by the backend, so the resolved
+    // worktree name and truncated title come from disk rather than a guess here.
+    if (snapshot) {
+      upsertSession(snapshot);
+      setSessionIndexItems((prev) => [...prev, snapshot]);
+      return;
+    }
+
+    // The backend just bumped `modified` and the model on an existing session's
+    // index entry; mirror it so the sidebar doesn't need a refetch.
+    setSessionIndexItems((prev) =>
+      prev.map((i) =>
+        i.sessionId === sessionId
+          ? { ...i, model: modelId, effort, modified: new Date().toISOString() }
+          : i,
+      ),
+    );
+  } catch (e) {
+    // A rejected invoke means the turn never started, so nothing will arrive to
+    // clear the flag — release it here rather than leaving the composer stuck.
+    setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
+    setError(String(e));
   }
-
-  // The backend just bumped `modified` and the model on an existing session's
-  // index entry; mirror it so the sidebar doesn't need a refetch.
-  setSessionIndexItems((prev) =>
-    prev.map((i) =>
-      i.sessionId === sessionId
-        ? { ...i, model: modelId, effort, modified: new Date().toISOString() }
-        : i,
-    ),
-  );
 };
 
 // Keeps effortByModel: the per-model picks are a preference that outlives any
@@ -142,9 +156,13 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
     return;
   }
 
-  const snapshot = await invoke<SessionSnapshot | null>("get_session_by_id", { sessionId });
-  if (snapshot) {
-    upsertSession(snapshot);
+  try {
+    const snapshot = await invoke<SessionSnapshot | null>("get_session_by_id", { sessionId });
+    if (snapshot) {
+      upsertSession(snapshot);
+    }
+  } catch (e) {
+    setError(String(e));
   }
 }
 
@@ -169,7 +187,6 @@ useEffect(() => {
       // console.log(event);
 
       const agentEvent = event.payload;
-      console.log("agent event", agentEvent);
 
         if (agentEvent.payload.type != "delta") {
             setSessions((prev) =>
@@ -179,6 +196,21 @@ useEffect(() => {
                 : s,
             ),
             );
+
+            // The only signals that a turn is over. `turn_completed` fires once per
+            // turn rather than per session, so this releases exactly the session
+            // whose turn ended and leaves any other running one alone.
+            const done =
+              agentEvent.payload.type === "turn_completed" ||
+              (agentEvent.payload.type === "error" && agentEvent.payload.fatal);
+
+            if (done) {
+              setBusyBySession((prev) => ({ ...prev, [agentEvent.sessionId]: false }));
+            }
+
+            if (agentEvent.payload.type === "error") {
+              setError(agentEvent.payload.message);
+            }
         } else {
             const payload = agentEvent.payload;
 
@@ -229,6 +261,9 @@ useEffect(() => {
   };
 }, []);
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, handleModelChange, handleSendMsg, handleSelectSessionIndexItem, handleNewSession};
+// A brand-new session has no id until its first send, so nothing can be in flight.
+const busy = selectedSessionId ? busyBySession[selectedSessionId] ?? false : false;
+
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, busy, busyBySession, error, setError, handleModelChange, handleSendMsg, handleSelectSessionIndexItem, handleNewSession};
 
 }
