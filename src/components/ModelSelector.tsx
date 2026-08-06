@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,16 +30,20 @@ export default function ModelSelector({
   effort: Effort | null;
   onChange: (modelId: ModelId, effort: Effort | null) => void;
 }) {
+  // Controlled so a click on a submenu trigger can close the whole menu; Radix
+  // otherwise keeps the parent open for the submenu it just opened on hover.
+  const [open, setOpen] = useState(false);
+
   const selected = models.find((m) => m.id === modelId) ?? null;
 
   const triggerLabel = selected
-    ? selected.efforts.length && effort
+    ? effort
       ? `${selected.label} ${EFFORT_LABELS[effort]}`
       : selected.label
     : modelId;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm">
           {triggerLabel}
@@ -48,20 +53,29 @@ export default function ModelSelector({
       <DropdownMenuContent align="start" className="min-w-48">
         {models.map((model) =>
           model.efforts.length ? (
+            // One row: hover opens the effort submenu (Radix's own behaviour),
+            // click picks the model and leaves its effort alone. Splitting the
+            // two into separate items would give the row two hover states.
             <DropdownMenuSub key={model.id}>
-              <DropdownMenuSubTrigger>{model.label}</DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger
+                className="cursor-pointer"
+                onClick={() => {
+                  onChange(model.id, null);
+                  setOpen(false);
+                }}
+              >
+                {model.label}
+              </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 {model.efforts.map((level) => (
                   <DropdownMenuItem
                     key={level}
-                    onSelect={() => onChange(model.id, level)}
+                    onSelect={() => {
+                      onChange(model.id, level);
+                      setOpen(false);
+                    }}
                   >
                     {EFFORT_LABELS[level]}
-                    {level === model.defaultEffort && (
-                      <span className="text-muted-foreground ml-auto text-xs">
-                        default
-                      </span>
-                    )}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuSubContent>

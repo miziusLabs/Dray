@@ -7,6 +7,11 @@ import { AgentEvent, Effort, Model, ModelId, SessionIndexItem, SessionSnapshot }
 const DEFAULT_CWD = "/Users/yogesh/Documents/ade";
 
 const DEFAULT_MODEL: ModelId = "haiku";
+const DEFAULT_EFFORT: Effort = "high";
+
+// Effort is a property of the model, not of the picker: switching to Sonnet must
+// not inherit the Max you last chose on Opus. Absent key = use the model default.
+type EffortByModel = Partial<Record<ModelId, Effort>>;
 
 export type StreamingBlock = {
     index: number,
@@ -23,11 +28,25 @@ export function useSessions() {
     const [sessionIndexItems, setSessionIndexItems] = useState<SessionIndexItem[]>([]);
     const [models, setModels] = useState<Model[]>([]);
     const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL);
-    const [effort, setEffort] = useState<Effort | null>(null);
+    const [effortByModel, setEffortByModel] = useState<EffortByModel>({});
 
+// What actually gets sent for the current model: its remembered pick, else its
+// own default, and null for a model that takes no effort flag at all.
+const model = models.find((m) => m.id === modelId) ?? null;
+const effort: Effort | null = model
+  ? model.efforts.length
+    ? effortByModel[modelId] ?? model.defaultEffort ?? DEFAULT_EFFORT
+    : null
+  : effortByModel[modelId] ?? null;
+
+// A null effort means "just switch to this model" — it must leave the model's
+// remembered pick alone, or coming back to Sonnet would lose the Extra High set
+// on it earlier. Only an explicit level writes to the map.
 const handleModelChange = (nextModelId: ModelId, nextEffort: Effort | null) => {
   setModelId(nextModelId);
-  setEffort(nextEffort);
+  if (nextEffort) {
+    setEffortByModel((prev) => ({ ...prev, [nextModelId]: nextEffort }));
+  }
 };
 
 const selectedSession = selectedSessionId ? sessions.find((s) => s.sessionId === selectedSessionId) ?? null : null;
@@ -93,6 +112,14 @@ const handleSendMsg = async (
   );
 };
 
+// Keeps effortByModel: the per-model picks are a preference that outlives any
+// one session, so a new chat starts on the default model but still remembers
+// the effort chosen for each.
+const handleNewSession = () => {
+  setSelectedSessionId(null);
+  setModelId(DEFAULT_MODEL);
+};
+
 const handleSelectSessionIndexItem = async (sessionId: string) => {
   setSelectedSessionId(sessionId);
 
@@ -101,8 +128,14 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
   const indexItem = sessionIndexItems.find((i) => i.sessionId === sessionId);
   if (indexItem) {
     // Sessions indexed before the model was recorded read back as "unknown".
-    setModelId(indexItem.model === "unknown" ? DEFAULT_MODEL : indexItem.model);
-    setEffort(indexItem.effort);
+    const restored =
+      indexItem.model === "unknown" ? DEFAULT_MODEL : indexItem.model;
+    setModelId(restored);
+    // The index stores one model/effort pair, so it can only seed that model's
+    // entry; the rest of the map falls back to per-model defaults.
+    if (indexItem.effort) {
+      setEffortByModel((prev) => ({ ...prev, [restored]: indexItem.effort! }));
+    }
   }
 
   if (sessions.some((s) => s.sessionId === sessionId)) {
@@ -196,6 +229,6 @@ useEffect(() => {
   };
 }, []);
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, handleModelChange, handleSendMsg, handleSelectSessionIndexItem};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, handleModelChange, handleSendMsg, handleSelectSessionIndexItem, handleNewSession};
 
 }

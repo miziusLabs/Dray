@@ -6,12 +6,12 @@ import Sidebar from "./components/Sidebar";
 import { useSessions } from "./hooks/useSessions";
 
 function App() {
-  let {selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, handleModelChange, handleSendMsg, handleSelectSessionIndexItem} = useSessions();
+  let {selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, handleModelChange, handleSendMsg, handleSelectSessionIndexItem, handleNewSession} = useSessions();
 
 
   return (
     <main className="flex flex-row">
-      <Sidebar items={sessionIndexItems} onSelect={handleSelectSessionIndexItem}/>
+      <Sidebar items={sessionIndexItems} onSelect={handleSelectSessionIndexItem} onNewSession={handleNewSession}/>
       <div className="flex flex-col">
       <Chat
         sessionId={selectedSessionId}
