@@ -64,18 +64,28 @@
   --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
 
   /* Semantic sizes, each overridable at runtime by setting its `--fs-*` on
-     `<html>`. Components use `text-ui`/`text-chat`/… and never a raw `text-sm`,
-     which is what makes a future font-size setting a no-op for them. */
-  --text-ui: var(--fs-ui, 0.8125rem);
-  --text-ui--line-height: 1.4;
+     `<html>`. Components use `text-chat`/`text-code`/… and never a raw
+     `text-sm`, which is what makes the font-size setting a no-op for them.
+
+     Everything in the transcript is one size — headings, prose, tool rows, list
+     items alike. Weight and color carry hierarchy instead, so a heading is bold
+     rather than bigger. Only code and tool output scale separately. */
   --text-chat: var(--fs-chat, 0.9375rem);
   --text-chat--line-height: 1.65;
+  --text-code: var(--fs-code, 0.875rem);
+  --text-code--line-height: 1.6;
+  /* Tool output is reference material next to the conversation, so it sits one
+     step down from chat text. */
+  --text-tool: var(--fs-tool, 0.8125rem);
+  --text-tool--line-height: 1.55;
+  /* Chrome outside the transcript — sidebar, headers, panel. Not user-facing
+     in the size setting, which is scoped to the conversation. */
+  --text-ui: var(--fs-ui, 0.8125rem);
+  --text-ui--line-height: 1.4;
   /* Not `--text-input`: that collides with shadcn's `--color-input`, and the
      color utility wins the `text-input` class name. */
-  --text-composer: var(--fs-composer, 0.9375rem);
+  --text-composer: var(--fs-composer, 0.875rem);
   --text-composer--line-height: 1.5;
-  --text-code: var(--fs-code, 0.8125rem);
-  --text-code--line-height: 1.6;
 
   --color-surface-raised: var(--surface-raised);
   --color-accent-thinking: var(--accent-thinking);
@@ -117,6 +127,38 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Streamdown puts the border and radius on the same element that scrolls
+   horizontally, and a scrolling box paints its border unclipped by its own
+   radius — the corners visibly break apart. The border has to move out to the
+   non-scrolling wrapper. Plain CSS rather than an arbitrary variant because
+   these compete with Streamdown's own utilities at equal specificity, where
+   source order decides and Tailwind's ordering isn't ours to control. */
+[data-streamdown="code-block"] {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* `!important` because these compete with Streamdown's own utilities on the same
+   element, where equal specificity makes source order decide — and the order of
+   a dependency's classes against ours isn't something we control. */
+[data-streamdown="code-block-body"] {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+/* Reveal the copy control for the block under the cursor, not every block in a
+   hovered message. */
+[data-streamdown="code-block-actions"] {
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+[data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"] {
+  opacity: 1;
 }
 
 @layer base {

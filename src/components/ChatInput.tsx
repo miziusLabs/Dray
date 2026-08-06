@@ -28,6 +28,7 @@ export default function ChatInput({
   sessionId = null,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
+  const [fontsReady, setFontsReady] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Grow to fit, then scroll. Height must be cleared before scrollHeight is read
@@ -54,11 +55,25 @@ export default function ChatInput({
     // scrollHeight includes padding, so the row cap has to as well.
     el.style.height = `${Math.min(el.scrollHeight, lineHeight * MAX_ROWS + chrome)}px`;
     card.style.height = "";
-  }, [message]);
+  }, [message, fontsReady]);
 
   useEffect(() => {
     textareaRef.current?.focus();
   }, [sessionId]);
+
+  // The sizing effect above runs before the webfont resolves, so its first
+  // measurement is against the fallback metrics and can clamp an empty box to
+  // the row cap. Nothing re-measures until the next keystroke, so nudge it once
+  // fonts are ready.
+  useEffect(() => {
+    let cancelled = false;
+    document.fonts?.ready.then(() => {
+      if (!cancelled) setFontsReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const canSend = message.trim().length > 0 && !busy;
 

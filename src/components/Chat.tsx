@@ -1,39 +1,28 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
-import EventRow from "@/components/chat/EventRow";
+import TurnBlock from "@/components/chat/TurnBlock";
 import type { StreamingBlock } from "@/hooks/useSessions";
-import type { AgentEvent, SessionSnapshot } from "@/types/events";
+import { buildTranscript } from "@/lib/transcript";
+import type { SessionSnapshot } from "@/types/events";
 
 type ChatProps = {
   session: SessionSnapshot | null;
   streamingBlock: StreamingBlock | null;
+  onOpenSubagent: (id: string) => void;
 };
 
-/// `seq` is the ordering key — most Claude Code events carry no usable `ts`.
-function bySeq(a: AgentEvent, b: AgentEvent) {
-  return a.seq - b.seq;
-}
-
-export default function Chat({ session, streamingBlock }: ChatProps) {
+export default function Chat({ session, streamingBlock, onOpenSubagent }: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Whether to keep pinning to the bottom. Cleared once the user scrolls up, so
   // reading back through a transcript isn't yanked forward by incoming deltas.
   const followRef = useRef(true);
 
-  const events = useMemo(() => [...(session?.events ?? [])].sort(bySeq), [session?.events]);
-
-  // callId → whether it errored. A call with no entry is still in flight.
-  const resultByCallId = useMemo(() => {
-    const map = new Map<string, boolean>();
-    for (const event of events) {
-      if (event.payload.type === "tool_call_completed") {
-        map.set(event.payload.callId, event.payload.result.isError);
-      }
-    }
-    return map;
-  }, [events]);
+  const { events, turns, subagentById, resultByCallId } = useMemo(
+    () => buildTranscript(session?.events ?? []),
+    [session?.events],
+  );
 
   const streamingText = streamingBlock?.type === "text" ? streamingBlock.text : "";
 
@@ -94,8 +83,14 @@ export default function Chat({ session, streamingBlock }: ChatProps) {
   return (
     <div ref={scrollRef} onScroll={onScroll} onWheel={onWheel} className="h-full overflow-y-auto">
       <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
-        {events.map((event) => (
-          <EventRow key={event.id} event={event} resultByCallId={resultByCallId} />
+        {turns.map((turn) => (
+          <TurnBlock
+            key={turn.key}
+            turn={turn}
+            subagentById={subagentById}
+            resultByCallId={resultByCallId}
+            onOpenSubagent={onOpenSubagent}
+          />
         ))}
 
         {/* Deltas are never persisted, so this trailing block is replaced by the
