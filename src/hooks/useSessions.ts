@@ -18,7 +18,8 @@ export function useSessions() {
     
     const [sessions, setSessions] = useState<SessionSnapshot[]>([]);
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-    const [streamingContentBlock, setStreamingContentBlock] = useState<StreamingBlock[]>([]);
+    // sessionId → the one in-flight block (CLI streams start→deltas→stop serially).
+    const [streamingContentBlock, setStreamingContentBlock] = useState<Record<string, StreamingBlock | null>>({});
     const [sessionIndexItems, setSessionIndexItems] = useState<SessionIndexItem[]>([]);
     const [models, setModels] = useState<Model[]>([]);
     const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL);
@@ -148,28 +149,39 @@ useEffect(() => {
         } else {
             const payload = agentEvent.payload;
 
-            if (payload.delta == "block_start") {
-                setStreamingContentBlock((prev) => {
-                    let block: StreamingBlock = {
-                        index: payload.block.index,
-                        text: "",
-                        type: null,
-                    };
-                    return [...prev, block]
-            })
+            const sessionId = agentEvent.sessionId;
 
-             } else if(payload.delta == "text_delta") {
-                setStreamingContentBlock((prev) => 
-                    (prev ?? []).map((b) => b.index == payload.block.index ? {...b, type: "text", text: b.text + payload.text} : b)
-                 )
-            } else if(payload.delta == "input_delta") {
-                setStreamingContentBlock((prev) => 
-                    (prev ?? []).map((b) => b.index == payload.block.index ? {...b, type: "tool_use", text: b.text + payload.partialJson} : b)
-                 )
+            if (payload.delta == "block_start") {
+                setStreamingContentBlock((prev) => ({
+                  ...prev,
+                  [sessionId]: { index: payload.block.index, text: "", type: null },
+                }));
+            } else if (payload.delta == "text_delta") {
+                setStreamingContentBlock((prev) => {
+                  const cur = prev[sessionId];
+                  if (!cur || cur.index !== payload.block.index) return prev;
+                  return {
+                    ...prev,
+                    [sessionId]: { ...cur, type: "text", text: cur.text + payload.text },
+                  };
+                });
+            } else if (payload.delta == "input_delta") {
+                setStreamingContentBlock((prev) => {
+                  const cur = prev[sessionId];
+                  if (!cur || cur.index !== payload.block.index) return prev;
+                  return {
+                    ...prev,
+                    [sessionId]: {
+                      ...cur,
+                      type: "tool_use",
+                      text: cur.text + payload.partialJson,
+                    },
+                  };
+                });
             } else if (payload.delta == "block_stop") {
-                setStreamingContentBlock([])
+                setStreamingContentBlock((prev) => ({ ...prev, [sessionId]: null }));
             } else {
-                setStreamingContentBlock([])
+                setStreamingContentBlock((prev) => ({ ...prev, [sessionId]: null }));
             }
         }
 

@@ -8,11 +8,10 @@ export default function Chat(
   }:
   { sessionId: string | null,
     session: SessionSnapshot | null,
-    streamingBlock: StreamingBlock[],
+    streamingBlock: StreamingBlock | null,
   }) {
     const events: AgentEvent[] | null = session?.events ? session?.events : null;
     const id = sessionId;
- 
 
   return (
     <div className="flex flex-col items-start mx-24 my-24">
@@ -39,7 +38,7 @@ export default function Chat(
             return <p key={event.id} className="text-left">{text}</p>;
   })}
     
-    {streamingBlock?.map((b) => <p key={b.index} className="text-left">{b.text}</p>)}
+    {streamingBlock ? <p key={streamingBlock.index} className="text-left">{streamingBlock.text}</p> : null}
 
       </div>
    
