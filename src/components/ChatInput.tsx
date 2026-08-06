@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUpIcon, StopIcon } from "@heroicons/react/24/outline";
 
 import ModelSelector from "@/components/ModelSelector";
 import { Button } from "@/components/ui/button";
@@ -127,7 +127,7 @@ export default function ChatInput({
               disabled={!canSend}
               title={busy ? "Running…" : "Send"}
             >
-              {busy ? <Square className="fill-current" /> : <ArrowUp />}
+              {busy ? <StopIcon className="fill-current" /> : <ArrowUpIcon />}
             </Button>
           </div>
         </div>

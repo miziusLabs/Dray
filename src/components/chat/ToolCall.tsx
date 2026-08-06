@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRightIcon } from "@heroicons/react/24/outline";
 
 import { cn } from "@/lib/utils";
 import { formatToolInput, toolSummary } from "@/lib/tools";
@@ -91,7 +91,7 @@ export default function ToolCall({
 
         {/* Trails the text rather than pinning to the far right, so it reads as
             part of the row instead of a column of its own. */}
-        <ChevronRight
+        <ChevronRightIcon
           className={cn(
             "size-3 shrink-0 text-muted-foreground transition-all",
             open ? "rotate-90 opacity-100" : "opacity-0 group-hover/tool:opacity-100",

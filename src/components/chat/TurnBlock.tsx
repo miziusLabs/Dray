@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRightIcon } from "@heroicons/react/24/outline";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import EventRow from "@/components/chat/EventRow";
@@ -52,7 +52,7 @@ export default function TurnBlock({
           className="group/turn flex items-center gap-2 text-left text-chat text-muted-foreground"
         >
           <span>{parts.join(" · ") || "Details"}</span>
-          <ChevronRight
+          <ChevronRightIcon
             className={cn(
               "size-3 shrink-0 transition-all",
               open ? "rotate-90 opacity-100" : "opacity-0 group-hover/turn:opacity-100",

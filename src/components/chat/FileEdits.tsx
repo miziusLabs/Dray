@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRightIcon } from "@heroicons/react/24/outline";
 
 import { shortenPath } from "@/lib/tools";
 import { cn } from "@/lib/utils";
@@ -49,7 +49,7 @@ function FileEditRow({ edit }: { edit: FileEdit }) {
           {shortenPath(edit.path)}
         </span>
 
-        <ChevronRight
+        <ChevronRightIcon
           className={cn(
             "size-3 shrink-0 text-muted-foreground transition-all",
             open ? "rotate-90 opacity-100" : "opacity-0 group-hover/edit:opacity-100",

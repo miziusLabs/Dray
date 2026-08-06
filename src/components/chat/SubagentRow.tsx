@@ -1,4 +1,4 @@
-import { Bot, ChevronRight } from "lucide-react";
+import { ChevronRightIcon, CpuChipIcon } from "@heroicons/react/24/outline";
 
 import type { SubagentRun } from "@/lib/transcript";
 
@@ -23,14 +23,14 @@ export default function SubagentRow({
       onClick={() => onOpen(run.id)}
       className="group flex w-full items-center gap-2 text-left text-chat"
     >
-      <Bot className="size-3.5 shrink-0 text-accent-thinking" />
+      <CpuChipIcon className="size-3.5 shrink-0 text-accent-thinking" />
       <span className="shrink-0 font-medium text-foreground/80">{label}</span>
 
       {detail && (
         <span className="min-w-0 max-w-fit truncate text-muted-foreground">{detail}</span>
       )}
 
-      <ChevronRight className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+      <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
 
       <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground/70">
         <span>{run.events.length} steps</span>

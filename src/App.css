@@ -42,7 +42,9 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.185 0 0);
+  /* Same as `--background`: the sidebar reads as part of the page, not as a
+     separate surface. Kept as its own token so a future palette can diverge. */
+  --sidebar: oklch(0.145 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.922 0 0);
   --sidebar-primary-foreground: oklch(0.205 0 0);
@@ -169,8 +171,13 @@
   html {
     @apply font-sans;
     /* Traffic lights float over our own header under `titleBarStyle: Overlay`,
-       so the header reserves this much lead space on macOS. */
-    --titlebar-h: 28px;
+       so the header reserves this much lead space on macOS. Tall enough to clear
+       a 28px control with breathing room — at exactly 28px the toggle butts
+       against the window edge. */
+    --titlebar-h: 40px;
+    /* Horizontal clearance for those same lights, needed only when a pane
+       reaches the window's left edge — i.e. with the sidebar collapsed. */
+    --traffic-lights-w: 78px;
   }
 
   body {

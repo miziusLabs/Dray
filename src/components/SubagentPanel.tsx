@@ -1,4 +1,4 @@
-import { Bot, X } from "lucide-react";
+import { CpuChipIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 import EventRow from "@/components/chat/EventRow";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ export default function SubagentPanel({
           Subagents{runs.length ? ` (${runs.length})` : ""}
         </span>
         <Button variant="ghost" size="icon-sm" onClick={onClose} title="Close panel">
-          <X />
+          <XMarkIcon />
         </Button>
       </div>
 
@@ -87,7 +87,7 @@ function RunRow({
           : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50",
       )}
     >
-      <Bot className="size-3.5 shrink-0 text-accent-thinking" />
+      <CpuChipIcon className="size-3.5 shrink-0 text-accent-thinking" />
       <span className="shrink-0 font-medium">{run.label ?? "Subagent"}</span>
       {run.description && (
         <span className="truncate text-muted-foreground">{run.description}</span>

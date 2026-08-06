@@ -1,14 +1,18 @@
 import { useMemo, useState } from "react";
-import { Bot } from "lucide-react";
+import { CpuChipIcon } from "@heroicons/react/24/outline";
 
 import Chat from "@/components/Chat";
 import ChatInput from "@/components/ChatInput";
-import Sidebar from "@/components/Sidebar";
+import Sidebar, { SidebarToggle } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
 import AppShell from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { DEMO_EVENTS, DEMO_MODELS } from "@/demo/fixtures";
+import { useFullscreen } from "@/hooks/useFullscreen";
+import { useHotkey } from "@/hooks/useHotkey";
 import { buildTranscript } from "@/lib/transcript";
+import { cn } from "@/lib/utils";
 import type { Effort, ModelId, SessionIndexItem, SessionSnapshot } from "@/types/events";
 
 const INDEX: SessionIndexItem = {
@@ -59,26 +63,45 @@ export default function Demo() {
   const [modelId, setModelId] = useState<ModelId>("opus");
   const [effort, setEffort] = useState<Effort | null>("high");
   const [busy, setBusy] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   const { subagents, resultByCallId } = useMemo(
     () => buildTranscript(DEMO_EVENTS),
     [],
   );
 
+  const toggleSidebar = () => setCollapsed((prev) => !prev);
+  useHotkey("b", toggleSidebar);
+  const fullscreen = useFullscreen();
+
   return (
+    <TooltipProvider>
     <AppShell
       sidebar={
         <Sidebar
           items={[INDEX, WORKTREE, OTHER_PROJECT]}
           selectedSessionId="demo"
-          collapsed={false}
-          onToggleCollapsed={() => {}}
+          collapsed={collapsed}
+          onToggleCollapsed={toggleSidebar}
           onSelect={async () => {}}
           onNewSession={() => {}}
         />
       }
       header={
         <header className="flex h-(--titlebar-h) shrink-0 items-center gap-2 px-3">
+          {collapsed && (
+            <div
+              className={cn(
+                "flex items-center",
+                // Fullscreen has no traffic lights, so the toggle pulls back past
+                // the header's own padding to sit flush at the window edge.
+                fullscreen ? "-ml-1" : "pl-(--traffic-lights-w)",
+              )}
+            >
+              <SidebarToggle onToggle={toggleSidebar} collapsed />
+            </div>
+          )}
+
           <span className="flex-1 truncate text-center text-ui text-muted-foreground">
             yogesh — demo
           </span>
@@ -88,7 +111,7 @@ export default function Demo() {
             onClick={() => setPanelOpen((prev) => !prev)}
             title="Subagents"
           >
-            <Bot />
+            <CpuChipIcon />
           </Button>
         </header>
       }
@@ -131,5 +154,6 @@ export default function Demo() {
         }}
       />
     </AppShell>
+    </TooltipProvider>
   );
 }
