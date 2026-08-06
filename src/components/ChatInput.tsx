@@ -34,7 +34,8 @@ export default function ChatInput({
   // or it reports the current height and the box can never shrink back down.
   useLayoutEffect(() => {
     const el = textareaRef.current;
-    if (!el) return;
+    const card = el?.parentElement;
+    if (!el || !card) return;
 
     const style = getComputedStyle(el);
     const lineHeight = parseFloat(style.lineHeight) || 20;
@@ -44,9 +45,15 @@ export default function ChatInput({
       parseFloat(style.borderTopWidth) +
       parseFloat(style.borderBottomWidth);
 
+    // Freeze the card while measuring: reading scrollHeight forces a layout with
+    // the textarea at 0px, and if that phantom layout reaches the flex column the
+    // chat pane momentarily grows and the browser clamps its scrollTop — the
+    // transcript ratchets up a few pixels on every value change.
+    card.style.height = `${card.offsetHeight}px`;
     el.style.height = "0px";
     // scrollHeight includes padding, so the row cap has to as well.
     el.style.height = `${Math.min(el.scrollHeight, lineHeight * MAX_ROWS + chrome)}px`;
+    card.style.height = "";
   }, [message]);
 
   useEffect(() => {
