@@ -6,6 +6,7 @@ import ChatInput from "@/components/ChatInput";
 import Sidebar, { SidebarToggle } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
 import AppShell from "@/components/layout/AppShell";
+import SessionHeader from "@/components/layout/SessionHeader";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DEMO_EVENTS, DEMO_MODELS } from "@/demo/fixtures";
@@ -20,9 +21,11 @@ const INDEX: SessionIndexItem = {
   harness: "claude_code",
   cwd: "/Users/yogesh/Documents/yogesh",
   projectPath: "/Users/yogesh/Documents/yogesh",
-  branch: null,
+  branch: "main",
   worktreeName: null,
-  title: "How does the blog work?",
+  // Long on purpose: the sidebar clips this, which is the whole reason the
+  // header shows the title at all.
+  title: "How does the blog work, and where does the frontmatter get parsed?",
   model: "opus",
   effort: "high",
   status: "idle",
@@ -102,9 +105,7 @@ export default function Demo() {
             </div>
           )}
 
-          <span className="flex-1 truncate text-center text-ui text-muted-foreground">
-            yogesh — demo
-          </span>
+          <SessionHeader session={SESSION} className="flex-1" />
           <Button
             variant="ghost"
             size="icon-sm"

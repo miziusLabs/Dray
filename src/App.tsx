@@ -7,13 +7,13 @@ import ChatInput from "@/components/ChatInput";
 import Sidebar, { SidebarToggle } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
 import AppShell from "@/components/layout/AppShell";
+import SessionHeader from "@/components/layout/SessionHeader";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSessions } from "@/hooks/useSessions";
-import { basename } from "@/lib/format";
 import { buildTranscript } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 
@@ -87,12 +87,7 @@ function App() {
             </div>
           )}
 
-          <span
-            className="flex-1 truncate text-center text-ui text-muted-foreground"
-            data-tauri-drag-region
-          >
-            {selectedSession ? basename(selectedSession.cwd) : "New session"}
-          </span>
+          <SessionHeader session={selectedSession} className="flex-1" />
 
           {subagents.length > 0 && (
             <Button
