@@ -28,7 +28,7 @@ export default function ChatInput({
   sessionId = null,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
-  const [fontsReady, setFontsReady] = useState(false);
+  const [resizeTick, setResizeTick] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Grow to fit, then scroll. Height must be cleared before scrollHeight is read
@@ -55,24 +55,25 @@ export default function ChatInput({
     // scrollHeight includes padding, so the row cap has to as well.
     el.style.height = `${Math.min(el.scrollHeight, lineHeight * MAX_ROWS + chrome)}px`;
     card.style.height = "";
-  }, [message, fontsReady]);
+  }, [message, resizeTick]);
 
   useEffect(() => {
     textareaRef.current?.focus();
   }, [sessionId]);
 
-  // The sizing effect above runs before the webfont resolves, so its first
-  // measurement is against the fallback metrics and can clamp an empty box to
-  // the row cap. Nothing re-measures until the next keystroke, so nudge it once
-  // fonts are ready.
+  // The sizing effect first measures against fallback font metrics, which can
+  // clamp an empty box to the row cap; nothing re-measures until the next
+  // keystroke, so the composer opens ten rows tall with a scrollbar. Waiting on
+  // document.fonts.ready isn't enough — the promise can resolve a frame before
+  // the new metrics reach layout, and that one shot is all it gets. Observing
+  // the box re-measures whenever its size actually changes, font swap included.
   useEffect(() => {
-    let cancelled = false;
-    document.fonts?.ready.then(() => {
-      if (!cancelled) setFontsReady(true);
-    });
-    return () => {
-      cancelled = true;
-    };
+    const el = textareaRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => setResizeTick((t) => t + 1));
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
   const canSend = message.trim().length > 0 && !busy;
@@ -94,8 +95,10 @@ export default function ChatInput({
           submit();
         }}
       >
-        {/* The ring lives on the card so the whole composer reads as one control. */}
-        <div className="rounded-xl border border-input bg-card transition-colors focus-within:border-ring/60">
+        {/* The ring lives on the card so the whole composer reads as one control.
+            --input bakes in its own alpha, which makes Tailwind's /40-style opacity
+            modifiers silently no-op, so both states set an explicit color. */}
+        <div className="rounded-2xl border border-[oklch(1_0_0/6%)] bg-card transition-colors focus-within:border-[oklch(1_0_0/18%)]">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -110,10 +113,10 @@ export default function ChatInput({
                 submit();
               }
             }}
-            className="block w-full resize-none overflow-y-auto bg-transparent px-3 pt-3 pb-2 text-composer text-foreground placeholder:text-muted-foreground focus:outline-none"
+            className="block w-full resize-none overflow-y-auto bg-transparent px-4 pt-3.5 pb-2 text-composer text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
 
-          <div className="flex items-center justify-between gap-2 px-2 pb-2">
+          <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
             <ModelSelector
               models={models}
               modelId={modelId}
@@ -126,8 +129,13 @@ export default function ChatInput({
               size="icon-sm"
               disabled={!canSend}
               title={busy ? "Running…" : "Send"}
+              className="rounded-full"
             >
-              {busy ? <StopIcon className="fill-current" /> : <ArrowUpIcon />}
+              {busy ? (
+                <StopIcon className="fill-current" />
+              ) : (
+                <ArrowUpIcon strokeWidth={2} />
+              )}
             </Button>
           </div>
         </div>
