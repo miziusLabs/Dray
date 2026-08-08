@@ -37,14 +37,18 @@ function bySeq(a: AgentEvent, b: AgentEvent) {
   return a.seq - b.seq;
 }
 
+/// Bookkeeping the summary count needs while a turn is open, dropped from the
+/// `Turn` handed to the UI.
+type OpenTurn = Turn & { lastWasAssistantText: boolean };
+
 /// Cuts the main thread into turns: each runs from a user prompt to the
 /// `turn_completed` that closes it. A turn's intermediate work collapses behind
 /// one summary line, leaving the prompt and the final answer as the default view.
 function groupTurns(events: AgentEvent[]): Turn[] {
   const turns: Turn[] = [];
-  let current: Turn | null = null;
+  let current: OpenTurn | null = null;
 
-  const open = (prompt: AgentEvent | null, key: string): Turn => ({
+  const open = (prompt: AgentEvent | null, key: string): OpenTurn => ({
     prompt,
     work: [],
     completed: null,
@@ -52,6 +56,7 @@ function groupTurns(events: AgentEvent[]): Turn[] {
     toolCalls: 0,
     messages: 0,
     key,
+    lastWasAssistantText: false,
   });
 
   for (const event of events) {
@@ -68,6 +73,13 @@ function groupTurns(events: AgentEvent[]): Turn[] {
     if (event.payload.type === "turn_completed") {
       current.completed = event;
       current.finalText = event.payload.finalText;
+      // The final answer renders in the collapsed view, so it isn't work the
+      // summary hides. Only discount it when it really is the last
+      // `assistant_text` — an interrupted turn has no `finalText` at all, and a
+      // tool call after the last message means the copy is of an earlier one.
+      if (current.finalText !== null && current.lastWasAssistantText) {
+        current.messages -= 1;
+      }
       turns.push(current);
       current = null;
       continue;
@@ -75,6 +87,7 @@ function groupTurns(events: AgentEvent[]): Turn[] {
 
     if (event.payload.type === "tool_call_started") current.toolCalls += 1;
     if (event.payload.type === "assistant_text") current.messages += 1;
+    current.lastWasAssistantText = event.payload.type === "assistant_text";
     current.work.push(event);
   }
 

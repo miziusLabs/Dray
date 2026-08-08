@@ -31,15 +31,18 @@ export default function TurnBlock({
   const [open, setOpen] = useState(false);
 
   const running = turn.completed === null;
-  // `finalText` duplicates the turn's last `assistant_text`, so the collapsed
-  // view renders it in that message's place rather than alongside it. A running
-  // turn has no `finalText` yet, so its work stays visible instead.
-  const collapsible = !running && turn.work.length > 0;
-  const showWork = open || !collapsible;
 
   const parts: string[] = [];
   if (turn.toolCalls) parts.push(plural(turn.toolCalls, "tool call"));
   if (turn.messages) parts.push(plural(turn.messages, "message"));
+
+  // `finalText` duplicates the turn's last `assistant_text`, so the collapsed
+  // view renders it in that message's place rather than alongside it. A running
+  // turn has no `finalText` yet, so its work stays visible instead. Gate on the
+  // summary rather than `work.length`: a turn whose only work *is* that final
+  // message has nothing left to reveal, and would offer an empty toggle.
+  const collapsible = !running && parts.length > 0;
+  const showWork = open || !collapsible;
 
   return (
     <div className="flex flex-col gap-2">
@@ -51,7 +54,7 @@ export default function TurnBlock({
           onClick={() => setOpen((prev) => !prev)}
           className="group/turn flex items-center gap-2 text-left text-chat text-muted-foreground"
         >
-          <span>{parts.join(" · ") || "Details"}</span>
+          <span>{parts.join(" · ")}</span>
           <ChevronRightIcon
             className={cn(
               "size-3 shrink-0 transition-all",
