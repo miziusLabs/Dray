@@ -299,6 +299,37 @@ pub async fn touch_session_index_item(
     write_session_index(&sessions).await
 }
 
+/// Sets `archived` and/or `pinned` on one entry. `None` leaves that flag alone,
+/// so the two sidebar controls share one command without either clobbering the
+/// other's field. Returns the entry as written, or `None` if the id is unknown.
+pub async fn set_session_flags(
+    session_id: &str,
+    archived: Option<bool>,
+    pinned: Option<bool>,
+) -> Result<Option<SessionIndexItem>> {
+    let _guard = INDEX_LOCK.lock().await;
+
+    let mut sessions = list_session_index_items().await?;
+    let Some(item) = sessions.iter_mut().find(|i| i.session_id == session_id) else {
+        return Ok(None);
+    };
+
+    if let Some(v) = archived {
+        item.archived = v;
+    }
+    if let Some(v) = pinned {
+        item.pinned = v;
+    }
+
+    // `modified` is deliberately left alone: it orders the list, and flipping a
+    // flag would jump the session to the top of it.
+    let updated = item.clone();
+
+    write_session_index(&sessions).await?;
+
+    Ok(Some(updated))
+}
+
 /// Caller must hold `INDEX_LOCK`: this rewrites the whole file, so a concurrent
 /// writer would drop the other's entry.
 async fn write_session_index(sessions: &[SessionIndexItem]) -> Result<()> {

@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import {
-  ArchiveBoxIcon,
   FunnelIcon,
   MagnifyingGlassIcon,
   PlusIcon,
 } from "@heroicons/react/24/outline";
+import { Check, Pin } from "lucide-react";
 
 import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,10 @@ type SidebarProps = {
   onToggleCollapsed: () => void;
   onSelect: (sessionId: string) => Promise<void>;
   onNewSession: () => void;
+  onSetFlags: (
+    sessionId: string,
+    flags: { archived?: boolean; pinned?: boolean },
+  ) => Promise<void>;
 };
 
 // Rendered rather than detected per-keystroke: the hotkey itself accepts either
@@ -76,6 +80,7 @@ export default function Sidebar({
   onToggleCollapsed,
   onSelect,
   onNewSession,
+  onSetFlags,
 }: SidebarProps) {
   const fullscreen = useFullscreen();
 
@@ -154,6 +159,7 @@ export default function Sidebar({
               item={item}
               active={item.sessionId === selectedSessionId}
               onSelect={onSelect}
+              onSetFlags={onSetFlags}
             />
           ))
         )}
@@ -195,18 +201,63 @@ function ProjectFilter() {
   );
 }
 
+/// One hover control on a session row. Stops the click from reaching the row's
+/// own handler, so acting on a session never also selects it.
+function RowAction({
+  label,
+  active,
+  onClick,
+  children,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={label}
+          aria-pressed={active}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick();
+          }}
+          // Set here rather than inherited from the row: the UA stylesheet's own
+          // `button { cursor: default }` wins over an inherited value.
+          className={cn(
+            "cursor-pointer",
+            active ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function SessionRow({
   item,
   active,
   onSelect,
+  onSetFlags,
 }: {
   item: SessionIndexItem;
   active: boolean;
   onSelect: (sessionId: string) => Promise<void>;
+  onSetFlags: (
+    sessionId: string,
+    flags: { archived?: boolean; pinned?: boolean },
+  ) => Promise<void>;
 }) {
   return (
     // A button can't nest a button, so the row is a div with a click handler and
-    // the archive control is the only real button inside it.
+    // the pin/settle controls are the only real buttons inside it.
     <div
       role="button"
       tabIndex={0}
@@ -217,9 +268,12 @@ function SessionRow({
           void onSelect(item.sessionId);
         }
       }}
-      title={item.title}
       className={cn(
-        "group relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 transition-colors",
+        // No vertical padding: the 24px hover buttons are the tallest thing in
+        // the row, so they'd add to any padding here and make the row grow the
+        // moment these controls landed. `min-h` keeps the height when they're the
+        // only thing not rendered — an empty row still matches a populated one.
+        "group relative flex min-h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
         active
           ? "bg-sidebar-accent text-sidebar-accent-foreground"
@@ -228,27 +282,43 @@ function SessionRow({
     >
       <span className="min-w-0 flex-1 truncate text-ui">{item.title}</span>
 
-      {/* The date and the archive control share one slot. Both fade on `opacity`
-          over the same duration so they cross without ever both being legible —
-          `visibility` alone flips instantly while the button's inherited
+      {/* One slot for both, sized by the buttons and always holding that width —
+          so a long title truncates against it either way and nothing reflows on
+          hover. The two children stack via `absolute` on the date and crossfade
+          on `opacity` over the same duration, so they never both read at once;
+          `visibility` would flip instantly while the button's inherited
           `transition-all` still crossfades, which is what read as an overlap. */}
-      <span className="shrink-0 text-ui text-muted-foreground opacity-100 transition-opacity duration-150 group-hover:opacity-0">
-        {relativeTime(item.modified)}
-      </span>
+      <div className="relative flex shrink-0 items-center justify-end self-stretch">
+        {/* `pointer-events-none` unconditionally: it's never a target, and a
+            faded-but-present element still hit-tests — stacked on `right-0` it
+            would otherwise swallow the cursor over the last button, which reads
+            as that one button being dead while its neighbour works. */}
+        <span className="pointer-events-none absolute right-0 text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0">
+          {relativeTime(item.modified)}
+        </span>
 
-      {/* `opacity-0` rather than `hidden`: shadcn's button base sets
-          `inline-flex`, and Tailwind emits that after `hidden` at equal
-          specificity, so a `display` utility here silently loses.
-          `pointer-events-none` keeps the invisible button unclickable. */}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        title="Archive"
-        onClick={(e) => e.stopPropagation()}
-        className="pointer-events-none absolute right-1.5 opacity-0 transition-opacity duration-150 text-muted-foreground group-hover:pointer-events-auto group-hover:opacity-100"
-      >
-        <ArchiveBoxIcon />
-      </Button>
+        {/* `opacity-0` rather than `hidden`: shadcn's button base sets
+            `inline-flex`, and Tailwind emits that after `hidden` at equal
+            specificity, so a `display` utility here silently loses.
+            `pointer-events-none` keeps the invisible buttons unclickable. */}
+        <div className="pointer-events-none relative flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100">
+          <RowAction
+            label={item.pinned ? "Unpin" : "Pin"}
+            active={item.pinned}
+            onClick={() => onSetFlags(item.sessionId, { pinned: !item.pinned })}
+          >
+            <Pin />
+          </RowAction>
+
+          <RowAction
+            label={item.archived ? "Unsettle" : "Settle"}
+            active={item.archived}
+            onClick={() => onSetFlags(item.sessionId, { archived: !item.archived })}
+          >
+            <Check />
+          </RowAction>
+        </div>
+      </div>
     </div>
   );
 }

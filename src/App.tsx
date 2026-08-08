@@ -48,6 +48,7 @@ function App() {
     handleSendMsg,
     handleSelectSessionIndexItem,
     handleNewSession,
+    setSessionFlags,
   } = useSessions();
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
@@ -96,6 +97,7 @@ function App() {
           onToggleCollapsed={toggleSidebar}
           onSelect={handleSelectSessionIndexItem}
           onNewSession={handleNewSession}
+          onSetFlags={setSessionFlags}
         />
       }
       header={

@@ -295,6 +295,29 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
 
 
 
+// One call for both flags, so a click writes only the one it owns. The row is
+// replaced from what the store returned rather than from the value we sent —
+// the index is authoritative, and a failed write must not leave the sidebar
+// showing a state the disk doesn't have.
+const setSessionFlags = async (
+  sessionId: string,
+  flags: { archived?: boolean; pinned?: boolean },
+) => {
+  try {
+    const updated = await invoke<SessionIndexItem | null>("set_session_flags", {
+      sessionId,
+      archived: flags.archived ?? null,
+      pinned: flags.pinned ?? null,
+    });
+    if (!updated) return;
+    setSessionIndexItems((prev) =>
+      prev.map((i) => (i.sessionId === sessionId ? updated : i)),
+    );
+  } catch (e) {
+    setError(String(e));
+  }
+};
+
 useEffect(() => {
   const listSessionIndexItems = async () => {
     return await invoke<SessionIndexItem[]>("list_session_index_items");
@@ -436,6 +459,6 @@ useEffect(() => {
 // A brand-new session has no id until its first send, so nothing can be in flight.
 const busy = selectedSessionId ? busyBySession[selectedSessionId] ?? false : false;
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, busyBySession, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, busyBySession, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
 
 }

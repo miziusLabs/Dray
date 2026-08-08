@@ -126,6 +126,19 @@ async fn checkout_branch(cwd: &str, branch: &str, stash: bool) -> Result<BranchL
     git::list_branches(cwd).await.map_err(|e| e.to_string())
 }
 
+/// Returns the entry as written so the sidebar re-renders from the stored value
+/// rather than its own guess at it. `None` for an unknown id.
+#[tauri::command]
+async fn set_session_flags(
+    session_id: &str,
+    archived: Option<bool>,
+    pinned: Option<bool>,
+) -> Result<Option<SessionIndexItem>, String> {
+    store::set_session_flags(session_id, archived, pinned)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -144,6 +157,7 @@ pub fn run() {
             set_last_selected_project,
             list_branches,
             checkout_branch,
+            set_session_flags,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
