@@ -67,6 +67,7 @@ function App() {
 
   const toggleSidebar = () => setCollapsed((prev) => !prev);
   useHotkey("b", toggleSidebar);
+  useHotkey("n", handleNewSession);
   // No accelerator: Shift+Tab on its own, matching the CLI's own chord for this.
   useHotkey("Tab", () => setPermissionMode(nextPermissionMode(permissionMode)), {
     meta: false,

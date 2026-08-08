@@ -97,7 +97,7 @@ export default function ChatInput({
             modifiers silently no-op, so both states set an explicit color. */}
         <div
           ref={cardRef}
-          className="rounded-2xl border border-[oklch(1_0_0/6%)] bg-card transition-colors focus-within:border-[oklch(1_0_0/18%)]"
+          className="rounded-2xl border border-[oklch(1_0_0/6%)] bg-card transition-colors focus-within:border-[oklch(1_0_0/12%)]"
         >
           {/* Both buttons sit on the last line. At one line that reads as
               centered anyway, because the textarea's vertical padding below is
@@ -120,7 +120,7 @@ export default function ChatInput({
               rows={1}
               autoFocus
               value={message}
-              placeholder="Ask anything..."
+              placeholder="Describe a task..."
               onChange={(e) => setMessage(e.currentTarget.value)}
               onKeyDown={(e) => {
                 // Shift+Enter is the only way to get a newline; plain Enter sends.

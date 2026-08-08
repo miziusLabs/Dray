@@ -117,7 +117,11 @@ export default function Sidebar({
           className="w-full justify-start px-1.5 text-ui"
         >
           <PlusIcon />
-          New chat
+          New Task
+          <KbdGroup className="ml-auto">
+            <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+            <Kbd>N</Kbd>
+          </KbdGroup>
         </Button>
 
         <Button variant="ghost" size="sm" className="w-full justify-start px-1.5 text-ui">
