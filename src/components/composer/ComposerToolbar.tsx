@@ -1,9 +1,12 @@
+import { PlusIcon } from "@heroicons/react/24/outline";
+
 import BranchSelector from "@/components/composer/BranchSelector";
 import BranchSwitchDialog from "@/components/composer/BranchSwitchDialog";
 import ModelSelector from "@/components/composer/ModelSelector";
 import PermissionSelector from "@/components/composer/PermissionSelector";
 import ProjectSelector from "@/components/composer/ProjectSelector";
 import WorktreeToggle from "@/components/composer/WorktreeToggle";
+import { Button } from "@/components/ui/button";
 import type {
   ApprovalPolicy,
   BranchList,
@@ -44,10 +47,11 @@ export type ComposerToolbarProps = {
   isNewSession: boolean;
 };
 
-/// The row under the composer. Model and permission change a running session in
+/// The composer's control row. Model and permission change a running session in
 /// place; project, branch, and worktree decide where it starts and disappear
 /// once it has — a control that can never be used is noise, and the session
-/// header already shows the project and branch.
+/// header already shows the project and branch. Its own spacing from the card is
+/// the caller's, since only the caller knows which side of it the row sits on.
 export default function ComposerToolbar({
   models,
   modelId,
@@ -70,7 +74,18 @@ export default function ComposerToolbar({
   isNewSession,
 }: ComposerToolbarProps) {
   return (
-    <div className="flex min-w-0 items-center gap-0.5 px-1 pt-1.5">
+    <div className="flex min-w-0 items-center gap-0.5 px-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        disabled
+        title="Attach"
+        className="rounded-full text-muted-foreground"
+      >
+        <PlusIcon />
+      </Button>
+
       <PermissionSelector value={permissionMode} onChange={onPermissionModeChange} />
 
       <ModelSelector

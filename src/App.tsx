@@ -149,6 +149,7 @@ function App() {
           onSend={handleSendMsg}
           busy={busy}
           sessionId={selectedSessionId}
+          isNewTask={!selectedSession}
           toolbar={
             <ComposerToolbar
               models={models}
