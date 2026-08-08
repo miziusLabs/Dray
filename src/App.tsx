@@ -184,6 +184,7 @@ function App() {
           selectedSessionId ? streamingContentBlock[selectedSessionId] ?? null : null
         }
         onOpenSubagent={openSubagent}
+        busy={busy}
       />
     </AppShell>
     </TooltipProvider>

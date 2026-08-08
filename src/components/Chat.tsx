@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
+import ThinkingIndicator from "@/components/chat/ThinkingIndicator";
 import TurnBlock from "@/components/chat/TurnBlock";
 import type { StreamingBlock } from "@/hooks/useSessions";
 import { buildTranscript } from "@/lib/transcript";
@@ -10,9 +11,17 @@ type ChatProps = {
   session: SessionSnapshot | null;
   streamingBlock: StreamingBlock | null;
   onOpenSubagent: (id: string) => void;
+  /// Whether this session has a turn in flight, so the transcript can show the
+  /// agent is still working.
+  busy?: boolean;
 };
 
-export default function Chat({ session, streamingBlock, onOpenSubagent }: ChatProps) {
+export default function Chat({
+  session,
+  streamingBlock,
+  onOpenSubagent,
+  busy = false,
+}: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Whether to keep pinning to the bottom. Cleared once the user scrolls up, so
@@ -92,6 +101,11 @@ export default function Chat({ session, streamingBlock, onOpenSubagent }: ChatPr
         {/* Deltas are never persisted, so this trailing block is replaced by the
             committed `assistant_text` the moment the turn's block closes. */}
         {streamingText && <AssistantMessage text={streamingText} streaming />}
+
+        {/* Last, so it trails whatever the turn has produced so far. The pane's
+            ResizeObserver re-pins the scroll when this mounts, so it needs no
+            place in the effect's deps. */}
+        {busy && <ThinkingIndicator />}
       </div>
     </div>
   );
