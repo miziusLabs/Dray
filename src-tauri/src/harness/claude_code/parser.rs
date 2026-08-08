@@ -538,7 +538,7 @@ pub struct ResultOrigin {
 // `McpServer` and `PermissionMode` are shared with the normalized model rather
 // than duplicated here — the wire shapes match, so these deserialize straight
 // into the `events` types.
-pub use crate::events::{ApprovalPolicy as PermissionMode, McpServer};
+pub use crate::events::{McpServer, PermissionMode};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plugin {

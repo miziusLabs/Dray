@@ -60,9 +60,11 @@ rawInput: string | null, title: string | null, } | { "type": "tool_call_complete
 description: string | null, lastTool: string | null, usage: Usage | null, } | { "type": "subagent_completed", agentId: string, status: string, summary: string | null, usage: Usage | null, } | { "type": "usage_update" } & Usage | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compacted", message: string | null, windowNumber: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
 
 /**
- * Permission stance for a session, in roughly increasing order of autonomy.
+ * Permission stance a session *runs under*, in roughly increasing order of
+ * autonomy. Every variant is settable, so this is what the app stores and
+ * sends — see [`PermissionMode`] for the wider set the CLI reports.
  */
-export type ApprovalPolicy = "default" | "plan" | "manual" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions";
+export type ApprovalPolicy = "plan" | "manual" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions";
 
 /**
  * Joins streamed content to its committed counterpart. A message is often
@@ -88,10 +90,16 @@ export type BranchList = {
  */
 current: string | null, branches: Array<string>, 
 /**
- * Uncommitted changes, which make a checkout fail. Surfaced so the picker
- * can say why rather than letting the send die on git's stderr.
+ * What a `-w` worktree forks from, resolved the way the CLI resolves it.
+ * Shown in place of the branch picker in worktree mode, where the picked
+ * branch has no effect. `None` when the repo has no remote.
  */
-dirty: boolean, };
+defaultBase: string | null, 
+/**
+ * Uncommitted changes, counted for the switch dialog's "you have N
+ * changes". Zero switches without asking.
+ */
+dirty: number, };
 
 export type ContextWindow = { usedTokens: number, maxTokens: number, };
 
@@ -153,6 +161,15 @@ efforts: Array<Effort>, defaultEffort: Effort | null, };
 export type ModelId = "opus" | "sonnet" | "haiku" | "unknown";
 
 /**
+ * What the CLI *reports* in `system/init`, which is a wider set than it
+ * accepts: `default` names the harness's own prompting stance, and
+ * `--permission-mode` rejects that name while offering `manual` for the same
+ * thing. Kept separate from [`ApprovalPolicy`] rather than remapped, so a
+ * round trip can't quietly turn one into the other.
+ */
+export type PermissionMode = "default" | "plan" | "manual" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions";
+
+/**
  * A directory the user attached, and the root a session runs in. Distinct from
  * [`crate::store::SessionIndexItem::project_path`], which records where a
  * session *did* run — a project can be detached without rewriting history.
@@ -167,13 +184,13 @@ path: string,
  * Folder name as of attaching. Cached so a project whose directory was
  * since renamed or removed still has a label.
  */
-name: string, added: string, };
-
-export type ProjectsFile = { projects: Array<Project>, 
+name: string, 
 /**
- * Seeds the composer's project picker on the next launch.
+ * Doubles as the sort key and the "which project was last open" answer:
+ * selecting a project *is* what makes it most recent, so a separate
+ * `last_selected` pointer would be a second place to keep the same fact.
  */
-lastSelected: string | null, };
+lastSelected: string, };
 
 export type RateLimit = { usedPercent: number | null, windowMinutes: number | null, 
 /**
@@ -277,7 +294,7 @@ export type Settings = { model: string | null,
  * `permissionMode`, which is a closed set; Codex's `approval_policy` maps
  * onto these, gaining variants if it turns out to need them.
  */
-approvalPolicy: ApprovalPolicy | null, sandbox: string | null, writableRoots: Array<string>, networkAccess: boolean | null, fastMode: string | null, };
+approvalPolicy: PermissionMode | null, sandbox: string | null, writableRoots: Array<string>, networkAccess: boolean | null, fastMode: string | null, };
 
 /**
  * A running subagent, whose events interleave with the main conversation's on

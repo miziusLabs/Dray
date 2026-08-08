@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect } from "react";
-import { AgentEvent, ApprovalPolicy, BranchList, Effort, Model, ModelId, Project, ProjectsFile, SessionIndexItem, SessionSnapshot } from "../types/events";
+import { AgentEvent, ApprovalPolicy, BranchList, Effort, Model, ModelId, Project, SessionIndexItem, SessionSnapshot } from "../types/events";
 
 const DEFAULT_MODEL: ModelId = "haiku";
 const DEFAULT_EFFORT: Effort = "high";
@@ -35,6 +35,9 @@ export function useSessions() {
     // and never persisted.
     const [branches, setBranches] = useState<BranchList | null>(null);
     const [branch, setBranch] = useState<string | null>(null);
+    // The branch a switch is waiting on the user to confirm, because the tree
+    // has uncommitted changes. Null when nothing is pending.
+    const [pendingBranch, setPendingBranch] = useState<string | null>(null);
     const [useWorktree, setUseWorktree] = useState(false);
     // Per-session, not global: sessions run concurrently and all of their events
     // arrive on the same channel, so a single flag would clear on another's turn.
@@ -67,9 +70,9 @@ const handleAttachProject = async () => {
   if (typeof picked !== "string") return;
 
   try {
-    const file = await invoke<ProjectsFile>("add_project", { path: picked });
-    setProjects(file.projects);
-    setProjectPath(file.lastSelected ?? picked);
+    // Returns the list already sorted, so the attached project is at the front.
+    setProjects(await invoke<Project[]>("add_project", { path: picked }));
+    setProjectPath(picked);
   } catch (e) {
     setError(String(e));
   }
@@ -79,6 +82,54 @@ const handleSelectProject = (path: string) => {
   setProjectPath(path);
   // Fire and forget: losing the remembered pick costs one dropdown next launch.
   void invoke("set_last_selected_project", { path }).catch(() => {});
+};
+
+// Checks the branch out for real, so the picker is the only thing that moves the
+// working tree — by send time the repo is already where the session expects it.
+const runCheckout = async (target: string, stash: boolean) => {
+  if (!projectPath) return;
+
+  try {
+    const list = await invoke<BranchList>("checkout_branch", {
+      cwd: projectPath,
+      branch: target,
+      stash,
+    });
+    setBranches(list);
+    setBranch(list.current);
+  } catch (e) {
+    // Git refuses rather than clobbering, so the tree is untouched and the
+    // message names the files in the way.
+    setError(String(e));
+  } finally {
+    setPendingBranch(null);
+  }
+};
+
+// A clean tree switches silently; a dirty one routes through the dialog, whose
+// buttons call back into `runCheckout` with the user's choice.
+//
+// The dirty count is re-read here rather than taken from `branches`: that was
+// fetched when the project was selected, and the user has been editing files
+// since. A stale zero silently skips the dialog and moves their work.
+const handleSelectBranch = async (target: string) => {
+  if (!projectPath || target === branches?.current) return;
+
+  let list: BranchList;
+  try {
+    list = await invoke<BranchList>("list_branches", { cwd: projectPath });
+    setBranches(list);
+  } catch (e) {
+    setError(String(e));
+    return;
+  }
+
+  if (list.dirty > 0) {
+    setPendingBranch(target);
+    return;
+  }
+
+  void runCheckout(target, false);
 };
 
 const selectedSession = selectedSessionId ? sessions.find((s) => s.sessionId === selectedSessionId) ?? null : null;
@@ -127,8 +178,9 @@ const handleSendMsg = async (
       effort,
       permissionMode,
       cwd,
-      // Creation-time only; the composer hides both once a session exists.
-      branch: isNewSession ? branch : null,
+      // Recorded, not acted on — the picker already checked it out. Null for a
+      // worktree session, whose branch the CLI names itself.
+      branch: isNewSession && !useWorktree ? branch : null,
       useWorktree: isNewSession && useWorktree,
       worktreeName: null,
       isNewSession,
@@ -221,10 +273,16 @@ useEffect(() => {
 }, [])
 
 useEffect(() => {
-  invoke<ProjectsFile>("list_projects").then((file) => {
-    setProjects(file.projects);
-    setProjectPath(file.lastSelected ?? file.projects[0]?.path ?? null);
-  });
+  invoke<Project[]>("list_projects")
+    .then((list) => {
+      setProjects(list);
+      // Sorted most-recently-selected first, so the front of the list *is* the
+      // project to reopen — no separate pointer to keep in step.
+      setProjectPath(list[0]?.path ?? null);
+    })
+    // Without this a failed read leaves the picker silently empty, and the
+    // reason only reaches the console.
+    .catch((e) => setError(String(e)));
 }, [])
 
 // Refetched per project rather than cached: branches change outside the app.
@@ -239,11 +297,20 @@ useEffect(() => {
 
   let cancelled = false;
 
-  invoke<BranchList>("list_branches", { cwd: projectPath }).then((list) => {
-    if (cancelled) return;
-    setBranches(list);
-    setBranch(list.current);
-  });
+  invoke<BranchList>("list_branches", { cwd: projectPath })
+    .then((list) => {
+      if (cancelled) return;
+      setBranches(list);
+      setBranch(list.current);
+    })
+    .catch((e) => {
+      if (cancelled) return;
+      // Cleared rather than left stale: the picker would otherwise offer the
+      // previous project's branches for this one.
+      setBranches(null);
+      setBranch(null);
+      setError(String(e));
+    });
 
   return () => {
     cancelled = true;
@@ -333,6 +400,6 @@ useEffect(() => {
 // A brand-new session has no id until its first send, so nothing can be in flight.
 const busy = selectedSessionId ? busyBySession[selectedSessionId] ?? false : false;
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, busyBySession, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, setBranch, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, busyBySession, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession};
 
 }

@@ -69,14 +69,20 @@ const OTHER_PROJECT: SessionIndexItem = {
 const SESSION: SessionSnapshot = { ...INDEX, events: DEMO_EVENTS };
 
 const DEMO_PROJECTS: Project[] = [
-  { path: "/Users/yogesh/Documents/yogesh", name: "yogesh", added: "" },
-  { path: "/Users/yogesh/Documents/mayo/supalytics-server", name: "supalytics-server", added: "" },
+  { path: "/Users/yogesh/Documents/yogesh", name: "yogesh", lastSelected: "" },
+  {
+    path: "/Users/yogesh/Documents/mayo/supalytics-server",
+    name: "supalytics-server",
+    lastSelected: "",
+  },
 ];
 
+// Dirty on purpose: it's what puts the switch dialog on screen here.
 const DEMO_BRANCHES: BranchList = {
   current: "main",
   branches: ["main", "feat/pagination", "fix/rss-dates"],
-  dirty: false,
+  defaultBase: "origin/main",
+  dirty: 2,
 };
 
 /// Renders every transcript component against fixed content so the UI can be
@@ -91,6 +97,7 @@ export default function Demo() {
   const [permissionMode, setPermissionMode] = useState<ApprovalPolicy>("auto");
   const [projectPath, setProjectPath] = useState<string | null>(DEMO_PROJECTS[0].path);
   const [branch, setBranch] = useState<string | null>("main");
+  const [pendingBranch, setPendingBranch] = useState<string | null>(null);
   const [useWorktree, setUseWorktree] = useState(false);
   // Drives the toolbar's creation-time trio, which a real session hides once it
   // exists — both states need to be reviewable here.
@@ -192,7 +199,15 @@ export default function Demo() {
               onAttachProject={() => {}}
               branches={DEMO_BRANCHES}
               branch={branch}
-              onSelectBranch={setBranch}
+              onSelectBranch={setPendingBranch}
+              pendingBranch={pendingBranch}
+              // No git here, so confirming just moves the picker — enough to
+              // review the copy and the button order.
+              onConfirmBranchSwitch={() => {
+                setBranch(pendingBranch);
+                setPendingBranch(null);
+              }}
+              onCancelBranchSwitch={() => setPendingBranch(null)}
               useWorktree={useWorktree}
               onToggleWorktree={() => setUseWorktree((v) => !v)}
               isNewSession={isNewSession}

@@ -39,7 +39,10 @@ function App() {
     setPermissionMode,
     handleAttachProject,
     handleSelectProject,
-    setBranch,
+    handleSelectBranch,
+    pendingBranch,
+    setPendingBranch,
+    runCheckout,
     setUseWorktree,
     handleSendMsg,
     handleSelectSessionIndexItem,
@@ -149,7 +152,12 @@ function App() {
               onAttachProject={handleAttachProject}
               branches={branches}
               branch={branch}
-              onSelectBranch={setBranch}
+              onSelectBranch={handleSelectBranch}
+              pendingBranch={pendingBranch}
+              onConfirmBranchSwitch={(stash) =>
+                pendingBranch && runCheckout(pendingBranch, stash)
+              }
+              onCancelBranchSwitch={() => setPendingBranch(null)}
               useWorktree={useWorktree}
               onToggleWorktree={() => setUseWorktree((v) => !v)}
               isNewSession={!selectedSessionId}

@@ -55,8 +55,8 @@ impl SessionManager {
         effort: Option<Effort>,
         permission_mode: ApprovalPolicy,
         cwd: &str,
-        // Checked out before the spawn when set. Creation-time only — the
-        // frontend hides the picker once a session exists.
+        // Recorded, not acted on: the picker checks the branch out when the
+        // user picks it, so by here the tree is already on it.
         branch: Option<&str>,
         use_worktree: bool,
         worktree_name: Option<&str>,
@@ -67,13 +67,6 @@ impl SessionManager {
         let effort = resolve_effort(&model_spec, effort);
 
         if is_new_session {
-            // Ahead of both the index write and the spawn: a checkout that fails
-            // must leave no trace, and a worktree forks from whatever HEAD points
-            // at, so this is also what decides the new tree's base commit.
-            if let Some(branch) = branch {
-                git::checkout_branch(cwd, branch).await?;
-            }
-
             let worktree_name = if use_worktree {
                 Some(resolve_worktree_name(cwd, worktree_name)?)
             } else {
@@ -307,11 +300,7 @@ impl Session {
     /// Switches the permission stance of a running child. Unlike effort, the CLI
     /// does have a `set_permission_mode` subtype, so this needs no respawn.
     pub async fn set_permission_mode(&mut self, mode: ApprovalPolicy) -> Result<()> {
-        // `Default` names the CLI's own default, which this request has no way
-        // to express — the child already holds whatever it started with.
-        let Some(arg) = mode.as_arg() else {
-            return Ok(());
-        };
+        let arg = mode.as_arg();
 
         let request = json!({
             "type": "control_request",

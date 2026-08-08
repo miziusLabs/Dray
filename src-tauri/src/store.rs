@@ -421,8 +421,9 @@ mod tests {
         // Reads back as a model no build lists, so it can never reach a spawn.
         assert_eq!(item.model, ModelId::Unknown);
         assert!(crate::models::find_model(item.model).is_none());
-        // Absent means the CLI's own default, which omits the flag entirely.
-        assert_eq!(item.permission_mode, ApprovalPolicy::Default);
+        // Absent reads as the composer's own default, so an old session resumes
+        // under the mode its picker would show.
+        assert_eq!(item.permission_mode, ApprovalPolicy::Auto);
     }
 
     #[test]

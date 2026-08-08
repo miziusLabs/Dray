@@ -2,7 +2,7 @@ use crate::{
     events::ApprovalPolicy,
     git::BranchList,
     models::{Effort, Model, ModelId},
-    projects::ProjectsFile,
+    projects::Project,
     session::{Harness, SessionManager},
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot},
 };
@@ -87,17 +87,17 @@ async fn get_session_by_id(session_id: &str) -> Result<Option<SessionSnapshot>, 
 }
 
 #[tauri::command]
-async fn list_projects() -> Result<ProjectsFile, String> {
+async fn list_projects() -> Result<Vec<Project>, String> {
     projects::read_projects().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn add_project(path: &str) -> Result<ProjectsFile, String> {
+async fn add_project(path: &str) -> Result<Vec<Project>, String> {
     projects::add_project(path).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn remove_project(path: &str) -> Result<ProjectsFile, String> {
+async fn remove_project(path: &str) -> Result<Vec<Project>, String> {
     projects::remove_project(path)
         .await
         .map_err(|e| e.to_string())
@@ -112,6 +112,17 @@ async fn set_last_selected_project(path: &str) -> Result<(), String> {
 
 #[tauri::command]
 async fn list_branches(cwd: &str) -> Result<BranchList, String> {
+    git::list_branches(cwd).await.map_err(|e| e.to_string())
+}
+
+/// Returns the branch list as it stands after the switch, so the picker
+/// re-renders from one round trip rather than following up with its own.
+#[tauri::command]
+async fn checkout_branch(cwd: &str, branch: &str, stash: bool) -> Result<BranchList, String> {
+    git::checkout_branch(cwd, branch, stash)
+        .await
+        .map_err(|e| e.to_string())?;
+
     git::list_branches(cwd).await.map_err(|e| e.to_string())
 }
 
@@ -132,6 +143,7 @@ pub fn run() {
             remove_project,
             set_last_selected_project,
             list_branches,
+            checkout_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

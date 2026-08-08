@@ -410,28 +410,27 @@ pub struct Settings {
     /// How much the agent may do without asking. Modeled on Claude Code's
     /// `permissionMode`, which is a closed set; Codex's `approval_policy` maps
     /// onto these, gaining variants if it turns out to need them.
-    pub approval_policy: Option<ApprovalPolicy>,
+    pub approval_policy: Option<PermissionMode>,
     pub sandbox: Option<String>,
     pub writable_roots: Vec<String>,
     pub network_access: Option<bool>,
     pub fast_mode: Option<String>,
 }
 
-/// Permission stance for a session, in roughly increasing order of autonomy.
+/// Permission stance a session *runs under*, in roughly increasing order of
+/// autonomy. Every variant is settable, so this is what the app stores and
+/// sends — see [`PermissionMode`] for the wider set the CLI reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub enum ApprovalPolicy {
-    /// Prompt per action, per the harness's own defaults. Inbound only — see
-    /// [`ApprovalPolicy::as_arg`].
-    #[default]
-    Default,
     /// Read-only: research and propose, change nothing.
     Plan,
-    /// Prompt per action, named explicitly rather than left to the harness.
+    /// Prompt per action.
     Manual,
     /// Edits apply without prompting; other tools still ask.
     AcceptEdits,
+    #[default]
     Auto,
     DontAsk,
     /// Every permission check bypassed.
@@ -439,23 +438,37 @@ pub enum ApprovalPolicy {
 }
 
 impl ApprovalPolicy {
-    /// The `--permission-mode` flag value, `None` for [`ApprovalPolicy::Default`].
-    ///
-    /// The CLI's vocabularies are asymmetric: it *reports* `default` in
-    /// `system/init`, but its flag rejects that name and offers `manual` for the
-    /// same stance. Rather than remap one onto the other and lose the
-    /// distinction, `Default` means "omit the flag and let the CLI decide".
-    pub fn as_arg(self) -> Option<&'static str> {
+    /// The `--permission-mode` flag value. Total, unlike the inbound direction:
+    /// the frontend always sends a real mode, so there is nothing to omit.
+    pub fn as_arg(self) -> &'static str {
         match self {
-            ApprovalPolicy::Default => None,
-            ApprovalPolicy::Plan => Some("plan"),
-            ApprovalPolicy::Manual => Some("manual"),
-            ApprovalPolicy::AcceptEdits => Some("acceptEdits"),
-            ApprovalPolicy::Auto => Some("auto"),
-            ApprovalPolicy::DontAsk => Some("dontAsk"),
-            ApprovalPolicy::BypassPermissions => Some("bypassPermissions"),
+            ApprovalPolicy::Plan => "plan",
+            ApprovalPolicy::Manual => "manual",
+            ApprovalPolicy::AcceptEdits => "acceptEdits",
+            ApprovalPolicy::Auto => "auto",
+            ApprovalPolicy::DontAsk => "dontAsk",
+            ApprovalPolicy::BypassPermissions => "bypassPermissions",
         }
     }
+}
+
+/// What the CLI *reports* in `system/init`, which is a wider set than it
+/// accepts: `default` names the harness's own prompting stance, and
+/// `--permission-mode` rejects that name while offering `manual` for the same
+/// thing. Kept separate from [`ApprovalPolicy`] rather than remapped, so a
+/// round trip can't quietly turn one into the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionMode {
+    #[default]
+    Default,
+    Plan,
+    Manual,
+    AcceptEdits,
+    Auto,
+    DontAsk,
+    BypassPermissions,
 }
 
 /// Hand-rolled to avoid a date dependency for one display-only field; `seq`, not
@@ -560,9 +573,8 @@ mod tests {
         assert_eq!(s, serde_json::to_string(&back).unwrap());
     }
 
-    /// Every settable mode's wire name is also its flag value — the one exception
-    /// being `Default`, whose wire name `default` the flag rejects outright.
-    /// Pins the asymmetry that makes [`ApprovalPolicy::as_arg`] return an Option.
+    /// Every settable mode's wire name is also its flag value, so persisting a
+    /// mode and passing it to `--permission-mode` can't drift apart.
     #[test]
     fn every_settable_policy_matches_its_cli_arg() {
         for p in [
@@ -574,17 +586,31 @@ mod tests {
             ApprovalPolicy::BypassPermissions,
         ] {
             let json = serde_json::to_string(&p).unwrap();
-            assert_eq!(json, format!("\"{}\"", p.as_arg().unwrap()));
+            assert_eq!(json, format!("\"{}\"", p.as_arg()));
         }
-
-        assert!(ApprovalPolicy::Default.as_arg().is_none());
     }
 
-    /// The CLI reports `default` in `system/init` even though its flag won't take
-    /// it, so the inbound parse has to keep working.
+    /// The CLI reports `default` in `system/init` even though its flag won't
+    /// take it. `PermissionMode` exists to hold that variant; `ApprovalPolicy`
+    /// must not gain it back, or an unsettable mode reaches the flag.
+    ///
+    /// Verified against v2.1.224: `plan`, `acceptEdits`, `bypassPermissions`
+    /// and `dontAsk` each report themselves, while both `auto` and `manual`
+    /// report `default` — so it names a real stance rather than an omitted
+    /// flag, and the init event can't say which of the two is in effect.
     #[test]
-    fn reported_default_policy_still_parses() {
-        let p: ApprovalPolicy = serde_json::from_str(r#""default""#).unwrap();
-        assert_eq!(p, ApprovalPolicy::Default);
+    fn reported_default_parses_as_permission_mode_only() {
+        let m: PermissionMode = serde_json::from_str(r#""default""#).unwrap();
+        assert_eq!(m, PermissionMode::Default);
+
+        assert!(serde_json::from_str::<ApprovalPolicy>(r#""default""#).is_err());
+    }
+
+    /// An index entry written before `permissionMode` existed reads as `auto`,
+    /// which is also the composer's default — so old sessions resume under the
+    /// mode the picker would show for them.
+    #[test]
+    fn default_policy_is_auto() {
+        assert_eq!(ApprovalPolicy::default(), ApprovalPolicy::Auto);
     }
 }

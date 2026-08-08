@@ -76,9 +76,21 @@ Prompts travel the other direction as a single JSON line written to the child's 
 
 **What can change mid-session.** A control is live only if the CLI has a control request for it; everything deciding *where* the agent runs is fixed at creation, and the composer hides it once a session exists. So model and permission mode apply in place, effort kills and resumes, and project/branch/worktree are creation-time only. That rule is what keeps a `git checkout` from ever running under a live child.
 
-**Permission mode is asymmetric.** The CLI *reports* `permissionMode: "default"` but `--permission-mode` rejects that name, offering `manual` for the same stance. `ApprovalPolicy::as_arg` ([events.rs](src-tauri/src/events/events.rs)) returns `Option`, and `Default` maps to `None` — meaning "omit the flag". Don't remap `default` onto `manual`; they are not the same and the round-trip would lie.
+**Permission mode is asymmetric**, and two separate types hold the two directions ([events.rs](src-tauri/src/events/events.rs)). `ApprovalPolicy` is the settable set that `--permission-mode` accepts; `PermissionMode` is what `system/init` reports, which is wider. Verified against v2.1.224 by passing each mode and reading the init event back:
 
-**Git.** [git.rs](src-tauri/src/git.rs) is the only place the app shells out to anything but `claude`. `checkout_branch` validates the name against the branches git just listed — no shell is involved, so injection isn't the risk, but a name starting with `-` would parse as a flag. It runs once per session creation, before the spawn, which is also what sets the base commit a `-w` worktree forks from: the CLI resolves `HEAD` through `rev-parse` and passes it to `git worktree add --no-track -B`.
+| passed | reported |
+|---|---|
+| `plan`, `acceptEdits`, `bypassPermissions`, `dontAsk` | itself |
+| `auto` | `default` |
+| `manual` | `default` |
+
+So `default` is not "no flag was passed" — it is the CLI's own name for the stance `auto` and `manual` both resolve into, and it comes back even when you set something else. `ApprovalPolicy` must therefore never regain a `Default` variant, or an unsettable mode reaches the flag.
+
+The reported value is transcript data only: it reaches `Settings.approval_policy` on a `SessionConfigured` event and nothing reads it back. The index item is what the app stores and displays, written from the user's own pick. Keep it that way — reconciling session state *from* the init event would quietly fail, since `auto` and `manual` are indistinguishable there.
+
+**Git.** [git.rs](src-tauri/src/git.rs) is the only place the app shells out to anything but `claude`. `checkout_branch` validates the name against the branches git just listed — no shell is involved, so injection isn't the risk, but a name starting with `-` would parse as a flag. It runs when the user picks a branch in the composer, not at send: the picker is the only thing that moves the working tree, so by spawn time the repo is already where the session expects it. `dirty` is re-read at pick time rather than reused from the project's initial load, or edits made since would silently skip the confirm.
+
+**A `-w` worktree does not fork from the checked-out branch.** The CLI resolves the repo's default branch, fetches `origin/<it>`, and passes that to `git worktree add --no-track -B` — so the fork point is `origin/main` regardless of what is checked out, and it depends on network state (a failed fetch falls back to local `HEAD`). `worktree.baseRef: "head"` in settings switches this, but the `-w` flag surface exposes no base ref. Hence the composer hides the branch picker in worktree mode and shows the resolved base instead: offering a branch there would promise something the CLI doesn't honour.
 
 **Models.** [models/models.rs](src-tauri/src/models/models.rs) is the single source for the model list, its effort levels, and the defaults; the frontend builds its picker from `list_models` rather than a hardcoded array. Ids are bare aliases (`opus`, not a dated name) so sessions follow the latest model. Haiku has no effort levels — the CLI tolerates `--effort` there and ignores it, so omitting it keeps the persisted value honest rather than avoiding a crash.
 

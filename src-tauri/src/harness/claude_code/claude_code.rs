@@ -50,11 +50,7 @@ pub async fn init(
         args.extend(["--effort", effort.as_arg()]);
     }
 
-    // `None` is `Default`, which the flag has no name for — omitting it is how
-    // the CLI's own default is requested.
-    if let Some(mode) = permission_mode.as_arg() {
-        args.extend(["--permission-mode", mode]);
-    }
+    args.extend(["--permission-mode", permission_mode.as_arg()]);
 
     if is_new_session {
         args.extend(["--session-id", session_id]);

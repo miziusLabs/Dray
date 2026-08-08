@@ -1,4 +1,5 @@
 import BranchSelector from "@/components/composer/BranchSelector";
+import BranchSwitchDialog from "@/components/composer/BranchSwitchDialog";
 import ModelSelector from "@/components/composer/ModelSelector";
 import PermissionSelector from "@/components/composer/PermissionSelector";
 import ProjectSelector from "@/components/composer/ProjectSelector";
@@ -30,6 +31,11 @@ export type ComposerToolbarProps = {
   branch: string | null;
   onSelectBranch: (branch: string) => void;
 
+  /// Set while a switch waits on the uncommitted-changes prompt.
+  pendingBranch: string | null;
+  onConfirmBranchSwitch: (stash: boolean) => void;
+  onCancelBranchSwitch: () => void;
+
   useWorktree: boolean;
   onToggleWorktree: () => void;
 
@@ -56,6 +62,9 @@ export default function ComposerToolbar({
   branches,
   branch,
   onSelectBranch,
+  pendingBranch,
+  onConfirmBranchSwitch,
+  onCancelBranchSwitch,
   useWorktree,
   onToggleWorktree,
   isNewSession,
@@ -86,11 +95,33 @@ export default function ComposerToolbar({
             <>
               <WorktreeToggle on={useWorktree} onToggle={onToggleWorktree} />
 
-              <BranchSelector
-                branches={branches}
-                value={branch}
-                onSelect={onSelectBranch}
-              />
+              {/* A worktree forks from the remote's default branch no matter
+                  what is checked out, so offering a branch here would promise
+                  something the CLI doesn't honour. State the real base instead. */}
+              {useWorktree ? (
+                branches?.defaultBase && (
+                  <span className="truncate px-1.5 text-ui text-muted-foreground/60">
+                    from {branches.defaultBase}
+                  </span>
+                )
+              ) : (
+                // Relative, so the switch popover anchors to the picker rather
+                // than to the window.
+                <div className="relative flex min-w-0 items-center">
+                  <BranchSelector
+                    branches={branches}
+                    value={branch}
+                    onSelect={onSelectBranch}
+                    disabled={pendingBranch !== null}
+                  />
+                  <BranchSwitchDialog
+                    target={pendingBranch}
+                    dirty={branches?.dirty ?? 0}
+                    onConfirm={onConfirmBranchSwitch}
+                    onCancel={onCancelBranchSwitch}
+                  />
+                </div>
+              )}
             </>
           )}
         </>

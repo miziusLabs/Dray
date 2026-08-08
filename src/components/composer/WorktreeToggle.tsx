@@ -6,8 +6,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-/// Reads together with the branch selector to its right: "New worktree · main"
-/// runs on `main` itself, "New worktree from · main" forks a fresh tree off it.
+/// Off, the branch picker to the right decides where the session runs. On, it is
+/// replaced by the fork point, which the CLI picks rather than the user.
 export default function WorktreeToggle({
   on,
   onToggle,
@@ -43,13 +43,13 @@ export default function WorktreeToggle({
               )}
             />
           </span>
-          {on ? "New worktree from" : "New worktree"}
+          Worktree
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top">
         {on
-          ? "Forks an isolated worktree off the selected branch"
-          : "Run this session on the selected branch directly"}
+          ? "Runs in an isolated tree, forked from the remote's default branch"
+          : "Runs on the selected branch, in the project directory"}
       </TooltipContent>
     </Tooltip>
   );
