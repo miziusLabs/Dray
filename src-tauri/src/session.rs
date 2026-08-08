@@ -1,10 +1,12 @@
 use crate::{
-    events::{now_rfc3339, AgentEvent, AgentEventPayload},
+    events::{now_rfc3339, AgentEvent, AgentEventPayload, ApprovalPolicy},
+    git,
     harness::{claude_code, Harness::ClaudeCode},
     models::{find_model, resolve_effort, Effort, Model, ModelId},
     store::{
-        append_session_event, append_session_index_item, list_session_events, resolve_worktree_name,
-        touch_session_index_item, worktree_path, SessionIndexItem, SessionSnapshot,
+        append_session_event, append_session_index_item, get_session_index_item,
+        list_session_events, resolve_worktree_name, touch_session_index_item, worktree_path,
+        SessionIndexItem, SessionSnapshot,
     },
 };
 use anyhow::{bail, Context, Result};
@@ -51,17 +53,27 @@ impl SessionManager {
         harness: Harness,
         model: ModelId,
         effort: Option<Effort>,
+        permission_mode: ApprovalPolicy,
         cwd: &str,
+        // Checked out before the spawn when set. Creation-time only — the
+        // frontend hides the picker once a session exists.
+        branch: Option<&str>,
         use_worktree: bool,
         worktree_name: Option<&str>,
         is_new_session: bool,
         app: &AppHandle,
     ) -> Result<Option<SessionSnapshot>> {
-        let model_spec =
-            find_model(model).with_context(|| format!("unknown model {model:?}"))?;
+        let model_spec = find_model(model).with_context(|| format!("unknown model {model:?}"))?;
         let effort = resolve_effort(&model_spec, effort);
 
         if is_new_session {
+            // Ahead of both the index write and the spawn: a checkout that fails
+            // must leave no trace, and a worktree forks from whatever HEAD points
+            // at, so this is also what decides the new tree's base commit.
+            if let Some(branch) = branch {
+                git::checkout_branch(cwd, branch).await?;
+            }
+
             let worktree_name = if use_worktree {
                 Some(resolve_worktree_name(cwd, worktree_name)?)
             } else {
@@ -73,6 +85,15 @@ impl SessionManager {
                 None => cwd.to_string(),
             };
 
+            // Read back rather than taken from the caller: the picker sends
+            // `None` when the user didn't touch it, and the repo is still on
+            // some branch worth recording. Non-repos report `None` and stay that
+            // way.
+            let branch = match branch {
+                Some(b) => Some(b.to_string()),
+                None => git::list_branches(cwd).await?.current,
+            };
+
             // Indexed before the process spawns, so a session that fails to
             // start is still visible rather than vanishing without a trace.
             let item = SessionIndexItem::new(
@@ -81,9 +102,11 @@ impl SessionManager {
                 &session_cwd,
                 cwd,
                 worktree_name.as_deref(),
+                branch.as_deref(),
                 prompt,
                 model,
                 effort,
+                permission_mode,
             );
             append_session_index_item(item.clone()).await?;
 
@@ -92,6 +115,7 @@ impl SessionManager {
                 harness,
                 &model_spec,
                 effort,
+                permission_mode,
                 cwd,
                 worktree_name.as_deref(),
                 is_new_session,
@@ -134,25 +158,37 @@ impl SessionManager {
         if let Some(s) = sessions_guard.get_mut(session_id) {
             // Before the send, so the index reflects intent even if writing to
             // the child fails — the prompt event is persisted ahead of stdin too.
-            touch_session_index_item(session_id, model, effort).await?;
+            touch_session_index_item(session_id, model, effort, permission_mode).await?;
             if s.model != model {
                 s.set_model(&model_spec).await?;
+            }
+            if s.permission_mode != permission_mode {
+                s.set_permission_mode(permission_mode).await?;
             }
 
             s.send_msg(prompt, app).await?;
             return Ok(None);
         }
 
-        touch_session_index_item(session_id, model, effort).await?;
+        touch_session_index_item(session_id, model, effort, permission_mode).await?;
 
-        // Resume spawns straight into the recorded `cwd` — the worktree already
-        // exists, and passing `-w` again would try to recreate it.
+        // The caller's `cwd` is a hint for a new session only. On resume the
+        // recorded one wins: with a project picker the two can disagree, and
+        // resuming in the wrong directory is both silent and destructive.
+        let resume_cwd = match get_session_index_item(session_id).await? {
+            Some(item) => item.cwd,
+            None => cwd.to_string(),
+        };
+
+        // The worktree already exists, so no `-w` — passing it again would try
+        // to recreate the tree.
         let mut session = Session::init(
             session_id,
             harness,
             &model_spec,
             effort,
-            cwd,
+            permission_mode,
+            &resume_cwd,
             None,
             is_new_session,
             app,
@@ -172,6 +208,7 @@ pub struct Session {
     pub harness: Harness,
     pub model: ModelId,
     pub effort: Option<Effort>,
+    pub permission_mode: ApprovalPolicy,
     pub events: Arc<Mutex<Vec<AgentEvent>>>,
     pub seq: Arc<AtomicU64>,
 }
@@ -184,6 +221,7 @@ impl Session {
         harness: Harness,
         model: &Model,
         effort: Option<Effort>,
+        permission_mode: ApprovalPolicy,
         cwd: &str,
         worktree_name: Option<&str>,
         is_new_session: bool,
@@ -194,6 +232,7 @@ impl Session {
                 session_id,
                 model,
                 effort,
+                permission_mode,
                 cwd,
                 worktree_name,
                 is_new_session,
@@ -261,6 +300,30 @@ impl Session {
             .await?;
         self.stdin.flush().await?;
         self.model = model.id;
+
+        Ok(())
+    }
+
+    /// Switches the permission stance of a running child. Unlike effort, the CLI
+    /// does have a `set_permission_mode` subtype, so this needs no respawn.
+    pub async fn set_permission_mode(&mut self, mode: ApprovalPolicy) -> Result<()> {
+        // `Default` names the CLI's own default, which this request has no way
+        // to express — the child already holds whatever it started with.
+        let Some(arg) = mode.as_arg() else {
+            return Ok(());
+        };
+
+        let request = json!({
+            "type": "control_request",
+            "request_id": Uuid::now_v7().to_string(),
+            "request": {"subtype": "set_permission_mode", "mode": arg},
+        });
+
+        self.stdin
+            .write_all(format!("{request}\n").as_bytes())
+            .await?;
+        self.stdin.flush().await?;
+        self.permission_mode = mode;
 
         Ok(())
     }

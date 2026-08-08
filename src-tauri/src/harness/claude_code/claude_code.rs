@@ -1,8 +1,8 @@
-use crate::events::{AgentEvent, AgentEventPayload};
-use crate::store::{append_session_event, next_seq_by_session_id};
+use crate::events::{AgentEvent, AgentEventPayload, ApprovalPolicy};
 use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::models::{Effort, Model};
 use crate::session::Session;
+use crate::store::{append_session_event, next_seq_by_session_id};
 use anyhow::{Context, Result};
 use std::process::Stdio;
 use std::sync::atomic::AtomicU64;
@@ -24,6 +24,7 @@ pub async fn init(
     session_id: &str,
     model: &Model,
     effort: Option<Effort>,
+    permission_mode: ApprovalPolicy,
     cwd: &str,
     worktree_name: Option<&str>,
     is_new_session: bool,
@@ -40,16 +41,19 @@ pub async fn init(
         "--model",
         // Infallible for a `Model`: only `claude_models()` builds one, and none
         // of those carry `Unknown`.
-        model
-            .id
-            .as_arg()
-            .context("model has no CLI alias")?,
+        model.id.as_arg().context("model has no CLI alias")?,
     ];
 
     // Omitted for models with no effort levels. The CLI accepts and ignores the
     // flag there, so this is about not recording an effort the session never had.
     if let Some(effort) = effort {
         args.extend(["--effort", effort.as_arg()]);
+    }
+
+    // `None` is `Default`, which the flag has no name for — omitting it is how
+    // the CLI's own default is requested.
+    if let Some(mode) = permission_mode.as_arg() {
+        args.extend(["--permission-mode", mode]);
     }
 
     if is_new_session {
@@ -114,6 +118,7 @@ pub async fn init(
         harness: ClaudeCode,
         model: model.id,
         effort,
+        permission_mode,
         events,
         seq,
     })

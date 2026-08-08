@@ -29,3 +29,4 @@ uuid = { version = "1.16", features = ["v7"] }
 # Generates the TS mirror of the event model; `cargo test` writes ../src/types/.
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 dirs = "6.0.0"
+tauri-plugin-dialog = "2"

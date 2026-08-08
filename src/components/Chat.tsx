@@ -75,7 +75,7 @@ export default function Chat({ session, streamingBlock, onOpenSubagent }: ChatPr
   if (!session) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-chat text-muted-foreground">Start a new session</p>
+        <img src="automedon.png" width={540} className="mx-auto opacity-20"></img>
       </div>
     );
   }

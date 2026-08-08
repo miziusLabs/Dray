@@ -186,17 +186,25 @@ mod wire_tests {
         let some: Option<Effort> = serde_json::from_str("\"xhigh\"").unwrap();
         assert_eq!(some, Some(Effort::Xhigh));
 
-        assert_eq!(serde_json::to_string(&Some(Effort::Max)).unwrap(), "\"max\"");
+        assert_eq!(
+            serde_json::to_string(&Some(Effort::Max)).unwrap(),
+            "\"max\""
+        );
     }
 
     /// Every level the CLI documents must survive the round trip, or a session
     /// persisted with it fails to load.
     #[test]
     fn every_effort_matches_its_cli_arg() {
-        for e in [Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh, Effort::Max] {
+        for e in [
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ] {
             let json = serde_json::to_string(&e).unwrap();
             assert_eq!(json, format!("\"{}\"", e.as_arg()));
         }
     }
 }
-

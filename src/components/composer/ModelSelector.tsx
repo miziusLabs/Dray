@@ -36,17 +36,29 @@ export default function ModelSelector({
 
   const selected = models.find((m) => m.id === modelId) ?? null;
 
-  const triggerLabel = selected
-    ? effort
-      ? `${selected.label} ${EFFORT_LABELS[effort]}`
-      : selected.label
-    : modelId;
+  /// What a row would resolve to if clicked: the live effort for the model
+  /// already selected, each other model's own default. Mirrors the resolution
+  /// in `useSessions`, so the menu can't advertise an effort the send wouldn't use.
+  const rowEffort = (model: Model): Effort | null =>
+    model.id === modelId ? effort : model.defaultEffort;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm">
-          {triggerLabel}
+        {/* `text-ui` over the button's own `text-sm`: the toolbar has to track
+            the runtime font-size setting like the rest of the chrome. */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="gap-1 px-1.5 text-ui text-muted-foreground"
+        >
+          {/* Effort is a qualifier on the model, not part of its name, so it's
+              held back a step rather than reading as one long label. */}
+          <span>{selected?.label ?? modelId}</span>
+          {effort && (
+            <span className="text-muted-foreground/60">{EFFORT_LABELS[effort]}</span>
+          )}
         </Button>
       </DropdownMenuTrigger>
 
@@ -58,18 +70,24 @@ export default function ModelSelector({
             // two into separate items would give the row two hover states.
             <DropdownMenuSub key={model.id}>
               <DropdownMenuSubTrigger
-                className="cursor-pointer"
+                className="cursor-pointer gap-1 text-ui"
                 onClick={() => {
                   onChange(model.id, null);
                   setOpen(false);
                 }}
               >
                 {model.label}
+                {rowEffort(model) && (
+                  <span className="text-muted-foreground/60">
+                    {EFFORT_LABELS[rowEffort(model)!]}
+                  </span>
+                )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 {model.efforts.map((level) => (
                   <DropdownMenuItem
                     key={level}
+                    className="text-ui"
                     onSelect={() => {
                       onChange(model.id, level);
                       setOpen(false);
@@ -84,6 +102,7 @@ export default function ModelSelector({
             // No submenu and no chevron for a model with no effort levels.
             <DropdownMenuItem
               key={model.id}
+              className="text-ui"
               onSelect={() => onChange(model.id, null)}
             >
               {model.label}

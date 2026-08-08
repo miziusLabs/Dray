@@ -1,16 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUpIcon, StopIcon } from "@heroicons/react/24/outline";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowUpIcon, PlusIcon, StopIcon } from "@heroicons/react/24/outline";
 
-import ModelSelector from "@/components/ModelSelector";
 import { Button } from "@/components/ui/button";
-import type { Effort, Model, ModelId } from "@/types/events";
 
 type ChatInputProps = {
   onSend: (message: string) => void;
-  models: Model[];
-  modelId: ModelId;
-  effort: Effort | null;
-  onModelChange: (modelId: ModelId, effort: Effort | null) => void;
+  /// Rendered below the card. A node rather than the controls' own props, so
+  /// this component keeps owning layout and measurement and nothing else.
+  toolbar?: ReactNode;
   busy?: boolean;
   /// Refocuses the composer when the user switches sessions.
   sessionId?: string | null;
@@ -20,22 +17,22 @@ const MAX_ROWS = 10;
 
 export default function ChatInput({
   onSend,
-  models,
-  modelId,
-  effort,
-  onModelChange,
+  toolbar,
   busy = false,
   sessionId = null,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [resizeTick, setResizeTick] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   // Grow to fit, then scroll. Height must be cleared before scrollHeight is read
   // or it reports the current height and the box can never shrink back down.
   useLayoutEffect(() => {
     const el = textareaRef.current;
-    const card = el?.parentElement;
+    // Referenced rather than reached via `parentElement`, so the freeze below
+    // keeps working as the composer's nesting changes.
+    const card = cardRef.current;
     if (!el || !card) return;
 
     const style = getComputedStyle(el);
@@ -98,30 +95,45 @@ export default function ChatInput({
         {/* The ring lives on the card so the whole composer reads as one control.
             --input bakes in its own alpha, which makes Tailwind's /40-style opacity
             modifiers silently no-op, so both states set an explicit color. */}
-        <div className="rounded-2xl border border-[oklch(1_0_0/6%)] bg-card transition-colors focus-within:border-[oklch(1_0_0/18%)]">
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            autoFocus
-            value={message}
-            placeholder="Ask anything..."
-            onChange={(e) => setMessage(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              // Shift+Enter is the only way to get a newline; plain Enter sends.
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            className="block w-full resize-none overflow-y-auto bg-transparent px-4 pt-3.5 pb-2 text-composer text-foreground placeholder:text-muted-foreground focus:outline-none"
-          />
+        <div
+          ref={cardRef}
+          className="rounded-2xl border border-[oklch(1_0_0/6%)] bg-card transition-colors focus-within:border-[oklch(1_0_0/18%)]"
+        >
+          {/* Both buttons sit on the last line. At one line that reads as
+              centered anyway, because the textarea's vertical padding below is
+              tuned to match the buttons' own height — no `self-center` needed,
+              and nothing drifts as the box grows. */}
+          <div className="flex items-end gap-1 px-2 py-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled
+              title="Attach"
+              className="rounded-full text-muted-foreground"
+            >
+              <PlusIcon />
+            </Button>
 
-          <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
-            <ModelSelector
-              models={models}
-              modelId={modelId}
-              effort={effort}
-              onChange={onModelChange}
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              autoFocus
+              value={message}
+              placeholder="Ask anything..."
+              onChange={(e) => setMessage(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                // Shift+Enter is the only way to get a newline; plain Enter sends.
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              // `min-w-0` is load-bearing: without it one long unbroken token
+              // sets this flex item's floor and pushes the buttons off the row.
+              // `py-1` puts one line at 28px — the buttons' own height — so the
+              // first row looks centered against them without being.
+              className="block min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-1 py-1 text-composer text-foreground placeholder:text-muted-foreground focus:outline-none"
             />
 
             <Button
@@ -139,6 +151,8 @@ export default function ChatInput({
             </Button>
           </div>
         </div>
+
+        {toolbar}
       </form>
     </div>
   );

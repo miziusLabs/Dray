@@ -1,13 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect } from "react";
-import { AgentEvent, Effort, Model, ModelId, SessionIndexItem, SessionSnapshot } from "../types/events";
-
-// Until there's a project picker, every session runs here.
-const DEFAULT_CWD = "/Users/yogesh/Documents/ade";
+import { AgentEvent, ApprovalPolicy, BranchList, Effort, Model, ModelId, Project, ProjectsFile, SessionIndexItem, SessionSnapshot } from "../types/events";
 
 const DEFAULT_MODEL: ModelId = "haiku";
 const DEFAULT_EFFORT: Effort = "high";
+const DEFAULT_PERMISSION: ApprovalPolicy = "auto";
 
 // Effort is a property of the model, not of the picker: switching to Sonnet must
 // not inherit the Max you last chose on Opus. Absent key = use the model default.
@@ -29,6 +28,14 @@ export function useSessions() {
     const [models, setModels] = useState<Model[]>([]);
     const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL);
     const [effortByModel, setEffortByModel] = useState<EffortByModel>({});
+    const [permissionMode, setPermissionMode] = useState<ApprovalPolicy>(DEFAULT_PERMISSION);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [projectPath, setProjectPath] = useState<string | null>(null);
+    // Derived from the selected project, not a preference — refetched on switch
+    // and never persisted.
+    const [branches, setBranches] = useState<BranchList | null>(null);
+    const [branch, setBranch] = useState<string | null>(null);
+    const [useWorktree, setUseWorktree] = useState(false);
     // Per-session, not global: sessions run concurrently and all of their events
     // arrive on the same channel, so a single flag would clear on another's turn.
     const [busyBySession, setBusyBySession] = useState<Record<string, boolean>>({});
@@ -53,6 +60,27 @@ const handleModelChange = (nextModelId: ModelId, nextEffort: Effort | null) => {
   }
 };
 
+// Attaching a known project just selects it, so this doubles as "switch to one
+// I already have" without the picker growing duplicates.
+const handleAttachProject = async () => {
+  const picked = await open({ directory: true, multiple: false });
+  if (typeof picked !== "string") return;
+
+  try {
+    const file = await invoke<ProjectsFile>("add_project", { path: picked });
+    setProjects(file.projects);
+    setProjectPath(file.lastSelected ?? picked);
+  } catch (e) {
+    setError(String(e));
+  }
+};
+
+const handleSelectProject = (path: string) => {
+  setProjectPath(path);
+  // Fire and forget: losing the remembered pick costs one dropdown next launch.
+  void invoke("set_last_selected_project", { path }).catch(() => {});
+};
+
 const selectedSession = selectedSessionId ? sessions.find((s) => s.sessionId === selectedSessionId) ?? null : null;
 
 // Dedupes against the queued array, not the render snapshot: two fast clicks
@@ -67,23 +95,25 @@ const upsertSession = (snapshot: SessionSnapshot) =>
 
 const handleSendMsg = async (
   message: string,
-  opts?: { projectPath?: string; useWorktree?: boolean; worktreeName?: string | null },
 ) => {
 
   let sessionId = selectedSessionId;
   const isNewSession = !sessionId;
+
+  const existing = sessionId ? sessions.find((s) => s.sessionId === sessionId) : undefined;
+  // The backend reads the recorded cwd on resume, so this only has to be right
+  // for a new session.
+  const cwd = isNewSession ? projectPath : existing?.cwd ?? projectPath;
+
+  if (!cwd) {
+    setError("Attach a project first.");
+    return;
+  }
+
   if (!sessionId) {
     sessionId = crypto.randomUUID();
     setSelectedSessionId(sessionId);
   }
-
-
-  const existing = sessions.find((s) => s.sessionId === sessionId);
-  const projectPath = opts?.projectPath ?? existing?.projectPath ?? DEFAULT_CWD;
-  const useWorktree = isNewSession && (opts?.useWorktree ?? false);
-  const worktreeName = useWorktree ? opts?.worktreeName ?? null : null;
-
-  const cwd = isNewSession ? projectPath : existing?.cwd ?? projectPath;
 
   setError(null);
   setBusyBySession((prev) => ({ ...prev, [sessionId]: true }));
@@ -95,9 +125,12 @@ const handleSendMsg = async (
       harness: "claude_code",
       model: modelId,
       effort,
+      permissionMode,
       cwd,
-      useWorktree,
-      worktreeName,
+      // Creation-time only; the composer hides both once a session exists.
+      branch: isNewSession ? branch : null,
+      useWorktree: isNewSession && useWorktree,
+      worktreeName: null,
       isNewSession,
     });
 
@@ -114,7 +147,7 @@ const handleSendMsg = async (
     setSessionIndexItems((prev) =>
       prev.map((i) =>
         i.sessionId === sessionId
-          ? { ...i, model: modelId, effort, modified: new Date().toISOString() }
+          ? { ...i, model: modelId, effort, permissionMode, modified: new Date().toISOString() }
           : i,
       ),
     );
@@ -126,12 +159,14 @@ const handleSendMsg = async (
   }
 };
 
-// Keeps effortByModel: the per-model picks are a preference that outlives any
-// one session, so a new chat starts on the default model but still remembers
-// the effort chosen for each.
+// Keeps effortByModel, the project, and the permission mode: all preferences
+// that outlive any one session. Only the worktree flag resets — it's a per-
+// session choice, and defaulting it on would quietly multiply trees.
 const handleNewSession = () => {
   setSelectedSessionId(null);
   setModelId(DEFAULT_MODEL);
+  setUseWorktree(false);
+  setBranch(branches?.current ?? null);
 };
 
 const handleSelectSessionIndexItem = async (sessionId: string) => {
@@ -150,7 +185,11 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
     if (indexItem.effort) {
       setEffortByModel((prev) => ({ ...prev, [restored]: indexItem.effort! }));
     }
+    setPermissionMode(indexItem.permissionMode);
   }
+
+  // Project, branch, and the worktree flag aren't restored — the composer hides
+  // all three once a session exists, and they'd only mislead the next new chat.
 
   if (sessions.some((s) => s.sessionId === sessionId)) {
     return;
@@ -180,6 +219,36 @@ useEffect(() => {
 useEffect(() => {
   invoke<Model[]>("list_models").then(setModels);
 }, [])
+
+useEffect(() => {
+  invoke<ProjectsFile>("list_projects").then((file) => {
+    setProjects(file.projects);
+    setProjectPath(file.lastSelected ?? file.projects[0]?.path ?? null);
+  });
+}, [])
+
+// Refetched per project rather than cached: branches change outside the app.
+// The guard matters because switching projects quickly would otherwise let a
+// slower repo's response land on top of the faster one's.
+useEffect(() => {
+  if (!projectPath) {
+    setBranches(null);
+    setBranch(null);
+    return;
+  }
+
+  let cancelled = false;
+
+  invoke<BranchList>("list_branches", { cwd: projectPath }).then((list) => {
+    if (cancelled) return;
+    setBranches(list);
+    setBranch(list.current);
+  });
+
+  return () => {
+    cancelled = true;
+  };
+}, [projectPath])
 
 useEffect(() => {
   const setupListener = async () => {
@@ -264,6 +333,6 @@ useEffect(() => {
 // A brand-new session has no id until its first send, so nothing can be in flight.
 const busy = selectedSessionId ? busyBySession[selectedSessionId] ?? false : false;
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, busy, busyBySession, error, setError, handleModelChange, handleSendMsg, handleSelectSessionIndexItem, handleNewSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, busyBySession, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, setBranch, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession};
 
 }

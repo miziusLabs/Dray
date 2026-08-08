@@ -418,20 +418,44 @@ pub struct Settings {
 }
 
 /// Permission stance for a session, in roughly increasing order of autonomy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub enum ApprovalPolicy {
-    /// Prompt per action, per the harness's own defaults.
+    /// Prompt per action, per the harness's own defaults. Inbound only — see
+    /// [`ApprovalPolicy::as_arg`].
+    #[default]
     Default,
-    /// Edits apply without prompting; other tools still ask.
-    AcceptEdits,
     /// Read-only: research and propose, change nothing.
     Plan,
+    /// Prompt per action, named explicitly rather than left to the harness.
+    Manual,
+    /// Edits apply without prompting; other tools still ask.
+    AcceptEdits,
     Auto,
     DontAsk,
     /// Every permission check bypassed.
     BypassPermissions,
+}
+
+impl ApprovalPolicy {
+    /// The `--permission-mode` flag value, `None` for [`ApprovalPolicy::Default`].
+    ///
+    /// The CLI's vocabularies are asymmetric: it *reports* `default` in
+    /// `system/init`, but its flag rejects that name and offers `manual` for the
+    /// same stance. Rather than remap one onto the other and lose the
+    /// distinction, `Default` means "omit the flag and let the CLI decide".
+    pub fn as_arg(self) -> Option<&'static str> {
+        match self {
+            ApprovalPolicy::Default => None,
+            ApprovalPolicy::Plan => Some("plan"),
+            ApprovalPolicy::Manual => Some("manual"),
+            ApprovalPolicy::AcceptEdits => Some("acceptEdits"),
+            ApprovalPolicy::Auto => Some("auto"),
+            ApprovalPolicy::DontAsk => Some("dontAsk"),
+            ApprovalPolicy::BypassPermissions => Some("bypassPermissions"),
+        }
+    }
 }
 
 /// Hand-rolled to avoid a date dependency for one display-only field; `seq`, not
@@ -534,5 +558,33 @@ mod tests {
         assert!(s.contains(r#""type":"delta""#) && s.contains(r#""delta":"text_delta""#));
         let back: AgentEventPayload = serde_json::from_str(&s).unwrap();
         assert_eq!(s, serde_json::to_string(&back).unwrap());
+    }
+
+    /// Every settable mode's wire name is also its flag value — the one exception
+    /// being `Default`, whose wire name `default` the flag rejects outright.
+    /// Pins the asymmetry that makes [`ApprovalPolicy::as_arg`] return an Option.
+    #[test]
+    fn every_settable_policy_matches_its_cli_arg() {
+        for p in [
+            ApprovalPolicy::Plan,
+            ApprovalPolicy::Manual,
+            ApprovalPolicy::AcceptEdits,
+            ApprovalPolicy::Auto,
+            ApprovalPolicy::DontAsk,
+            ApprovalPolicy::BypassPermissions,
+        ] {
+            let json = serde_json::to_string(&p).unwrap();
+            assert_eq!(json, format!("\"{}\"", p.as_arg().unwrap()));
+        }
+
+        assert!(ApprovalPolicy::Default.as_arg().is_none());
+    }
+
+    /// The CLI reports `default` in `system/init` even though its flag won't take
+    /// it, so the inbound parse has to keep working.
+    #[test]
+    fn reported_default_policy_still_parses() {
+        let p: ApprovalPolicy = serde_json::from_str(r#""default""#).unwrap();
+        assert_eq!(p, ApprovalPolicy::Default);
     }
 }

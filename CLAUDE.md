@@ -72,18 +72,27 @@ Per-harness code lives under `harness/<name>/` with a deliberate seam: `parser.r
 
 Module entry files are named after their directory (`events/events.rs`, `harness/harness.rs`) rather than `mod.rs`, declared with `#[path]`. Only entry files need the attribute.
 
-Prompts travel the other direction as a single JSON line written to the child's stdin ([session.rs](src-tauri/src/session.rs)). The same pipe carries `control_request` lines — `set_model` switches a running child's model in place, verified against the CLI. `set_effort` does not exist, and an `effort` field on `set_model` is accepted and ignored, so effort changes require a respawn.
+Prompts travel the other direction as a single JSON line written to the child's stdin ([session.rs](src-tauri/src/session.rs)). The same pipe carries `control_request` lines — `set_model` and `set_permission_mode` both switch a running child in place, verified against the CLI. `set_effort` does not exist, and an `effort` field on `set_model` is accepted and ignored, so effort changes require a respawn.
+
+**What can change mid-session.** A control is live only if the CLI has a control request for it; everything deciding *where* the agent runs is fixed at creation, and the composer hides it once a session exists. So model and permission mode apply in place, effort kills and resumes, and project/branch/worktree are creation-time only. That rule is what keeps a `git checkout` from ever running under a live child.
+
+**Permission mode is asymmetric.** The CLI *reports* `permissionMode: "default"` but `--permission-mode` rejects that name, offering `manual` for the same stance. `ApprovalPolicy::as_arg` ([events.rs](src-tauri/src/events/events.rs)) returns `Option`, and `Default` maps to `None` — meaning "omit the flag". Don't remap `default` onto `manual`; they are not the same and the round-trip would lie.
+
+**Git.** [git.rs](src-tauri/src/git.rs) is the only place the app shells out to anything but `claude`. `checkout_branch` validates the name against the branches git just listed — no shell is involved, so injection isn't the risk, but a name starting with `-` would parse as a flag. It runs once per session creation, before the spawn, which is also what sets the base commit a `-w` worktree forks from: the CLI resolves `HEAD` through `rev-parse` and passes it to `git worktree add --no-track -B`.
 
 **Models.** [models/models.rs](src-tauri/src/models/models.rs) is the single source for the model list, its effort levels, and the defaults; the frontend builds its picker from `list_models` rather than a hardcoded array. Ids are bare aliases (`opus`, not a dated name) so sessions follow the latest model. Haiku has no effort levels — the CLI tolerates `--effort` there and ignores it, so omitting it keeps the persisted value honest rather than avoiding a crash.
 
 ## Persistence
 
-Everything lives under `~/.automedon/sessions/` ([store.rs](src-tauri/src/store.rs)):
+Everything lives under `~/.automedon/` ([store.rs](src-tauri/src/store.rs), [projects.rs](src-tauri/src/projects.rs)):
 
-- **`<session-id>.jsonl`** — one mapped `AgentEvent` per line, append-only. Single writer per file, so `O_APPEND` alone is enough; no lock. On resume, `next_seq_by_session_id` tail-reads the last line to continue the counter.
-- **`index.json`** — one `SessionIndexItem` per session, holding both `cwd` (where the agent runs) and `project_path` (the repo root, used as the grouping key so worktree sessions still list under their project). Rewritten whole, so it takes a process-wide lock and lands via write-temp + `rename`.
+- **`sessions/<session-id>.jsonl`** — one mapped `AgentEvent` per line, append-only. Single writer per file, so `O_APPEND` alone is enough; no lock. On resume, `next_seq_by_session_id` tail-reads the last line to continue the counter.
+- **`sessions/index.json`** — one `SessionIndexItem` per session, holding both `cwd` (where the agent runs) and `project_path` (the repo root, used as the grouping key so worktree sessions still list under their project). Rewritten whole, so it takes a process-wide lock and lands via write-temp + `rename`.
+- **`projects.json`** — the attached projects and which was last selected. Its own file and its own lock, because it shares none of the index's semantics. Paths are canonicalized at attach time; without that, `/x/proj` and `/x/proj/` become two projects and split the sidebar's grouping.
 
 The asymmetry is the point: appending to a private file is atomic, rewriting a shared one is not.
+
+`cwd` on the index is authoritative on resume — `send_msg` reads it rather than trusting the caller's argument, since the project picker makes the two able to disagree and resuming in the wrong directory is silent.
 
 ## Parser conventions
 
@@ -112,20 +121,17 @@ To add coverage, follow the same pattern: capture real CLI output, commit it as 
 
 Several things are deliberately unfinished — don't mistake them for bugs:
 
-- **The UI is a bare seam.** `Chat.tsx` renders text off a handful of payload types and `ChatInput` sends; there is no session list, project picker, or tool-call rendering. This is the active area.
+- **The UI is still the active area.** The sidebar, transcript, and composer toolbar are built; the `+` attachment button in the composer is inert, and there's no project *management* beyond attach (no rename, no detach from the UI).
 - **The mapper is partial.** `assistant`, `user`, `result`, `system/init`, tasks, and the stream frames are wired; the remaining system events fall through to `None`. `turn_id` is always `None` and `ThreadRef.label` is unset (the label needs a `tool_use_id → subagent_type` map from `system/task_started`).
 - **Codex is a stub.** `Harness::Codex` parses from the frontend, but `Session::init` bails on it.
-- **`DEFAULT_CWD` is hardcoded** in `useSessions.ts` — there's no project picker yet. Model and effort now come from `ModelSelector`, backed by `models/models.rs`.
+- **The composer toolbar is the session's control surface.** [composer/](src/components/composer) holds one component per control; `ComposerToolbar` hides project, branch, and the worktree toggle once a session exists. `ChatInput` takes the row as a `ReactNode` so it keeps owning layout and measurement and nothing else.
 - **The TS event types are generated, not written.** `ts-rs` derives them from the Rust model into `src/types/events.ts`, which is checked in so the frontend build needs no Rust toolchain. `cargo test` regenerates; never edit the output. Two settings live in `src-tauri/.cargo/config.toml`: the export path, and `TS_RS_LARGE_INT = "number"` because `u64` otherwise becomes `bigint`, which `JSON.parse` never produces.
 
 ## Known issues
 
 Diagnosed defects, not yet fixed. Unlike *Current state* above, these are broken rather than unbuilt. Delete the entry when you fix it.
 
-- **Sessions load on startup but their events don't.** The sidebar reads `list_session_index_items`, but nothing calls `get_session_by_id`, so selecting an older session shows an empty chat and `sessions` still only holds what this run created.
-- **Deltas are persisted and kept in memory.** Filter them from the JSONL and `Session.events`; the committed event supersedes them. Leave `seq` a `u64` — gaps are fine.
 - **`modified` only updates on send.** The AI side has no completion signal yet, so it reads as "last time the user typed" rather than last activity.
-
 - **Changing effort respawns the child.** The CLI has no `set_effort` control request (`set_model` exists and works), so the session is killed and resumed by id. Harmless today — the respawn happens inside `send_msg`, which only runs when the user types, so no turn is in flight. Revisit when queued/mid-turn messages land.
 - **Worktree paths are computed, not verified.** `worktree_path()` joins the convention instead of reading `init`'s `cwd`. Correct as of now; reading it back isn't worth it — `init` fires repeatedly, so each would need a re-write plus dedup.
 - **`Session.status` never leaves `"in_progress"`** — the `result` event that should advance it isn't mapped.

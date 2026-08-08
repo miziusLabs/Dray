@@ -62,7 +62,7 @@ description: string | null, lastTool: string | null, usage: Usage | null, } | { 
 /**
  * Permission stance for a session, in roughly increasing order of autonomy.
  */
-export type ApprovalPolicy = "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions";
+export type ApprovalPolicy = "default" | "plan" | "manual" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions";
 
 /**
  * Joins streamed content to its committed counterpart. A message is often
@@ -78,6 +78,20 @@ export type BlockRef = { messageId: string, index: number, };
  * label the call while [`DeltaEvent::InputDelta`] fragments are still landing.
  */
 export type BlockType = { "type": "text" } | { "type": "thinking" } | { "type": "tool_use", id: string, name: string, };
+
+/**
+ * What the composer's branch picker needs to render and guard itself.
+ */
+export type BranchList = { 
+/**
+ * `None` on a detached HEAD, and for a directory that isn't a repo.
+ */
+current: string | null, branches: Array<string>, 
+/**
+ * Uncommitted changes, which make a checkout fail. Surfaced so the picker
+ * can say why rather than letting the send die on git's stderr.
+ */
+dirty: boolean, };
 
 export type ContextWindow = { usedTokens: number, maxTokens: number, };
 
@@ -138,6 +152,29 @@ efforts: Array<Effort>, defaultEffort: Effort | null, };
  */
 export type ModelId = "opus" | "sonnet" | "haiku" | "unknown";
 
+/**
+ * A directory the user attached, and the root a session runs in. Distinct from
+ * [`crate::store::SessionIndexItem::project_path`], which records where a
+ * session *did* run — a project can be detached without rewriting history.
+ */
+export type Project = { 
+/**
+ * Canonicalized at attach time, so this is the only spelling of the path
+ * that ever reaches the index or the sidebar's grouping key.
+ */
+path: string, 
+/**
+ * Folder name as of attaching. Cached so a project whose directory was
+ * since renamed or removed still has a label.
+ */
+name: string, added: string, };
+
+export type ProjectsFile = { projects: Array<Project>, 
+/**
+ * Seeds the composer's project picker on the next launch.
+ */
+lastSelected: string | null, };
+
 export type RateLimit = { usedPercent: number | null, windowMinutes: number | null, 
 /**
  * RFC3339, normalized from whatever the harness reports.
@@ -169,6 +206,11 @@ model: ModelId,
  * `None` for models that take no effort flag.
  */
 effort: Effort | null, 
+/**
+ * Defaulted so entries written before this field read as the CLI's own
+ * default rather than failing the whole index.
+ */
+permissionMode: ApprovalPolicy, 
 /**
  * Defaulted so index entries written before this field parse as `Idle`.
  */
@@ -209,6 +251,11 @@ model: ModelId,
  * `None` for models that take no effort flag.
  */
 effort: Effort | null, 
+/**
+ * Defaulted so entries written before this field read as the CLI's own
+ * default rather than failing the whole index.
+ */
+permissionMode: ApprovalPolicy, 
 /**
  * Defaulted so index entries written before this field parse as `Idle`.
  */

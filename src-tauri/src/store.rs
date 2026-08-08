@@ -8,7 +8,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
-    events::{now_rfc3339, AgentEvent},
+    events::{now_rfc3339, AgentEvent, ApprovalPolicy},
     models::{Effort, ModelId},
     session::Harness,
 };
@@ -54,6 +54,10 @@ pub struct SessionIndexItem {
     /// `None` for models that take no effort flag.
     #[serde(default)]
     pub effort: Option<Effort>,
+    /// Defaulted so entries written before this field read as the CLI's own
+    /// default rather than failing the whole index.
+    #[serde(default)]
+    pub permission_mode: ApprovalPolicy,
     /// Defaulted so index entries written before this field parse as `Idle`.
     #[serde(default)]
     pub status: SessionStatus,
@@ -154,9 +158,11 @@ impl SessionIndexItem {
         cwd: &str,
         project_path: &str,
         worktree_name: Option<&str>,
+        branch: Option<&str>,
         first_prompt: &str,
         model: ModelId,
         effort: Option<Effort>,
+        permission_mode: ApprovalPolicy,
     ) -> Self {
         let now = now_rfc3339();
 
@@ -165,11 +171,17 @@ impl SessionIndexItem {
             harness,
             cwd: cwd.to_string(),
             project_path: project_path.to_string(),
-            branch: worktree_name.map(|name| format!("worktree-{name}")),
+            // A worktree's branch is the CLI's to name, so it's derived rather
+            // than read; everything else records the branch actually checked out.
+            branch: match worktree_name {
+                Some(name) => Some(format!("worktree-{name}")),
+                None => branch.map(str::to_string),
+            },
             worktree_name: worktree_name.map(str::to_string),
             title: title_from_prompt(first_prompt),
             model,
             effort,
+            permission_mode,
             status: SessionStatus::default(),
             created: now.clone(),
             modified: now,
@@ -263,13 +275,14 @@ pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> 
     write_session_index(&sessions).await
 }
 
-/// Bumps `modified`, and `model`/`effort` when they changed. Callers hold the
-/// live session's values, so an unchanged send skips the rewrite entirely —
-/// the whole index is serialized on every write.
+/// Bumps `modified`, and the settable per-session fields when they changed.
+/// Callers hold the live session's values, so an unchanged send skips the
+/// rewrite entirely — the whole index is serialized on every write.
 pub async fn touch_session_index_item(
     session_id: &str,
     model: ModelId,
     effort: Option<Effort>,
+    permission_mode: ApprovalPolicy,
 ) -> Result<()> {
     let _guard = INDEX_LOCK.lock().await;
 
@@ -281,6 +294,7 @@ pub async fn touch_session_index_item(
     item.modified = now_rfc3339();
     item.model = model;
     item.effort = effort;
+    item.permission_mode = permission_mode;
 
     write_session_index(&sessions).await
 }
@@ -407,6 +421,8 @@ mod tests {
         // Reads back as a model no build lists, so it can never reach a spawn.
         assert_eq!(item.model, ModelId::Unknown);
         assert!(crate::models::find_model(item.model).is_none());
+        // Absent means the CLI's own default, which omits the flag entirely.
+        assert_eq!(item.permission_mode, ApprovalPolicy::Default);
     }
 
     #[test]
@@ -417,15 +433,24 @@ mod tests {
             "/p",
             "/p",
             None,
+            Some("main"),
             "hi",
             ModelId::Opus,
             Some(Effort::High),
+            ApprovalPolicy::AcceptEdits,
         );
-        let json = serde_json::to_value(SessionSnapshot { index_item: item, events: vec![] }).unwrap();
+        let json = serde_json::to_value(SessionSnapshot {
+            index_item: item,
+            events: vec![],
+        })
+        .unwrap();
 
         assert_eq!(json["sessionId"], "a");
         assert_eq!(json["status"], "idle");
         assert!(json["events"].is_array());
-        assert!(json.get("indexItem").is_none(), "must stay flat for the generated TS type");
+        assert!(
+            json.get("indexItem").is_none(),
+            "must stay flat for the generated TS type"
+        );
     }
 }

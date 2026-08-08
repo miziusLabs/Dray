@@ -1,5 +1,8 @@
 use crate::{
+    events::ApprovalPolicy,
+    git::BranchList,
     models::{Effort, Model, ModelId},
+    projects::ProjectsFile,
     session::{Harness, SessionManager},
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot},
 };
@@ -7,10 +10,12 @@ use tauri::{AppHandle, State};
 
 #[path = "events/events.rs"]
 pub mod events;
+pub mod git;
 #[path = "harness/harness.rs"]
 pub mod harness;
 #[path = "models/models.rs"]
 pub mod models;
+pub mod projects;
 pub mod session;
 mod store;
 
@@ -21,7 +26,9 @@ async fn send_msg(
     harness: &str,
     model: ModelId,
     effort: Option<Effort>,
+    permission_mode: ApprovalPolicy,
     cwd: &str,
+    branch: Option<&str>,
     use_worktree: bool,
     worktree_name: Option<&str>,
     is_new_session: bool,
@@ -41,7 +48,9 @@ async fn send_msg(
             harness,
             model,
             effort,
+            permission_mode,
             cwd,
+            branch,
             use_worktree,
             worktree_name,
             is_new_session,
@@ -77,9 +86,39 @@ async fn get_session_by_id(session_id: &str) -> Result<Option<SessionSnapshot>, 
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn list_projects() -> Result<ProjectsFile, String> {
+    projects::read_projects().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn add_project(path: &str) -> Result<ProjectsFile, String> {
+    projects::add_project(path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn remove_project(path: &str) -> Result<ProjectsFile, String> {
+    projects::remove_project(path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_last_selected_project(path: &str) -> Result<(), String> {
+    projects::set_last_selected_project(path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_branches(cwd: &str) -> Result<BranchList, String> {
+    git::list_branches(cwd).await.map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(SessionManager::default())
         .invoke_handler(tauri::generate_handler![
@@ -88,6 +127,11 @@ pub fn run() {
             list_sessions_by_project,
             list_session_index_items,
             get_session_by_id,
+            list_projects,
+            add_project,
+            remove_project,
+            set_last_selected_project,
+            list_branches,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

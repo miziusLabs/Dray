@@ -6,6 +6,8 @@ import Chat from "@/components/Chat";
 import ChatInput from "@/components/ChatInput";
 import Sidebar, { SidebarToggle } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
+import ComposerToolbar from "@/components/composer/ComposerToolbar";
+import { nextPermissionMode } from "@/components/composer/PermissionSelector";
 import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
 import { Button } from "@/components/ui/button";
@@ -26,8 +28,19 @@ function App() {
     models,
     modelId,
     effort,
+    permissionMode,
+    projects,
+    projectPath,
+    branches,
+    branch,
+    useWorktree,
     busy,
     handleModelChange,
+    setPermissionMode,
+    handleAttachProject,
+    handleSelectProject,
+    setBranch,
+    setUseWorktree,
     handleSendMsg,
     handleSelectSessionIndexItem,
     handleNewSession,
@@ -51,6 +64,11 @@ function App() {
 
   const toggleSidebar = () => setCollapsed((prev) => !prev);
   useHotkey("b", toggleSidebar);
+  // No accelerator: Shift+Tab on its own, matching the CLI's own chord for this.
+  useHotkey("Tab", () => setPermissionMode(nextPermissionMode(permissionMode)), {
+    meta: false,
+    shift: true,
+  });
   const fullscreen = useFullscreen();
 
   return (
@@ -115,12 +133,28 @@ function App() {
       footer={
         <ChatInput
           onSend={handleSendMsg}
-          models={models}
-          modelId={modelId}
-          effort={effort}
           busy={busy}
           sessionId={selectedSessionId}
-          onModelChange={handleModelChange}
+          toolbar={
+            <ComposerToolbar
+              models={models}
+              modelId={modelId}
+              effort={effort}
+              onModelChange={handleModelChange}
+              permissionMode={permissionMode}
+              onPermissionModeChange={setPermissionMode}
+              projects={projects}
+              projectPath={projectPath}
+              onSelectProject={handleSelectProject}
+              onAttachProject={handleAttachProject}
+              branches={branches}
+              branch={branch}
+              onSelectBranch={setBranch}
+              useWorktree={useWorktree}
+              onToggleWorktree={() => setUseWorktree((v) => !v)}
+              isNewSession={!selectedSessionId}
+            />
+          }
         />
       }
     >
