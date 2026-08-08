@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Working practices
 
-**Never commit without asking.** Stage and describe the change, then wait for approval — even for work that is finished and passing tests. The same goes for `git push`, branches, and anything else that rewrites history.
+**Don't commit unprompted.** Stage and describe the change, then wait — even for work that is finished and passing tests. But "commit" is itself the approval: when asked, commit without staging-and-confirming first. The same goes for `git push`, branches, and anything else that rewrites history.
 
 **Comment sparingly.** Aim for roughly 10% of lines, and only where the code cannot speak for itself:
 
