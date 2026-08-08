@@ -17,7 +17,8 @@ pub mod harness;
 pub mod models;
 pub mod projects;
 pub mod session;
-mod store;
+pub mod store;
+pub mod title;
 
 #[tauri::command]
 async fn send_msg(

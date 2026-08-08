@@ -285,6 +285,13 @@ status: SessionStatus, created: string, modified: string, archived: boolean, pin
 export type SessionStatus = "idle" | "in_progress" | "completed";
 
 /**
+ * Emitted as `session_title` once a generated title lands, so the sidebar row
+ * updates without a refetch. Not an `AgentEvent`: nothing here came from the
+ * agent, and it must never reach the session's `.jsonl` log.
+ */
+export type SessionTitleEvent = { sessionId: string, title: string, };
+
+/**
  * Settings that can change mid-session, so they arrive as events rather than
  * living only on [`SessionInfo`].
  */

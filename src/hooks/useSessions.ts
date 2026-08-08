@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect } from "react";
 import { useComposerPrefs, type EffortByModel } from "@/hooks/useComposerPrefs";
-import { AgentEvent, ApprovalPolicy, BranchList, Effort, Model, ModelId, Project, SessionIndexItem, SessionSnapshot } from "../types/events";
+import { AgentEvent, ApprovalPolicy, BranchList, Effort, Model, ModelId, Project, SessionIndexItem, SessionSnapshot, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
 // "unknown". Everything else seeds from the user's stored prefs.
@@ -450,6 +450,27 @@ useEffect(() => {
   };
 
   const listenerPromise = setupListener();
+
+  return () => {
+    listenerPromise.then((unlisten) => unlisten());
+  };
+}, []);
+
+// The backend generates a title a few seconds after a session starts and writes
+// it to the index itself, so this only mirrors what's already on disk. Its own
+// listener rather than a branch in `agent_event`: nothing here came from the
+// agent, and it must not land in the session's event list.
+useEffect(() => {
+  const listenerPromise = listen<SessionTitleEvent>("session_title", (event) => {
+    const { sessionId, title } = event.payload;
+
+    setSessionIndexItems((prev) =>
+      prev.map((i) => (i.sessionId === sessionId ? { ...i, title } : i)),
+    );
+    setSessions((prev) =>
+      prev.map((s) => (s.sessionId === sessionId ? { ...s, title } : s)),
+    );
+  });
 
   return () => {
     listenerPromise.then((unlisten) => unlisten());

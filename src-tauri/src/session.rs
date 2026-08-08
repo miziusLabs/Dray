@@ -103,6 +103,10 @@ impl SessionManager {
             );
             append_session_index_item(item.clone()).await?;
 
+            // Detached: generation takes ~16s and the snapshot below is what the
+            // composer waits on. The title written above stands until this lands.
+            crate::title::spawn_title_generation(session_id, prompt, &session_cwd, app);
+
             let mut session = Session::init(
                 session_id,
                 harness,

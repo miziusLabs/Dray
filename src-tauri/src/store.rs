@@ -330,6 +330,31 @@ pub async fn set_session_flags(
     Ok(Some(updated))
 }
 
+/// Replaces one entry's title. Returns the entry as written, or `None` if the
+/// id is unknown — a session deleted while its title was being generated.
+///
+/// `modified` is left alone, like [`set_session_flags`]: it orders the sidebar,
+/// and a title landing seconds after the send would jump the session to the top
+/// of it for a reason the user never took.
+pub async fn set_session_title(
+    session_id: &str,
+    title: &str,
+) -> Result<Option<SessionIndexItem>> {
+    let _guard = INDEX_LOCK.lock().await;
+
+    let mut sessions = list_session_index_items().await?;
+    let Some(item) = sessions.iter_mut().find(|i| i.session_id == session_id) else {
+        return Ok(None);
+    };
+
+    item.title = title.to_string();
+    let updated = item.clone();
+
+    write_session_index(&sessions).await?;
+
+    Ok(Some(updated))
+}
+
 /// Caller must hold `INDEX_LOCK`: this rewrites the whole file, so a concurrent
 /// writer would drop the other's entry.
 async fn write_session_index(sessions: &[SessionIndexItem]) -> Result<()> {
