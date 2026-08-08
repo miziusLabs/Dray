@@ -12,6 +12,7 @@ import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
@@ -72,6 +73,14 @@ function App() {
   useHotkey("Tab", () => setPermissionMode(nextPermissionMode(permissionMode)), {
     meta: false,
     shift: true,
+  });
+  // Double-tap Shift cycles the model, JetBrains-search style — leaves each
+  // model's own remembered effort alone, same as picking it from the menu.
+  useDoubleTap("Shift", () => {
+    if (models.length < 2) return;
+    const index = models.findIndex((m) => m.id === modelId);
+    const next = models[(index + 1) % models.length];
+    handleModelChange(next.id, null);
   });
   const fullscreen = useFullscreen();
 

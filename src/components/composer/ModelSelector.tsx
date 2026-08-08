@@ -9,6 +9,12 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { Effort, Model, ModelId } from "@/types/events";
 
 const EFFORT_LABELS: Record<Effort, string> = {
@@ -44,23 +50,34 @@ export default function ModelSelector({
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        {/* `text-ui` over the button's own `text-sm`: the toolbar has to track
-            the runtime font-size setting like the rest of the chrome. */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="gap-1 px-1.5 text-ui text-muted-foreground"
-        >
-          {/* Effort is a qualifier on the model, not part of its name, so it's
-              held back a step rather than reading as one long label. */}
-          <span>{selected?.label ?? modelId}</span>
-          {effort && (
-            <span className="text-muted-foreground/60">{EFFORT_LABELS[effort]}</span>
-          )}
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            {/* `text-ui` over the button's own `text-sm`: the toolbar has to track
+                the runtime font-size setting like the rest of the chrome. */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1 px-1.5 text-ui text-muted-foreground"
+            >
+              {/* Effort is a qualifier on the model, not part of its name, so it's
+                  held back a step rather than reading as one long label. */}
+              <span>{selected?.label ?? modelId}</span>
+              {effort && (
+                <span className="text-muted-foreground/60">{EFFORT_LABELS[effort]}</span>
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          Switch model
+          <KbdGroup>
+            <Kbd>Shift</Kbd>
+            <Kbd>Shift</Kbd>
+          </KbdGroup>
+        </TooltipContent>
+      </Tooltip>
 
       <DropdownMenuContent align="start" className="min-w-48">
         {models.map((model) =>
