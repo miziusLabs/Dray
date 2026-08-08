@@ -35,6 +35,13 @@ export default function Chat({
 
   const streamingText = streamingBlock?.type === "text" ? streamingBlock.text : "";
 
+  // `busy` flips the instant the user hits send, but their prompt only reaches
+  // the transcript when the backend echoes it back as a `user_message`. Showing
+  // the indicator on `busy` alone puts it on screen above the message it is
+  // meant to follow. An open trailing turn is the signal that the echo landed.
+  const lastTurn = turns.at(-1);
+  const promptLanded = Boolean(lastTurn?.prompt && !lastTurn.completed);
+
   // A new session resets the pin, or the previous session's scroll position
   // would decide whether this one follows. Must run before the pin effect below,
   // which is why it sits first.
@@ -105,7 +112,7 @@ export default function Chat({
         {/* Last, so it trails whatever the turn has produced so far. The pane's
             ResizeObserver re-pins the scroll when this mounts, so it needs no
             place in the effect's deps. */}
-        {busy && <ThinkingIndicator />}
+        {busy && promptLanded && <ThinkingIndicator />}
       </div>
     </div>
   );
