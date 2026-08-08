@@ -30,7 +30,7 @@ export function useFullscreen(): boolean {
           apply(await win.isFullscreen());
         });
       } catch {
-        // Not in a Tauri window (the dev server in a browser, or the demo page).
+        // Not in a Tauri window (the dev server in a browser).
         if (typeof matchMedia === "undefined") return;
         const mq = matchMedia("(display-mode: fullscreen)");
         const onChange = () => apply(mq.matches);
