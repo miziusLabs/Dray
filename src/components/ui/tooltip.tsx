@@ -28,9 +28,12 @@ function TooltipTrigger({
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
 }
 
+// No arrow, by design — one removal here covers every tooltip in the app.
+// `sideOffset` was 0 when the arrow filled the gap; without it the tooltip would
+// sit flush against its trigger, so the gap moves here.
 function TooltipContent({
   className,
-  sideOffset = 0,
+  sideOffset = 6,
   children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
@@ -46,9 +49,6 @@ function TooltipContent({
         {...props}
       >
         {children}
-        {/* Only two of the four rotated edges show, so the border goes on those
-            two — a full box-shadow would draw a seam across the content. */}
-        <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%_-_3px)] rotate-45 rounded-[2px] border-r border-b border-border bg-popover fill-popover" />
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   )
