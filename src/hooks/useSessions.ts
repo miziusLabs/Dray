@@ -2,15 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect } from "react";
+import { useComposerPrefs, type EffortByModel } from "@/hooks/useComposerPrefs";
 import { AgentEvent, ApprovalPolicy, BranchList, Effort, Model, ModelId, Project, SessionIndexItem, SessionSnapshot } from "../types/events";
 
+// Only for a session indexed before the model was recorded, which reads back as
+// "unknown". Everything else seeds from the user's stored prefs.
 const DEFAULT_MODEL: ModelId = "haiku";
 const DEFAULT_EFFORT: Effort = "high";
-const DEFAULT_PERMISSION: ApprovalPolicy = "auto";
-
-// Effort is a property of the model, not of the picker: switching to Sonnet must
-// not inherit the Max you last chose on Opus. Absent key = use the model default.
-type EffortByModel = Partial<Record<ModelId, Effort>>;
 
 export type StreamingBlock = {
     index: number,
@@ -19,16 +17,22 @@ export type StreamingBlock = {
 }
 
 export function useSessions() {
-    
+
+    // The sticky defaults. Live state below seeds from these and writes back on
+    // every user-initiated change; restoring a session writes live state only.
+    const [prefs, setPrefs] = useComposerPrefs();
+
     const [sessions, setSessions] = useState<SessionSnapshot[]>([]);
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     // sessionId → the one in-flight block (CLI streams start→deltas→stop serially).
     const [streamingContentBlock, setStreamingContentBlock] = useState<Record<string, StreamingBlock | null>>({});
     const [sessionIndexItems, setSessionIndexItems] = useState<SessionIndexItem[]>([]);
     const [models, setModels] = useState<Model[]>([]);
-    const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL);
-    const [effortByModel, setEffortByModel] = useState<EffortByModel>({});
-    const [permissionMode, setPermissionMode] = useState<ApprovalPolicy>(DEFAULT_PERMISSION);
+    // Seeded once from prefs, then free to diverge: selecting a session overwrites
+    // these with what that session was started with, which must not feed back.
+    const [modelId, setModelId] = useState<ModelId>(() => prefs.modelId);
+    const [effortByModel, setEffortByModel] = useState<EffortByModel>(() => prefs.effortByModel);
+    const [permissionMode, setPermissionModeState] = useState<ApprovalPolicy>(() => prefs.permissionMode);
     const [projects, setProjects] = useState<Project[]>([]);
     const [projectPath, setProjectPath] = useState<string | null>(null);
     // Derived from the selected project, not a preference — refetched on switch
@@ -38,7 +42,7 @@ export function useSessions() {
     // The branch a switch is waiting on the user to confirm, because the tree
     // has uncommitted changes. Null when nothing is pending.
     const [pendingBranch, setPendingBranch] = useState<string | null>(null);
-    const [useWorktree, setUseWorktree] = useState(false);
+    const [useWorktree, setUseWorktreeState] = useState(() => prefs.useWorktree);
     // Per-session, not global: sessions run concurrently and all of their events
     // arrive on the same channel, so a single flag would clear on another's turn.
     const [busyBySession, setBusyBySession] = useState<Record<string, boolean>>({});
@@ -59,8 +63,31 @@ const effort: Effort | null = model
 const handleModelChange = (nextModelId: ModelId, nextEffort: Effort | null) => {
   setModelId(nextModelId);
   if (nextEffort) {
-    setEffortByModel((prev) => ({ ...prev, [nextModelId]: nextEffort }));
+    const next = { ...effortByModel, [nextModelId]: nextEffort };
+    setEffortByModel(next);
+    setPrefs({ modelId: nextModelId, effortByModel: next });
+    return;
   }
+  setPrefs({ modelId: nextModelId });
+};
+
+// Wrapped rather than exported raw: picking a mode is a preference, and the
+// hotkey in App.tsx goes through here too.
+const setPermissionMode = (mode: ApprovalPolicy) => {
+  setPermissionModeState(mode);
+  setPrefs({ permissionMode: mode });
+};
+
+// Sticky, unlike before. Someone who works in worktrees works in worktrees; the
+// old reset-to-off made them re-toggle it for every single task.
+//
+// Resolved against the rendered value rather than inside the state updater: React
+// may run an updater twice, and writing the preference from in there would fire
+// the side effect twice with it.
+const setUseWorktree = (next: boolean | ((prev: boolean) => boolean)) => {
+  const resolved = typeof next === "function" ? next(useWorktree) : next;
+  setUseWorktreeState(resolved);
+  setPrefs({ useWorktree: resolved });
 };
 
 // Attaching a known project just selects it, so this doubles as "switch to one
@@ -211,21 +238,30 @@ const handleSendMsg = async (
   }
 };
 
-// Keeps effortByModel, the project, and the permission mode: all preferences
-// that outlive any one session. Only the worktree flag resets — it's a per-
-// session choice, and defaulting it on would quietly multiply trees.
+// Restores the user's own defaults, not the app's. Selecting a session overwrote
+// the live controls with that session's settings, so every field they can change
+// has to be put back from prefs here — otherwise the last session clicked in the
+// sidebar silently becomes the template for the next new one.
+//
+// Branch is the exception: it seeds from whatever the repo is checked out to,
+// since the picker is the only thing that moves the tree and a remembered name
+// would either be a lie or an unasked-for checkout.
 const handleNewSession = () => {
   setSelectedSessionId(null);
-  setModelId(DEFAULT_MODEL);
-  setUseWorktree(false);
+  setModelId(prefs.modelId);
+  setEffortByModel(prefs.effortByModel);
+  setPermissionModeState(prefs.permissionMode);
+  setUseWorktreeState(prefs.useWorktree);
   setBranch(branches?.current ?? null);
 };
 
 const handleSelectSessionIndexItem = async (sessionId: string) => {
   setSelectedSessionId(sessionId);
 
-  // The point of persisting model/effort: switching sessions restores what the
-  // user last picked there instead of resetting to a default.
+  // Restores what this session was started with. Every setter here is the raw
+  // state setter, never the prefs-writing wrapper: these values are the session's,
+  // not the user's choice, and clicking through the sidebar must not rewrite the
+  // defaults that `handleNewSession` reads back.
   const indexItem = sessionIndexItems.find((i) => i.sessionId === sessionId);
   if (indexItem) {
     // Sessions indexed before the model was recorded read back as "unknown".
@@ -237,7 +273,7 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
     if (indexItem.effort) {
       setEffortByModel((prev) => ({ ...prev, [restored]: indexItem.effort! }));
     }
-    setPermissionMode(indexItem.permissionMode);
+    setPermissionModeState(indexItem.permissionMode);
   }
 
   // Project, branch, and the worktree flag aren't restored — the composer hides
