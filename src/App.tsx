@@ -78,6 +78,7 @@ function App() {
   return (
     <TooltipProvider>
     <AppShell
+      centered={!selectedSession}
       sidebar={
         <Sidebar
           items={sessionIndexItems}

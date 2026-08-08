@@ -72,13 +72,9 @@ export default function Chat({ session, streamingBlock, onOpenSubagent }: ChatPr
     followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   };
 
-  if (!session) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <img src="automedon.png" width={540} className="mx-auto opacity-20"></img>
-      </div>
-    );
-  }
+  // With no session there is no transcript to draw; AppShell centers the
+  // composer and skips this pane entirely.
+  if (!session) return null;
 
   return (
     <div ref={scrollRef} onScroll={onScroll} onWheel={onWheel} className="h-full overflow-y-auto">
