@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowUpIcon, StopIcon } from "@heroicons/react/24/outline";
-import { CornerDownLeft } from "lucide-react";
+import { CornerDownLeft, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,12 @@ type ChatInputProps = {
   /// padding, the toolbar moves above — reading order runs settings first, then
   /// the box they apply to — and the send button gives way to a keyboard hint.
   isNewTask?: boolean;
+  /// A backend failure, shown above the composer. Lives here rather than in the
+  /// shell so it inherits the form's `max-w-3xl` column and lines up with the
+  /// input; the transcript is the wrong home for it, since most of these fail
+  /// before any session exists to have a transcript.
+  error?: string | null;
+  onDismissError?: () => void;
 };
 
 const MAX_ROWS = 10;
@@ -29,6 +35,8 @@ export default function ChatInput({
   busy = false,
   sessionId = null,
   isNewTask = false,
+  error = null,
+  onDismissError,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [resizeTick, setResizeTick] = useState(0);
@@ -101,6 +109,39 @@ export default function ChatInput({
           submit();
         }}
       >
+        {/* Above the toolbar in both states, so the failure reads before the
+            controls rather than after them. `whitespace-pre-wrap` because these
+            are raw messages from git and the CLI, which carry their own line
+            breaks — flattening them runs the offending filenames together.
+
+            The button is positioned out of flow and the first line cleared for
+            it with `text-indent`, rather than floating it or giving it a flex
+            column. Both of those reserve space per-line: a float clears after
+            line one, so a message with its own `\n` breaks lands on three
+            different left edges. This way every line shares one edge and only
+            the first is inset. */}
+        {error && (
+          <div className="relative mb-2 px-1 text-ui break-words whitespace-pre-wrap text-destructive">
+            {onDismissError && (
+              <button
+                type="button"
+                onClick={onDismissError}
+                aria-label="Dismiss error"
+                className="absolute top-px left-1 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100"
+              >
+                <X className="size-3.5" strokeWidth={2} />
+              </button>
+            )}
+            {/* Matches the button's 14px glyph plus its padding and the gap.
+                Applied inline: an arbitrary Tailwind value would work, but the
+                number has to track the icon size above and reads clearer next
+                to it. */}
+            <span style={onDismissError ? { textIndent: "1.5rem" } : undefined} className="block">
+              {error}
+            </span>
+          </div>
+        )}
+
         {/* Pulled left by the toolbar's own `px-1` plus the ghost button's 6px
             icon inset, so the `+` glyph — not the button box — lands on the
             same edge as the text below it. */}

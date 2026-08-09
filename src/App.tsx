@@ -36,6 +36,8 @@ function App() {
     branch,
     useWorktree,
     busy,
+    error,
+    setError,
     handleModelChange,
     setPermissionMode,
     handleAttachProject,
@@ -153,6 +155,8 @@ function App() {
           busy={busy}
           sessionId={selectedSessionId}
           isNewTask={!selectedSession}
+          error={error}
+          onDismissError={() => setError(null)}
           toolbar={
             <ComposerToolbar
               models={models}
