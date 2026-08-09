@@ -65,7 +65,9 @@ export type Turn = {
 
 /// Payload types that put something on screen — the complement of the
 /// `return null` arms in [EventRow](../components/chat/EventRow.tsx). Keep the
-/// two in step, or a turn miscounts what expanding it would reveal.
+/// two in step: this set decides what a collapse would reveal, what can break a
+/// tool run, and whether `finalText` duplicates the last visible row, so a
+/// missing entry miscounts turns and splits groups on an invisible event.
 const RENDERS = new Set([
   "assistant_text",
   "reasoning",
@@ -118,20 +120,6 @@ function groupKey(event: AgentEvent, subagentIds: Set<string>): string | null {
   if (subagentIds.has(payload.callId)) return null;
   return payload.name;
 }
-
-/// Events that draw nothing of their own and so cannot break a run. A
-/// `tool_call_completed` lands between every pair of calls — it is consumed via
-/// `resultByCallId` rather than rendered — so treating it as a breaker would
-/// mean no run ever exceeds length 1.
-const TRANSPARENT = new Set([
-  "tool_call_completed",
-  "turn_started",
-  "usage_update",
-  "hook",
-  "settings_changed",
-  "delta",
-  "unknown",
-]);
 
 /// Distinct summaries across a run — the same string a row shows, so the label
 /// counts exactly what the reader will see listed. A call with no summary counts
@@ -189,7 +177,12 @@ function groupTools(work: AgentEvent[], subagentIds: Set<string>): WorkItem[] {
   };
 
   for (const event of work) {
-    if (runKey !== null && TRANSPARENT.has(event.payload.type)) {
+    // Anything that draws nothing cannot break a run — derived from `RENDERS`
+    // rather than kept as a second list, which drifted. It matters constantly: a
+    // `tool_call_completed` lands between every pair of calls (consumed via
+    // `resultByCallId`, never rendered), so treating those as breakers would
+    // mean no run ever exceeds length 1.
+    if (runKey !== null && !rendersRow(event)) {
       held.push(event);
       continue;
     }
@@ -227,11 +220,19 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
   const close = (turn: OpenTurn) => {
     const { lastWasAssistantText, ...rest } = turn;
     const work = groupTools(turn.work, subagentIds);
-    // The collapsed view renders `finalText` in place of the message it copies,
-    // so that row is on screen either way and collapsing does not hide it. The
-    // same condition that discounts it from `messages` applies here.
+    // `finalText` is a verbatim copy of the turn's last `assistant_text`, and
+    // the collapsed view renders it in that message's place — so when the last
+    // rendered row really is that message, it is on screen either way:
+    // collapsing hides one fewer row, and the summary has one fewer message to
+    // claim. An interrupted turn has no `finalText`, and a tool call after the
+    // last message means the copy is of an earlier one; neither discounts.
     const duplicated = turn.finalText !== null && lastWasAssistantText ? 1 : 0;
-    turns.push({ ...rest, work, rows: work.filter(rendersRow).length - duplicated });
+    turns.push({
+      ...rest,
+      work,
+      messages: turn.messages - duplicated,
+      rows: work.filter(rendersRow).length - duplicated,
+    });
   };
 
   const open = (prompt: AgentEvent | null, key: string): OpenTurn => ({
@@ -259,13 +260,6 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
     if (event.payload.type === "turn_completed") {
       current.completed = event;
       current.finalText = event.payload.finalText;
-      // The final answer renders in the collapsed view, so it isn't work the
-      // summary hides. Only discount it when it really is the last
-      // `assistant_text` — an interrupted turn has no `finalText` at all, and a
-      // tool call after the last message means the copy is of an earlier one.
-      if (current.finalText !== null && current.lastWasAssistantText) {
-        current.messages -= 1;
-      }
       close(current);
       current = null;
       continue;
@@ -273,7 +267,13 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
 
     if (event.payload.type === "tool_call_started") current.toolCalls += 1;
     if (event.payload.type === "assistant_text") current.messages += 1;
-    current.lastWasAssistantText = event.payload.type === "assistant_text";
+    // Only a *rendered* row unseats the flag. A replayed log carries trailing
+    // `delta`s the live path filters out of `events` — let those clear it and
+    // the finalText discount applies live but not on reload, so the same turn
+    // counts differently across a restart.
+    if (rendersRow(event)) {
+      current.lastWasAssistantText = event.payload.type === "assistant_text";
+    }
     current.work.push(event);
   }
 
