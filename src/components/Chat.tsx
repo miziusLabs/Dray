@@ -47,21 +47,29 @@ export default function Chat({
 
   const streamingText = streamingBlock?.type === "text" ? streamingBlock.text : "";
 
-  // `busy` flips the instant the user hits send, but their prompt only reaches
-  // the transcript when the backend echoes it back as a `user_message`. Showing
-  // the indicator on `busy` alone puts it on screen above the message it is
-  // meant to follow. An open trailing turn is the signal that the echo landed.
+  // The turn the indicator belongs to, or null when nothing is waiting on
+  // output.
+  //
+  // An *open* trailing turn is the whole test. Not "has a prompt": a run
+  // routinely closes a turn and opens another with no `user_message` between
+  // them, and that continuation turn is exactly when the indicator is wanted.
+  // Requiring a prompt lost it for the rest of the session. The window between
+  // the user hitting send and the backend echoing their message back is covered
+  // by the same check from the other side — until the echo lands the previous
+  // turn is still closed, so there is no open turn to attach to.
+  //
+  // A turn stops waiting once it draws something. Not `work.length`, which
+  // counts harness plumbing the transcript renders nothing for — `turn_started`
+  // above all, which lands before any real output and hid the indicator early.
   const lastTurn = turns.at(-1);
-  const promptLanded = Boolean(lastTurn?.prompt && !lastTurn.completed);
-
-  // Not `work.length`: that counts harness plumbing the transcript never draws
-  // — `turn_started` above all, which lands before any real output and so hid
-  // the indicator a beat early. Only an event that renders means the turn has
-  // something to show, with the streaming text covering the window before the
-  // first one commits.
-  const producing =
-    Boolean(lastTurn?.work.some((e) => RENDERS.has(e.payload.type))) ||
-    streamingText.length > 0;
+  const waitingTurn =
+    busy &&
+    lastTurn &&
+    !lastTurn.completed &&
+    !streamingText &&
+    !lastTurn.work.some((e) => RENDERS.has(e.payload.type))
+      ? lastTurn
+      : null;
 
 
   // A new session resets the pin, or the previous session's scroll position
@@ -117,7 +125,7 @@ export default function Chat({
   return (
     <div ref={scrollRef} onScroll={onScroll} onWheel={onWheel} className="h-full overflow-y-auto">
       <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
-        {turns.map((turn, i) => (
+        {turns.map((turn) => (
           <TurnBlock
             key={turn.key}
             turn={turn}
@@ -125,13 +133,9 @@ export default function Chat({
             resultByCallId={resultByCallId}
             onOpenSubagent={onOpenSubagent}
             // Covers the silence between the prompt landing and the first
-            // output; the turn's own content replaces it from then on. Inside
-            // the block so it sits at the gap the first event will occupy.
-            footer={
-              i === turns.length - 1 && busy && promptLanded && !producing ? (
-                <ThinkingIndicator />
-              ) : undefined
-            }
+            // output. Inside the block so it sits at the gap the first event
+            // will occupy, rather than the wider one between turns.
+            footer={turn === waitingTurn ? <ThinkingIndicator /> : undefined}
           />
         ))}
 
