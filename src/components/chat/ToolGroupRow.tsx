@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 
 import EventRow from "@/components/chat/EventRow";
-import { groupLabel } from "@/lib/tools";
+import { groupLabel, groupVerb } from "@/lib/tools";
 import type { ToolGroup } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 import type { ToolResult } from "@/types/events";
@@ -51,8 +51,17 @@ export default function ToolGroupRow({
             pending ? "shimmer-text" : failed && "text-destructive",
           )}
         >
-          {groupLabel(group.name, group.targets, pending)}
+          {group.target
+            ? groupVerb(group.name, pending)
+            : groupLabel(group.name, group.targets, pending)}
         </span>
+
+        {/* A run that hit one target names it instead of counting to one, so it
+            reads like the `ToolCall` rows underneath — same mono, same truncation
+            — with the verb above keeping the group's own styling. */}
+        {group.target && (
+          <span className="min-w-0 max-w-fit truncate font-mono">{group.target}</span>
+        )}
 
         {/* The label counts targets, so repeat visits vanish from it — 30 edits
             across 12 files reads as "12 files". This is the only place that

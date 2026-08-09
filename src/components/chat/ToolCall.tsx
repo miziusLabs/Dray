@@ -92,7 +92,7 @@ export default function ToolCall({
         {showLabel && (
           <span
             className={cn(
-              "shrink-0 font-medium",
+              "shrink-0",
               failed ? "text-destructive" : "text-foreground/80",
               pending && "shimmer-text",
             )}
@@ -143,17 +143,19 @@ export default function ToolCall({
 
       {/* A failure drops the box and reads at the row's own size: an error is
           the reason to look at the row, so it should not be the smallest text on
-          it. It is tinted well short of the destructive color the name carries
-          — see `--color-destructive-muted`. */}
+          it. Nothing here is tinted — the red label above already marks the row,
+          and the "Error:" lead-in names the text without a second color
+          repeating what the label said. */}
       {open && shown && (
         <pre
           className={cn(
             "max-h-96 overflow-auto whitespace-pre-wrap",
             failed
-              ? "font-mono text-chat text-destructive-muted"
+              ? "font-mono text-chat text-foreground/90"
               : "rounded-md bg-surface-raised px-2.5 py-2 font-mono text-tool text-muted-foreground",
           )}
         >
+          {failed && "Error: "}
           {shown}
         </pre>
       )}

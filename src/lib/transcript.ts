@@ -29,6 +29,9 @@ export type ToolGroup = {
   /// edits to one file is "Edited 1 file", not 3. Falls back to the call count
   /// for a tool whose calls carry no identifying field.
   targets: number;
+  /// The single target's summary when the whole run hit one, else null. Lets the
+  /// row name it — "Edited src/lib/tools.ts" — instead of counting to one.
+  target: string | null;
   key: string;
 };
 
@@ -124,7 +127,11 @@ function groupKey(event: AgentEvent, subagentIds: Set<string>): string | null {
 /// Distinct summaries across a run — the same string a row shows, so the label
 /// counts exactly what the reader will see listed. A call with no summary counts
 /// as its own target: it is something that happened, just unnamed.
-function countTargets(run: AgentEvent[]): number {
+///
+/// Returns the count and, when the run hit exactly one *named* target, that name.
+/// Unnamed calls never yield a name — there is nothing to print — so a pair of
+/// them stays a count.
+function countTargets(run: AgentEvent[]): { count: number; only: string | null } {
   const seen = new Set<string>();
   let unnamed = 0;
   for (const event of run) {
@@ -134,7 +141,8 @@ function countTargets(run: AgentEvent[]): number {
     if (summary === null) unnamed += 1;
     else seen.add(summary);
   }
-  return seen.size + unnamed;
+  const count = seen.size + unnamed;
+  return { count, only: count === 1 && seen.size === 1 ? [...seen][0] : null };
 }
 
 /// Collapses runs of `GROUP_MIN`+ consecutive calls to the same tool into one
@@ -159,11 +167,13 @@ function groupTools(work: AgentEvent[], subagentIds: Set<string>): WorkItem[] {
 
   const flush = () => {
     if (runKey !== null && run.length >= GROUP_MIN) {
+      const { count, only } = countTargets(run);
       items.push({
         kind: "tool_group",
         name: runKey,
         calls: run,
-        targets: countTargets(run),
+        targets: count,
+        target: only,
         key: `group-${run[0].id}`,
       });
     } else {

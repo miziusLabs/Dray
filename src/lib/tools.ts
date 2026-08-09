@@ -97,18 +97,22 @@ function plural(noun: string, count: number): string {
   return /[^aeiou]y$/.test(noun) ? `${noun.slice(0, -1)}ies` : `${noun}s`;
 }
 
-/// Labels a collapsed run: "Reading 4 files" live, "Read 4 files" once settled.
-/// A tool with no entry counts bare calls under its own name ("ToolSearch 4
-/// calls"), which needs no upkeep as tools come and go.
-export function groupLabel(name: string, count: number, pending: boolean): string {
-  const verbs = TOOL_VERBS[name];
+/// The verb a collapsed run reads under — "Reading" live, "Read" once settled.
+/// A tool with no entry falls back to its own name, which needs no upkeep as
+/// tools come and go. Exported for a run that hit a single target and names it
+/// rather than counting to one: the row supplies the target, this the verb.
+export function groupVerb(name: string, pending: boolean): string {
   const override = GROUP_VERBS[name];
-  const verb = override
-    ? override[pending ? 0 : 1]
-    : verbs
-      ? verbs[pending ? 0 : 1]
-      : name;
-  return `${verb} ${count} ${plural(verbs?.[2] ?? "call", count)}`;
+  if (override) return override[pending ? 0 : 1];
+  const verbs = TOOL_VERBS[name];
+  return verbs ? verbs[pending ? 0 : 1] : name;
+}
+
+/// Labels a collapsed run: "Reading 4 files" live, "Read 4 files" once settled.
+/// A tool with no `TOOL_VERBS` noun counts bare calls ("ToolSearch 4 calls").
+export function groupLabel(name: string, count: number, pending: boolean): string {
+  const noun = plural(TOOL_VERBS[name]?.[2] ?? "call", count);
+  return `${groupVerb(name, pending)} ${count} ${noun}`;
 }
 
 /// Absolute paths dominate the row otherwise; the last two segments are enough
