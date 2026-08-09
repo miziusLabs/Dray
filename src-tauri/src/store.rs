@@ -127,6 +127,24 @@ pub async fn list_session_index_items() -> Result<Vec<SessionIndexItem>> {
     Ok(items)
 }
 
+/// The index filtered to one side of `archived` — the sidebar shows exactly one
+/// of the two at a time, so a parameter keeps it to one function rather than a
+/// pair that would drift. Callers that need every entry (`set_*`, `get_*`) still
+/// use [`list_session_index_items`] directly.
+pub async fn list_session_index_items_by_archived(
+    archived: bool,
+) -> Result<Vec<SessionIndexItem>> {
+    Ok(filter_by_archived(
+        list_session_index_items().await?,
+        archived,
+    ))
+}
+
+/// Split out from the async read so it can be tested without an `index.json`.
+fn filter_by_archived(items: Vec<SessionIndexItem>, archived: bool) -> Vec<SessionIndexItem> {
+    items.into_iter().filter(|i| i.archived == archived).collect()
+}
+
 /// All sessions, bucketed by `project_path` — the sidebar's project grouping.
 pub async fn list_sessions_by_project() -> Result<Vec<SessionIndexByProject>> {
     let sessions = list_session_index_items().await?;
@@ -480,6 +498,39 @@ mod tests {
         // Absent reads as the composer's own default, so an old session resumes
         // under the mode its picker would show.
         assert_eq!(item.permission_mode, ApprovalPolicy::Auto);
+    }
+
+    #[test]
+    fn archived_filter_splits_the_index_into_two_disjoint_views() {
+        let item = |id: &str, archived: bool| {
+            let mut i = SessionIndexItem::new(
+                id,
+                Harness::ClaudeCode,
+                "/p",
+                "/p",
+                None,
+                None,
+                "hi",
+                ModelId::Opus,
+                None,
+                ApprovalPolicy::Auto,
+            );
+            i.archived = archived;
+            i
+        };
+        let items = vec![item("a", false), item("b", true), item("c", false)];
+
+        let active = filter_by_archived(items.clone(), false);
+        let settled = filter_by_archived(items, true);
+
+        assert_eq!(
+            active.iter().map(|i| i.session_id.as_str()).collect::<Vec<_>>(),
+            ["a", "c"]
+        );
+        assert_eq!(
+            settled.iter().map(|i| i.session_id.as_str()).collect::<Vec<_>>(),
+            ["b"]
+        );
     }
 
     #[test]

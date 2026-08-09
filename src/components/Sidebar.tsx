@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Check, Filter, Pin, Plus, Search } from "lucide-react";
+import { Check, CheckCheck, Inbox, Pin, Plus, Search } from "lucide-react";
 
 import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,8 @@ type SidebarProps = {
     sessionId: string,
     flags: { archived?: boolean; pinned?: boolean },
   ) => Promise<void>;
+  showArchived: boolean;
+  onToggleArchived: () => void;
 };
 
 // Rendered rather than detected per-keystroke: the hotkey itself accepts either
@@ -94,6 +96,8 @@ export default function Sidebar({
   onSelect,
   onNewSession,
   onSetFlags,
+  showArchived,
+  onToggleArchived,
 }: SidebarProps) {
   const fullscreen = useFullscreen();
 
@@ -149,15 +153,32 @@ export default function Sidebar({
         </Button>
       </div>
 
-      {/* Neither control is wired yet — the filter label is where project
-          grouping went, and it stays inert until there's a project picker. */}
+      {/* The filter label is where project grouping went, and it stays inert
+          until there's a project picker. */}
       <div className="mt-4 flex items-start justify-between py-1 pr-2 pl-3">
         <ProjectFilter />
 
         <div className="flex items-center gap-0.5">
-          <Button variant="ghost" size="icon-xs" title="Filter">
-            <Filter />
-          </Button>
+          {/* The icon names the destination, not the current view: `CheckCheck`
+              (the row control's single `Check`, doubled — every settled one) goes
+              to the settled list, `Inbox` comes back. A pressed state on one icon
+              can't say that on its own, so the glyph swaps instead. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={showArchived ? "Show active" : "Show settled"}
+                onClick={onToggleArchived}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {showArchived ? <Inbox /> : <CheckCheck />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {showArchived ? "Show active" : "Show settled"}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -166,7 +187,7 @@ export default function Sidebar({
       <div className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 pl-2 pr-0">
         {sorted.length === 0 ? (
           <p className="px-2 py-6 text-ui text-muted-foreground">
-            No sessions yet. Start one below.
+            {showArchived ? "Nothing settled yet." : "No sessions yet. Start one below."}
           </p>
         ) : (
           sorted.map((item) => (

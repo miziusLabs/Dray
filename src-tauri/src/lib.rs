@@ -74,9 +74,11 @@ async fn list_sessions_by_project() -> Result<Vec<SessionIndexByProject>, String
         .map_err(|e| e.to_string())
 }
 
+/// One side of the archived split. The sidebar's toggle is the only caller, and
+/// it never wants both at once, so the flag it holds is the argument.
 #[tauri::command]
-async fn list_session_index_items() -> Result<Vec<SessionIndexItem>, String> {
-    store::list_session_index_items()
+async fn list_session_index_items(archived: bool) -> Result<Vec<SessionIndexItem>, String> {
+    store::list_session_index_items_by_archived(archived)
         .await
         .map_err(|e| e.to_string())
 }

@@ -27,6 +27,9 @@ export function useSessions() {
     // sessionId → the one in-flight block (CLI streams start→deltas→stop serially).
     const [streamingContentBlock, setStreamingContentBlock] = useState<Record<string, StreamingBlock | null>>({});
     const [sessionIndexItems, setSessionIndexItems] = useState<SessionIndexItem[]>([]);
+    // Which side of the archived split the sidebar is showing. Not persisted:
+    // archived is the exception view, so every launch starts on the active list.
+    const [showArchived, setShowArchived] = useState(false);
     const [models, setModels] = useState<Model[]>([]);
     // Seeded once from prefs, then free to diverge: selecting a session overwrites
     // these with what that session was started with, which must not feed back.
@@ -217,7 +220,11 @@ const handleSendMsg = async (
     // worktree name and truncated title come from disk rather than a guess here.
     if (snapshot) {
       upsertSession(snapshot);
-      setSessionIndexItems((prev) => [...prev, snapshot]);
+      // A new session is never archived, so it belongs to the active list only —
+      // pushed unconditionally it would show up under the archived filter too.
+      if (!showArchived) {
+        setSessionIndexItems((prev) => [...prev, snapshot]);
+      }
       return;
     }
 
@@ -311,21 +318,37 @@ const setSessionFlags = async (
     });
     if (!updated) return;
     setSessionIndexItems((prev) =>
-      prev.map((i) => (i.sessionId === sessionId ? updated : i)),
+      prev.flatMap((i) => {
+        if (i.sessionId !== sessionId) return [i];
+        // Archiving from the active list — or unarchiving from the archived one —
+        // moves the row to the other view, so it leaves this one rather than
+        // sitting there contradicting the filter that produced the list.
+        return updated.archived === showArchived ? [updated] : [];
+      }),
+    );
+    // The open transcript keeps its own copy of the index fields, and it's what
+    // the composer reads `archived` from — left alone, settling the session on
+    // screen would swap in the unsettle bar only after a reselect.
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.sessionId === sessionId
+          ? { ...s, archived: updated.archived, pinned: updated.pinned }
+          : s,
+      ),
     );
   } catch (e) {
     setError(String(e));
   }
 };
 
+// Refetched on every toggle rather than filtered from one cached list: the two
+// views are disjoint, so holding both would mean tracking which of them a flag
+// write belongs to.
 useEffect(() => {
-  const listSessionIndexItems = async () => {
-    return await invoke<SessionIndexItem[]>("list_session_index_items");
-  };
-
-  listSessionIndexItems().then((items) => setSessionIndexItems(items));
-
-}, [])
+  invoke<SessionIndexItem[]>("list_session_index_items", { archived: showArchived })
+    .then(setSessionIndexItems)
+    .catch((e) => setError(String(e)));
+}, [showArchived])
 
 useEffect(() => {
   invoke<Model[]>("list_models").then(setModels);
@@ -500,6 +523,6 @@ useEffect(() => {
 // A brand-new session has no id until its first send, so nothing can be in flight.
 const busy = selectedSessionId ? busyBySession[selectedSessionId] ?? false : false;
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, busyBySession, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, busyBySession, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
 
 }

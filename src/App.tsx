@@ -28,6 +28,8 @@ function App() {
     selectedSession,
     streamingContentBlock,
     sessionIndexItems,
+    showArchived,
+    setShowArchived,
     models,
     modelId,
     effort,
@@ -107,6 +109,8 @@ function App() {
           onSelect={handleSelectSessionIndexItem}
           onNewSession={handleNewSession}
           onSetFlags={setSessionFlags}
+          showArchived={showArchived}
+          onToggleArchived={() => setShowArchived((v) => !v)}
         />
       }
       header={
@@ -164,6 +168,10 @@ function App() {
           isNewTask={!selectedSession}
           error={error}
           onDismissError={() => setError(null)}
+          archived={selectedSession?.archived ?? false}
+          onUnarchive={() =>
+            selectedSessionId && setSessionFlags(selectedSessionId, { archived: false })
+          }
           toolbar={
             <ComposerToolbar
               models={models}

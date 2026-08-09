@@ -24,6 +24,11 @@ type ChatInputProps = {
   /// before any session exists to have a transcript.
   error?: string | null;
   onDismissError?: () => void;
+  /// A settled session takes no new turns, so the composer is replaced by the one
+  /// control that can change that. Handled here rather than in the shell so the
+  /// bar inherits the form's column and sits exactly where the card would.
+  archived?: boolean;
+  onUnarchive?: () => void;
 };
 
 const MAX_ROWS = 10;
@@ -36,6 +41,8 @@ export default function ChatInput({
   isNewTask = false,
   error = null,
   onDismissError,
+  archived = false,
+  onUnarchive,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [resizeTick, setResizeTick] = useState(0);
@@ -98,6 +105,37 @@ export default function ChatInput({
     onSend(trimmed);
     setMessage("");
   };
+
+  // Returns before the form, so there is no disabled textarea to focus and no
+  // submit path to reach at all — a disabled input still reads as "type here,
+  // but not now", and this session isn't waiting on anything.
+  //
+  // After the hooks above, which must stay unconditional: settling the open
+  // session swaps this in under a mounted composer.
+  //
+  // The live composer is a card plus a 34px toolbar row beneath it. Only the card
+  // has a settled counterpart, so that row's height is held below as empty space:
+  // `pb-4` + 34px. Without it the bar sits 34px lower than every other session's
+  // composer and the transcript shifts down with it.
+  if (archived) {
+    return (
+      <div className="px-4 pb-[3.125rem]">
+        {/* `px-3 py-3` is the live card's own padding, so the button's right edge
+            lands where the submit button's does. The label carries the textarea's
+            extra `px-1` itself — inside the card those two sit on different
+            edges, and matching only one of them is what reads as a shift. */}
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 rounded-2xl border border-[oklch(1_0_0/6%)] bg-card px-3 py-3">
+          <span className="px-1 text-composer text-muted-foreground">
+            Unsettle this task to send a follow-up.
+          </span>
+
+          <Button variant="secondary" size="sm" onClick={onUnarchive}>
+            Unsettle
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="px-4 pb-4">
