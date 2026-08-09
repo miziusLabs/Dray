@@ -65,7 +65,9 @@ pub async fn init(
         args.extend(["-w", name]);
     }
 
-    let mut child = Command::new("claude")
+    // Resolved rather than spawned by bare name: a bundled `.app` launched from
+    // Finder inherits launchd's `PATH`, which holds no `claude`.
+    let mut child = Command::new(crate::binpath::claude().await)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::piped())

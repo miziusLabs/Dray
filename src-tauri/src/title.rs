@@ -81,7 +81,7 @@ pub async fn generate_title(prompt: &str, cwd: &str) -> Result<String> {
         bail!("empty prompt");
     }
 
-    let child = Command::new("claude")
+    let child = Command::new(crate::binpath::claude().await)
         .args([
             // A separate argv element, never concatenated into a command line:
             // no shell is involved, so a prompt containing quotes or `$(...)`

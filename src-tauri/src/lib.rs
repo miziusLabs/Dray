@@ -8,6 +8,7 @@ use crate::{
 };
 use tauri::{AppHandle, State};
 
+pub mod binpath;
 #[path = "events/events.rs"]
 pub mod events;
 pub mod git;
