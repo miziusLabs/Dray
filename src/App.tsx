@@ -4,7 +4,7 @@ import { CpuChipIcon } from "@heroicons/react/24/outline";
 import "./App.css";
 import Chat from "@/components/Chat";
 import ChatInput from "@/components/ChatInput";
-import Sidebar, { SidebarToggle } from "@/components/Sidebar";
+import Sidebar, { DevBadge, SidebarToggle } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import { nextPermissionMode } from "@/components/composer/PermissionSelector";
@@ -118,6 +118,7 @@ function App() {
               )}
             >
               <SidebarToggle onToggle={toggleSidebar} collapsed />
+              {import.meta.env.DEV && <DevBadge className="ml-1" />}
             </div>
           )}
 

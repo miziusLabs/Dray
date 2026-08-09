@@ -73,6 +73,24 @@ export function SidebarToggle({
   );
 }
 
+/// Marks a dev build so it can't be mistaken for the installed app. Gated on
+/// `import.meta.env.DEV`, which Vite folds to a constant — the badge and this
+/// component are dropped from a production bundle entirely.
+export function DevBadge({ className }: { className?: string }) {
+  return (
+    <span
+      // Drag region is opted out of so the label never swallows a window drag.
+      className={cn(
+        "rounded bg-orange-500/15 px-1.5 py-0.5 font-mono text-[10px] leading-none font-medium tracking-wide text-orange-500 uppercase",
+        className,
+      )}
+      data-tauri-drag-region={false}
+    >
+      Dev
+    </span>
+  );
+}
+
 export default function Sidebar({
   items,
   selectedSessionId,
@@ -109,6 +127,7 @@ export default function Sidebar({
         )}
         data-tauri-drag-region
       >
+        {import.meta.env.DEV && <DevBadge className="mr-auto" />}
         <SidebarToggle onToggle={onToggleCollapsed} />
       </div>
 
