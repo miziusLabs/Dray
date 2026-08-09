@@ -4,7 +4,7 @@ import AssistantMessage from "@/components/chat/AssistantMessage";
 import ThinkingIndicator from "@/components/chat/ThinkingIndicator";
 import TurnBlock from "@/components/chat/TurnBlock";
 import type { StreamingBlock } from "@/hooks/useSessions";
-import { buildTranscript } from "@/lib/transcript";
+import { buildTranscript, rendersRow } from "@/lib/transcript";
 import type { SessionSnapshot } from "@/types/events";
 
 type ChatProps = {
@@ -15,18 +15,6 @@ type ChatProps = {
   /// agent is still working.
   busy?: boolean;
 };
-
-/// Payload types that put something on screen. The complement of the
-/// `return null` arms in [EventRow](chat/EventRow.tsx) — keep the two in step,
-/// or the thinking indicator hides against an event that draws nothing.
-const RENDERS = new Set([
-  "assistant_text",
-  "reasoning",
-  "tool_call_started",
-  "file_edits",
-  "error",
-  "context_compacted",
-]);
 
 export default function Chat({
   session,
@@ -67,13 +55,14 @@ export default function Chat({
     lastTurn &&
     !lastTurn.completed &&
     !streamingText &&
-    !lastTurn.work.some((e) => RENDERS.has(e.payload.type))
+    !lastTurn.work.some(rendersRow)
       ? lastTurn
       : null;
 
   // Which turn hosts the preview. It has to render inside the same stack the
   // committed `assistant_text` will land in, or the two sit at different gaps
-  // (16px between turns, 8px within one) and the text jumps 8px on the swap.
+  // (the between-turn gap is wider than the within-turn one) and the text
+  // jumps by the difference on the swap.
   //
   // Always the open trailing turn while anything is streaming. `turn_completed`
   // maps from `result`, which fires once per run rather than per message, so a

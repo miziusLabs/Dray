@@ -4,8 +4,9 @@ import { ChevronRight } from "lucide-react";
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import EventRow from "@/components/chat/EventRow";
 import SubagentRow from "@/components/chat/SubagentRow";
+import ToolGroupRow from "@/components/chat/ToolGroupRow";
 import UserMessage from "@/components/chat/UserMessage";
-import type { SubagentRun, Turn } from "@/lib/transcript";
+import { isToolGroup, type SubagentRun, type Turn } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 import type { ToolResult } from "@/types/events";
 
@@ -17,10 +18,15 @@ type TurnBlockProps = {
   /// Trails the turn's work inside this block's own stack. The thinking
   /// indicator and the streaming preview both go here rather than after the
   /// block, so they sit at the same gap the committed event will — placing them
-  /// outside left them 16px down from the turn and the content that replaced
-  /// them jumped 8px up.
+  /// outside left them at the between-turn gap, and the content that replaced
+  /// them jumped up by the difference.
   footer?: ReactNode;
 };
+
+/// Fewer rows than this and the collapse costs a click to reveal less than the
+/// summary line it stood in for. Tool groups already compact the long runs, so
+/// what reaches here is genuinely distinct steps.
+const COLLAPSE_MIN = 3;
 
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -45,14 +51,18 @@ export default function TurnBlock({
 
   // `finalText` duplicates the turn's last `assistant_text`, so the collapsed
   // view renders it in that message's place rather than alongside it. A running
-  // turn has no `finalText` yet, so its work stays visible instead. Gate on the
-  // summary rather than `work.length`: a turn whose only work *is* that final
-  // message has nothing left to reveal, and would offer an empty toggle.
-  const collapsible = !running && parts.length > 0;
+  // turn has no `finalText` yet, so its work stays visible instead.
+  //
+  // `rows` rather than `work.length` or the summary counts: a turn whose only
+  // work *is* that final message has nothing left to reveal and would offer an
+  // empty toggle, and one hiding a single row costs a click to show less than
+  // the summary line it replaced. Same reasoning as `GROUP_MIN` — a collapse
+  // has to save more than it costs.
+  const collapsible = !running && turn.rows >= COLLAPSE_MIN;
   const showWork = open || !collapsible;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       {turn.prompt && <UserMessage {...userProps(turn)} />}
 
       {collapsible && (
@@ -72,16 +82,22 @@ export default function TurnBlock({
       )}
 
       {showWork &&
-        turn.work.map((event) => {
+        turn.work.map((item) => {
+          if (isToolGroup(item)) {
+            return (
+              <ToolGroupRow key={item.key} group={item} resultByCallId={resultByCallId} />
+            );
+          }
+
           const run =
-            event.payload.type === "tool_call_started"
-              ? subagentById.get(event.payload.callId)
+            item.payload.type === "tool_call_started"
+              ? subagentById.get(item.payload.callId)
               : undefined;
 
           return run ? (
-            <SubagentRow key={event.id} run={run} onOpen={onOpenSubagent} />
+            <SubagentRow key={item.id} run={run} onOpen={onOpenSubagent} />
           ) : (
-            <EventRow key={event.id} event={event} resultByCallId={resultByCallId} />
+            <EventRow key={item.id} event={item} resultByCallId={resultByCallId} />
           );
         })}
 

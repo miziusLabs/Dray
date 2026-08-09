@@ -44,6 +44,73 @@ export function toolSummary(
   );
 }
 
+/// Present/past labels per tool, so a row reads as an action rather than an API
+/// name. Only the built-in tools get one — an MCP tool's name is arbitrary, and
+/// conjugating it would produce nonsense, so those fall back to the name itself.
+///
+/// Bash stays literal in both tenses on a row: "Running"/"Ran" describes the
+/// command, not the tool, and the command is already shown beside it.
+///
+/// The third field is the noun a collapsed run counts ("Read 4 **files**") — the
+/// group label needs it, a single row doesn't.
+type Verbs = [running: string, done: string, noun: string];
+
+const TOOL_VERBS: Record<string, Verbs> = {
+  Read: ["Reading", "Read", "file"],
+  NotebookRead: ["Reading", "Read", "notebook"],
+  Edit: ["Editing", "Edited", "file"],
+  NotebookEdit: ["Editing", "Edited", "notebook"],
+  Write: ["Writing", "Wrote", "file"],
+  Bash: ["Bash", "Bash", "command"],
+  BashOutput: ["Reading output", "Read output", "output"],
+  KillShell: ["Killing shell", "Killed shell", "shell"],
+  Grep: ["Searching", "Searched", "pattern"],
+  Glob: ["Searching", "Searched", "pattern"],
+  WebFetch: ["Fetching", "Fetched", "page"],
+  WebSearch: ["Searching web", "Searched web", "query"],
+};
+
+/// The label for a single tool-call row. `pending` picks the tense — a live call
+/// reads "Reading", a settled one "Read".
+export function toolLabel(name: string, pending: boolean): string {
+  const verbs = TOOL_VERBS[name];
+  if (!verbs) return name;
+  return pending ? verbs[0] : verbs[1];
+}
+
+/// Verbs that differ in a group. Two reasons a tool lands here: Bash reads
+/// better conjugated than its row does ("Bash" beside a command, but "Ran 6
+/// commands" for a count), and the verbs carrying their own object would
+/// otherwise say it twice — "Searching web 4 queries".
+const GROUP_VERBS: Record<string, [running: string, done: string]> = {
+  Bash: ["Running", "Ran"],
+  BashOutput: ["Reading", "Read"],
+  KillShell: ["Killing", "Killed"],
+  WebSearch: ["Searching", "Searched"],
+};
+
+/// English plurals only where the nouns here need it — a trailing `y` after a
+/// consonant. Nothing in `TOOL_VERBS` is irregular, so this stays a rule rather
+/// than a table.
+function plural(noun: string, count: number): string {
+  if (count === 1) return noun;
+  return /[^aeiou]y$/.test(noun) ? `${noun.slice(0, -1)}ies` : `${noun}s`;
+}
+
+/// Labels a collapsed run: "Reading 4 files" live, "Read 4 files" once settled.
+/// A tool with no entry counts bare calls under its own name ("ToolSearch 4
+/// calls"), which needs no upkeep as tools come and go.
+export function groupLabel(name: string, count: number, pending: boolean): string {
+  const verbs = TOOL_VERBS[name];
+  const override = GROUP_VERBS[name];
+  const verb = override
+    ? override[pending ? 0 : 1]
+    : verbs
+      ? verbs[pending ? 0 : 1]
+      : name;
+  return `${verb} ${count} ${plural(verbs?.[2] ?? "call", count)}`;
+}
+
 /// Absolute paths dominate the row otherwise; the last two segments are enough
 /// to recognize a file and still fit beside the tool name.
 export function shortenPath(path: string): string {

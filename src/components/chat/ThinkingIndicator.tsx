@@ -12,9 +12,7 @@ export default function ThinkingIndicator() {
           app stamps a palette name (`neutral`) there instead. */}
       <ThinkingOrb state="listening" size={20} theme="dark" aria-hidden />
 
-      <span className="animate-shimmer bg-[linear-gradient(90deg,var(--color-muted-foreground)_35%,var(--color-foreground)_50%,var(--color-muted-foreground)_65%)] bg-[length:200%_100%] bg-clip-text text-chat text-transparent">
-        Thinking...
-      </span>
+      <span className="shimmer-text text-chat">Thinking...</span>
     </div>
   );
 }

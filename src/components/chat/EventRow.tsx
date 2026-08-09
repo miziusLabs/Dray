@@ -36,11 +36,14 @@ function Notice({
 export default function EventRow({
   event,
   resultByCallId,
+  hideToolLabel = false,
 }: {
   event: AgentEvent;
   /// Results keyed by call id, so a started call renders its own outcome without
   /// searching the event list itself.
   resultByCallId: Map<string, ToolResult>;
+  /// Passed down by `ToolGroupRow`, whose header already names the tool.
+  hideToolLabel?: boolean;
 }) {
   const { payload } = event;
 
@@ -63,6 +66,7 @@ export default function EventRow({
           input={payload.input}
           rawInput={payload.rawInput}
           result={resultByCallId.get(payload.callId)}
+          hideLabel={hideToolLabel}
         />
       );
 

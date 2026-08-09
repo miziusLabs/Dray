@@ -228,6 +228,32 @@
 }
 
 @layer utilities {
+  /* The full shimmer: the travelling gradient plus the clip and transparent
+     fill that confine it to the glyphs. `--animate-shimmer` alone animates a
+     background nothing can see, and the four classes it needs alongside it were
+     being retyped per call site. Colors are the muted/foreground pair, so it
+     reads as the same text brightening rather than a tinted highlight. */
+  .shimmer-text {
+    animation: var(--animate-shimmer);
+    background-image: linear-gradient(
+      90deg,
+      var(--color-muted-foreground) 35%,
+      var(--color-foreground) 50%,
+      var(--color-muted-foreground) 65%
+    );
+    background-size: 200% 100%;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Motion is decoration here — the label's tense already carries the state,
+     and the text stays legible without the animation. */
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer-text {
+      animation: none;
+    }
+  }
+
   /* Thin scrollbar that appears while the list is hovered. The gutter is
      reserved permanently, so the thumb showing never reflows the rows — the
      gutter is the container's right padding.

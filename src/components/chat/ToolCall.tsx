@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { formatToolInput, toolSummary } from "@/lib/tools";
+import { formatToolInput, toolLabel, toolSummary } from "@/lib/tools";
 import type { ToolResult, ToolType } from "@/types/events";
 import type { JsonValue } from "@/types/serde_json/JsonValue";
 
@@ -31,6 +31,10 @@ type ToolCallProps = {
   rawInput: string | null;
   /// Absent while the call is still in flight.
   result?: ToolResult;
+  /// Set for a row inside a `ToolGroupRow`, whose header already names the tool
+  /// — repeating "Edited" down all 30 rows is noise, and the path is the only
+  /// thing that varies.
+  hideLabel?: boolean;
 };
 
 export default function ToolCall({
@@ -40,6 +44,7 @@ export default function ToolCall({
   input,
   rawInput,
   result,
+  hideLabel = false,
 }: ToolCallProps) {
   const [open, setOpen] = useState(false);
 
@@ -57,6 +62,10 @@ export default function ToolCall({
   const summary = title ?? toolSummary(name, toolType, input);
   const pending = result === undefined;
   const failed = result?.isError ?? false;
+
+  // Inside a group the label is redundant — except with no summary to stand in
+  // its place, where dropping it would leave a blank, unclickable row.
+  const showLabel = !hideLabel || !summary;
 
   const body = rawInput ?? formatToolInput(input, SUMMARY_FIELDS);
   const output = result?.text.trim() ?? "";
@@ -77,14 +86,33 @@ export default function ToolCall({
         onClick={() => setOpen((prev) => !prev)}
         className="flex w-full items-center gap-2 text-left text-chat"
       >
-        <span className={cn("shrink-0 font-medium", failed ? "text-destructive" : "text-foreground/80")}>
-          {name}
-        </span>
+        {/* The shimmer is the running state; it stops the moment the result
+            lands, so a settled row is plain text again. The label carries the
+            same information in its tense — "Reading" then "Read". */}
+        {showLabel && (
+          <span
+            className={cn(
+              "shrink-0 font-medium",
+              failed ? "text-destructive" : "text-foreground/80",
+              pending && "shimmer-text",
+            )}
+          >
+            {toolLabel(name, pending)}
+          </span>
+        )}
 
         {/* `min-w-0` lets it shrink and `max-w-fit` stops it claiming the row's
-            free space, which would push the caret out to the far right. */}
+            free space, which would push the caret out to the far right. With the
+            label hidden this is the whole row, so it inherits the shimmer and
+            the failure color the label would have carried. */}
         {summary && (
-          <span className="min-w-0 max-w-fit truncate font-mono text-muted-foreground">
+          <span
+            className={cn(
+              "min-w-0 max-w-fit truncate font-mono",
+              !showLabel && failed ? "text-destructive" : "text-muted-foreground",
+              !showLabel && pending && "shimmer-text",
+            )}
+          >
             {summary}
           </span>
         )}
@@ -99,12 +127,12 @@ export default function ToolCall({
           )}
         />
 
-        <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground/70">
-          {result?.exitCode != null && result.exitCode !== 0 && (
-            <span className="text-destructive">exit {result.exitCode}</span>
-          )}
-          {pending && <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />}
-        </span>
+        {/* No pending dot — the shimmering label is the running state, and two
+            indicators for one fact just competed with each other. A non-zero
+            exit stays: that is an outcome, which the label never encodes. */}
+        {result?.exitCode != null && result.exitCode !== 0 && (
+          <span className="ml-auto shrink-0 text-destructive">exit {result.exitCode}</span>
+        )}
       </button>
 
       {open && body && (
@@ -113,11 +141,16 @@ export default function ToolCall({
         </pre>
       )}
 
+      {/* A failure drops the box: the destructive text is the signal, and
+          wrapping it in the same surface as ordinary output made the error read
+          as just more output. */}
       {open && shown && (
         <pre
           className={cn(
-            "max-h-96 overflow-auto rounded-md bg-surface-raised px-2.5 py-2 font-mono text-tool whitespace-pre-wrap",
-            failed ? "text-destructive" : "text-muted-foreground",
+            "max-h-96 overflow-auto font-mono text-tool whitespace-pre-wrap",
+            failed
+              ? "text-destructive"
+              : "rounded-md bg-surface-raised px-2.5 py-2 text-muted-foreground",
           )}
         >
           {shown}
