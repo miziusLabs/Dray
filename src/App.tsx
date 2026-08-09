@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Cpu } from "lucide-react";
 
 import "./App.css";
@@ -12,8 +12,10 @@ import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useCodeTheme } from "@/hooks/useCodeTheme";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { warmHighlighter } from "@/hooks/useHighlighter";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSessions } from "@/hooks/useSessions";
@@ -56,6 +58,11 @@ function App() {
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedSubagentId, setSelectedSubagentId] = useState<string | null>(null);
+
+  // Themes and Shiki's engine are shared by every code surface, so they load
+  // once here instead of on the first diff the user happens to open.
+  const { pair: codeThemePair } = useCodeTheme();
+  useEffect(() => warmHighlighter(codeThemePair), [codeThemePair]);
 
   // The chat derives this too, but the panel and the header count need it here
   // and the memo makes the second pass free.

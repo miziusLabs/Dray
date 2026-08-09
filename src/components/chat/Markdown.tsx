@@ -1,7 +1,9 @@
-import { memo } from "react";
-import { code } from "@streamdown/code";
+import { memo, useMemo } from "react";
 import { Streamdown, type ThemeInput } from "streamdown";
 
+import { useCodeTheme } from "@/hooks/useCodeTheme";
+import { createSharedCodePlugin } from "@/lib/codePlugin";
+import type { CodeThemePair } from "@/lib/codeTheme";
 import { cn } from "@/lib/utils";
 
 type MarkdownProps = {
@@ -12,11 +14,21 @@ type MarkdownProps = {
   className?: string;
 };
 
-// Shiki takes a [light, dark] pair and picks by the `.dark` class our theme
-// already sets, so switching palettes needs nothing here.
-const SHIKI_THEME: [ThemeInput, ThemeInput] = ["github-light", "github-dark"];
+// A plugin's `getThemes()` outranks the `shikiTheme` prop, so the pair has to
+// reach it through construction. Cached per pair because each instance owns its
+// own token cache — rebuilding one on every render would throw that away and
+// re-tokenize every visible block.
+const pluginCache = new Map<string, ReturnType<typeof createSharedCodePlugin>>();
 
-const PLUGINS = { code };
+function codePlugin(pair: CodeThemePair) {
+  const key = `${pair.light}:${pair.dark}`;
+  let plugin = pluginCache.get(key);
+  if (!plugin) {
+    plugin = createSharedCodePlugin(pair);
+    pluginCache.set(key, plugin);
+  }
+  return plugin;
+}
 
 // Copy is the only control worth keeping. Table actions and code download are
 // off entirely rather than hidden with CSS, so they can't be tabbed to either.
@@ -25,13 +37,22 @@ const CONTROLS = { table: false, code: { copy: true, download: false } };
 /// Streamdown is built on the same shadcn tokens as the rest of the app, so it
 /// inherits the palette; only typography scale is ours to set.
 function MarkdownImpl({ children, streaming = false, className }: MarkdownProps) {
+  // Shiki takes a [light, dark] pair and picks by the `.dark` class our theme
+  // already sets, so this needs no mode of its own — only the user's pick.
+  const { pair } = useCodeTheme();
+  const shikiTheme = useMemo(
+    (): [ThemeInput, ThemeInput] => [pair.light as ThemeInput, pair.dark as ThemeInput],
+    [pair.light, pair.dark],
+  );
+  const plugins = useMemo(() => ({ code: codePlugin(pair) }), [pair]);
+
   return (
     <Streamdown
       mode={streaming ? "streaming" : "static"}
       isAnimating={streaming}
-      plugins={PLUGINS}
+      plugins={plugins}
       controls={CONTROLS}
-      shikiTheme={SHIKI_THEME}
+      shikiTheme={shikiTheme}
       lineNumbers={false}
       className={cn(
         // `group/md` so the copy control can fade in on hover of the message —

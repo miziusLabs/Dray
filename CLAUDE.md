@@ -131,11 +131,39 @@ Tests use `include_str!` against real captured CLI output under `harness/<name>/
 
 To add coverage, follow the same pattern: capture real CLI output, commit it as a fixture, assert against it. Shapes absent from every fixture (Claude Code `thinking` blocks, permission requests) get hand-written tests pinning the documented shape.
 
+## Rendering code
+
+Every surface that shows code — the `Edit` diff, the ranged `Read` slice, and markdown code blocks — goes through **one** Shiki highlighter, the shared instance inside `@pierre/diffs`. That single instance is the whole design:
+
+- [DiffView](src/components/chat/DiffView.tsx) renders a `file_edit` call's two sides via `FileDiff`.
+- [CodeView](src/components/chat/CodeView.tsx) renders a ranged `file_read` via `File`.
+- [codePlugin.ts](src/lib/codePlugin.ts) is a Streamdown `code-highlighter` backed by the same instance, replacing `@streamdown/code`'s runtime (the package survives as a type-only import).
+
+Sharing it is not just deduplication. The stock Streamdown plugin builds a *second* Shiki with its own theme and grammar registries — which both duplicates grammar loading (the slowness) and cannot see `pierre-*` at all, failing with "Theme `pierre-light` is not included in this bundle".
+
+**Themes are `{light, dark}` pairs, never one name** ([codeTheme.ts](src/lib/codeTheme.ts)). The app's mode can change under a mounted view — `system` follows the OS — and a dark syntax theme on a light page is unreadable. The user picks one entry; the resolved mode picks a side. [useCodeTheme](src/hooks/useCodeTheme.ts) is a `useSyncExternalStore` rather than `useLocalStorage` because several diffs and code blocks are mounted at once and per-component state would desync them.
+
+Three failure modes, all of which present as *code that renders but is blank or grey* rather than as an error:
+
+- **A view must not mount before *its own* language and theme are attached.** `FileDiff`/`File` kick off their own load when they hydrate without one, then drop the promise and never re-render — so a premature mount paints an empty or unhighlighted `<pre>` and stays that way until something remounts it. [useHighlighter](src/hooks/useHighlighter.ts) is the single gate both views use, and it checks `getLoadedThemes()`/`getLoadedLanguages()` for the specific pair and language. Do not gate on `isHighlighterLoaded()`: it only reports that the *instance* exists, so a view whose grammar is still loading mounts the moment any other view has warmed the highlighter, and renders grey until it is collapsed and expanded again.
+- **Themes and grammars load independently.** Tokenizing with the theme unattached returns every token with an empty style; tokenizing with the *grammar* unattached silently yields one plain-text token per line. `codePlugin` therefore checks `getLoadedThemes()` *and* `getLoadedLanguages()` and reports not-ready instead of caching either result — caching the plain-text fallback is what left blocks permanently grey.
+- **A fence's info string is a language id, not a filename.** `getFiletypeFromFileName` maps *extensions*, so it turns `typescript` and `rust` into `text` while only `ts` happens to work. Use it for a path (`CodeView`, `DiffView`), never for a fence tag.
+
+`File` numbers a file from 1 and exposes no starting-line option, so `CodeView` rewrites the gutter in `onPostRender` — which hands back the *host* element, whose rows live in its shadow root. Padding the content with blank lines also works and then collapses: an `offset` of 420 renders 419 empty rows.
+
+**`+N -M` comes from the library's hunks, not a hand-rolled scan.** `countChanges` parses the diff and sums `hunk.additionLines`/`deletionLines` so the collapsed row can never disagree with the diff it opens. A prefix/suffix scan looks equivalent and isn't: `Edit` fragments usually arrive without a trailing newline, so the diff algorithm treats the boundary line as changed on both sides — appending two lines to `"a\nb"` renders as `+3/-1`, not the `+2/-0` a scan reports.
+
+**Where the time goes.** Tokenizing is not the cost — measured in the app, an already-attached language is 0ms. What varies is the per-language grammar chunk, and the spread is wide: the entire `COMMON_LANGS` set attaches in **~54ms** batched (the library parallelises the loaders), while **Ruby alone is ~390ms**, since it drags in HTML, CSS, JS and SQL for its embedded syntaxes.
+
+That spread is why `warmHighlighter` preloads a *named list* rather than everything or nothing. `COMMON_LANGS` in [useHighlighter.ts](src/hooks/useHighlighter.ts) is the set this app is actually used on (TS/TSX, JS/JSX, Python, JSON, CSS, HTML, Markdown, YAML, Bash, Rust, Go, SQL, TOML) — cheap enough to pay for once at startup, off the critical path, and it means opening a diff or a read is instant for essentially every file that comes up. Keep it that way: it is not a "preload everything" list, and adding a Ruby-shaped grammar to it would cost more than the whole current set. Anything absent still loads lazily on mount and pays only its own grammar, rendering *unhighlighted but readable* text meanwhile rather than an empty frame — a blank box for 400ms reads as a stall.
+
 ## Current state
 
 Several things are deliberately unfinished — don't mistake them for bugs:
 
 - **The UI is still the active area.** The sidebar, transcript, and composer toolbar are built; the `+` attachment button in the toolbar is inert, and there's no project *management* beyond attach (no rename, no detach from the UI).
+- **Only a *ranged* `Read` renders its code, and a whole-file read has no expander at all.** A successful whole-file read is a dead end on purpose — no diff, no code, no arguments, and its result is the file itself — so the row collapses to the tool name and the path with nothing to open. That read is the agent pulling a file into context, not showing it to the reader. The range comes from the call's own `offset`/`limit`; there is no line-range argument to read it from. A *failed* read still expands, since its error text is the only place the reason lives.
+- **The code theme has no picker yet.** `CODE_THEMES` and `setCodeTheme` are the settings surface's whole contract; nothing calls the setter today, so the default is what everyone sees.
 - **The mapper is partial.** `assistant`, `user`, `result`, `system/init`, tasks, and the stream frames are wired; the remaining system events fall through to `None`. `turn_id` is always `None` and `ThreadRef.label` is unset (the label needs a `tool_use_id → subagent_type` map from `system/task_started`).
 - **Codex is a stub.** `Harness::Codex` parses from the frontend, but `Session::init` bails on it.
 - **The composer toolbar is the session's control surface.** [composer/](src/components/composer) holds one component per control; `ComposerToolbar` hides project, branch, and the worktree toggle once a session exists. `ChatInput` takes the row as a `ReactNode` so it keeps owning layout and measurement and nothing else — including the row's own spacing from the card, since only `ChatInput` knows which side of it the row sits on.
