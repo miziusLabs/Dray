@@ -392,6 +392,26 @@ useEffect(() => {
             ),
             );
 
+            // The committed event supersedes its preview, and it arrives one
+            // line *before* `block_stop` — so waiting for the stop leaves both
+            // on screen for a frame, the preview shoved down by the event that
+            // just replaced it. Retiring the preview here puts both writes in
+            // one listener call, which React batches into a single render.
+            const streamingBlockRef =
+              (agentEvent.payload.type === "assistant_text" ||
+                agentEvent.payload.type === "reasoning") &&
+              agentEvent.payload.block;
+
+            if (streamingBlockRef) {
+              setStreamingContentBlock((prev) => {
+                const cur = prev[agentEvent.sessionId];
+                // Index alone: the CLI runs one block at a time, but a stale
+                // preview from an earlier message would share indices.
+                if (!cur || cur.index !== streamingBlockRef.index) return prev;
+                return { ...prev, [agentEvent.sessionId]: null };
+              });
+            }
+
             // The only signals that a turn is over. `turn_completed` fires once per
             // turn rather than per session, so this releases exactly the session
             // whose turn ended and leaves any other running one alone.

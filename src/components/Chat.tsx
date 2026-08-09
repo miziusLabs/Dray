@@ -71,6 +71,17 @@ export default function Chat({
       ? lastTurn
       : null;
 
+  // Which turn hosts the preview. It has to render inside the same stack the
+  // committed `assistant_text` will land in, or the two sit at different gaps
+  // (16px between turns, 8px within one) and the text jumps 8px on the swap.
+  //
+  // Always the open trailing turn while anything is streaming. `turn_completed`
+  // maps from `result`, which fires once per run rather than per message, so a
+  // turn stays open across every `message_start` in it — and after a `result`
+  // the next thing is a `user_message`, which opens the next turn before any
+  // delta arrives. So this is non-null whenever `streamingText` is.
+  const streamingTurn =
+    streamingText && lastTurn && !lastTurn.completed ? lastTurn : null;
 
   // A new session resets the pin, or the previous session's scroll position
   // would decide whether this one follows. Must run before the pin effect below,
@@ -132,16 +143,19 @@ export default function Chat({
             subagentById={subagentById}
             resultByCallId={resultByCallId}
             onOpenSubagent={onOpenSubagent}
-            // Covers the silence between the prompt landing and the first
-            // output. Inside the block so it sits at the gap the first event
-            // will occupy, rather than the wider one between turns.
-            footer={turn === waitingTurn ? <ThinkingIndicator /> : undefined}
+            // Both cover the wait for output, and never at once — `waitingTurn`
+            // requires no streaming text. Inside the block so they sit at the
+            // gap the committed event will occupy, rather than the wider one
+            // between turns: the preview belongs to this turn, not after it.
+            footer={
+              turn === waitingTurn ? (
+                <ThinkingIndicator />
+              ) : turn === streamingTurn ? (
+                <AssistantMessage text={streamingText} streaming />
+              ) : undefined
+            }
           />
         ))}
-
-        {/* Deltas are never persisted, so this trailing block is replaced by the
-            committed `assistant_text` the moment the turn's block closes. */}
-        {streamingText && <AssistantMessage text={streamingText} streaming />}
       </div>
     </div>
   );

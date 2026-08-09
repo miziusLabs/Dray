@@ -15,9 +15,10 @@ type TurnBlockProps = {
   resultByCallId: Map<string, ToolResult>;
   onOpenSubagent: (id: string) => void;
   /// Trails the turn's work inside this block's own stack. The thinking
-  /// indicator goes here rather than after the block, so it sits at the same
-  /// gap the first real event will — placing it outside left it 16px down from
-  /// the turn and the content that replaced it jumped 8px up.
+  /// indicator and the streaming preview both go here rather than after the
+  /// block, so they sit at the same gap the committed event will — placing them
+  /// outside left them 16px down from the turn and the content that replaced
+  /// them jumped 8px up.
   footer?: ReactNode;
 };
 
