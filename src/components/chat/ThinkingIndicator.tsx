@@ -1,8 +1,8 @@
 import { ThinkingOrb } from "thinking-orbs";
 
-/// The trailing row while a turn is in flight. Sits after the last committed
-/// turn and any streaming text, so it reads as "still going" rather than as a
-/// message of its own.
+/// The gap-filler between the user's prompt landing and the turn's first
+/// output. Both parts leave together the moment anything streams in — the
+/// transcript's own content takes over as the sign that work is happening.
 export default function ThinkingIndicator() {
   return (
     <div className="flex items-center gap-2" aria-live="polite">

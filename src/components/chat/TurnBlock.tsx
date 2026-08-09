@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronRightIcon } from "@heroicons/react/24/outline";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
@@ -14,6 +14,11 @@ type TurnBlockProps = {
   subagentById: Map<string, SubagentRun>;
   resultByCallId: Map<string, ToolResult>;
   onOpenSubagent: (id: string) => void;
+  /// Trails the turn's work inside this block's own stack. The thinking
+  /// indicator goes here rather than after the block, so it sits at the same
+  /// gap the first real event will — placing it outside left it 16px down from
+  /// the turn and the content that replaced it jumped 8px up.
+  footer?: ReactNode;
 };
 
 function plural(n: number, word: string) {
@@ -27,6 +32,7 @@ export default function TurnBlock({
   subagentById,
   resultByCallId,
   onOpenSubagent,
+  footer,
 }: TurnBlockProps) {
   const [open, setOpen] = useState(false);
 
@@ -81,6 +87,8 @@ export default function TurnBlock({
       {/* Collapsed, this stands in for the turn's last message; expanded, that
           message already rendered above, so it would be a duplicate. */}
       {!showWork && turn.finalText && <AssistantMessage text={turn.finalText} />}
+
+      {footer}
 
       {turn.completed && (
         <EventRow

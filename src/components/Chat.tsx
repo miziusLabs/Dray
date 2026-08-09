@@ -16,6 +16,18 @@ type ChatProps = {
   busy?: boolean;
 };
 
+/// Payload types that put something on screen. The complement of the
+/// `return null` arms in [EventRow](chat/EventRow.tsx) — keep the two in step,
+/// or the thinking indicator hides against an event that draws nothing.
+const RENDERS = new Set([
+  "assistant_text",
+  "reasoning",
+  "tool_call_started",
+  "file_edits",
+  "error",
+  "context_compacted",
+]);
+
 export default function Chat({
   session,
   streamingBlock,
@@ -41,6 +53,16 @@ export default function Chat({
   // meant to follow. An open trailing turn is the signal that the echo landed.
   const lastTurn = turns.at(-1);
   const promptLanded = Boolean(lastTurn?.prompt && !lastTurn.completed);
+
+  // Not `work.length`: that counts harness plumbing the transcript never draws
+  // — `turn_started` above all, which lands before any real output and so hid
+  // the indicator a beat early. Only an event that renders means the turn has
+  // something to show, with the streaming text covering the window before the
+  // first one commits.
+  const producing =
+    Boolean(lastTurn?.work.some((e) => RENDERS.has(e.payload.type))) ||
+    streamingText.length > 0;
+
 
   // A new session resets the pin, or the previous session's scroll position
   // would decide whether this one follows. Must run before the pin effect below,
@@ -95,24 +117,27 @@ export default function Chat({
   return (
     <div ref={scrollRef} onScroll={onScroll} onWheel={onWheel} className="h-full overflow-y-auto">
       <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
-        {turns.map((turn) => (
+        {turns.map((turn, i) => (
           <TurnBlock
             key={turn.key}
             turn={turn}
             subagentById={subagentById}
             resultByCallId={resultByCallId}
             onOpenSubagent={onOpenSubagent}
+            // Covers the silence between the prompt landing and the first
+            // output; the turn's own content replaces it from then on. Inside
+            // the block so it sits at the gap the first event will occupy.
+            footer={
+              i === turns.length - 1 && busy && promptLanded && !producing ? (
+                <ThinkingIndicator />
+              ) : undefined
+            }
           />
         ))}
 
         {/* Deltas are never persisted, so this trailing block is replaced by the
             committed `assistant_text` the moment the turn's block closes. */}
         {streamingText && <AssistantMessage text={streamingText} streaming />}
-
-        {/* Last, so it trails whatever the turn has produced so far. The pane's
-            ResizeObserver re-pins the scroll when this mounts, so it needs no
-            place in the effect's deps. */}
-        {busy && promptLanded && <ThinkingIndicator />}
       </div>
     </div>
   );
