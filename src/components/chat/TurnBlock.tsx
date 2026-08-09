@@ -6,7 +6,7 @@ import EventRow from "@/components/chat/EventRow";
 import SubagentRow from "@/components/chat/SubagentRow";
 import ToolGroupRow from "@/components/chat/ToolGroupRow";
 import UserMessage from "@/components/chat/UserMessage";
-import { isToolGroup, type SubagentRun, type Turn } from "@/lib/transcript";
+import { GROUP_MIN, isToolGroup, type SubagentRun, type Turn } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 import type { ToolResult } from "@/types/events";
 
@@ -23,10 +23,26 @@ type TurnBlockProps = {
   footer?: ReactNode;
 };
 
-/// Fewer rows than this and the collapse costs a click to reveal less than the
-/// summary line it stood in for. Tool groups already compact the long runs, so
-/// what reaches here is genuinely distinct steps.
+/// How many rendered rows a turn must have before it collapses behind its
+/// summary. Fewer than this and the collapse costs a click to reveal less than
+/// the summary line it stood in for.
+///
+/// Separate from `GROUP_MIN` because they answer different questions — that one
+/// is how many *calls* make a group, this is how many *rows* make a collapse —
+/// but not independent of it: grouping runs first, so a group is already one row
+/// by the time this counts. Keeping this at or above `GROUP_MIN` is what stops a
+/// run too short to group from collapsing a turn on its own.
 const COLLAPSE_MIN = 3;
+
+// Tune either constant freely, but not past the other: this throws on load
+// rather than letting the pairing silently reintroduce ungrouped repeats inside
+// a collapsed turn.
+if (GROUP_MIN > COLLAPSE_MIN) {
+  throw new Error(
+    `GROUP_MIN (${GROUP_MIN}) must not exceed COLLAPSE_MIN (${COLLAPSE_MIN}) — ` +
+      "runs too short to group would still collapse a turn on their own.",
+  );
+}
 
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -55,9 +71,7 @@ export default function TurnBlock({
   //
   // `rows` rather than `work.length` or the summary counts: a turn whose only
   // work *is* that final message has nothing left to reveal and would offer an
-  // empty toggle, and one hiding a single row costs a click to show less than
-  // the summary line it replaced. Same reasoning as `GROUP_MIN` — a collapse
-  // has to save more than it costs.
+  // empty toggle. See `COLLAPSE_MIN` for why the threshold is what it is.
   const collapsible = !running && turn.rows >= COLLAPSE_MIN;
   const showWork = open || !collapsible;
 

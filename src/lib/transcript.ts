@@ -86,9 +86,19 @@ function bySeq(a: AgentEvent, b: AgentEvent) {
   return a.seq - b.seq;
 }
 
+/// How many consecutive same-tool calls collapse into one group row.
+///
 /// Any repeat groups. Consistency is the point: the tool name never appears
 /// twice in a row, so a run reads the same whether it is two calls or thirty.
-const GROUP_MIN = 2;
+///
+/// Constrained by `COLLAPSE_MIN` in [TurnBlock](../components/chat/TurnBlock.tsx):
+/// keep this at or below it. A run too short to group still costs a row each,
+/// so raising this above the collapse threshold puts ungrouped repeats inside a
+/// collapsed turn — expand it and you find two rows of the same tool under a
+/// summary, which is the double summary the row count exists to prevent. That
+/// is exactly what a 3/3 pairing did before: a run of 2 grouped nowhere and
+/// collapsed anyway.
+export const GROUP_MIN = 2;
 
 /// Bookkeeping the summary count needs while a turn is open, dropped from the
 /// `Turn` handed to the UI.
@@ -268,9 +278,9 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
   }
 
   // The open trailing turn groups too — a run of reads collapses as it arrives
-  // rather than only once the turn closes. A run still landing sits below
-  // `GROUP_MIN` and renders as loose rows until its fourth call, which is the
-  // same thing the reader would see anyway.
+  // rather than only once the turn closes. A run still below `GROUP_MIN` renders
+  // as loose rows until the call that reaches it, which is the same thing the
+  // reader would see anyway.
   if (current) close(current);
   return turns;
 }
