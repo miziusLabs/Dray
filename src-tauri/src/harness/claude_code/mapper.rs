@@ -437,7 +437,7 @@ impl Mapper {
             } => Some(AgentEventPayload::ToolCallCompleted {
                 call_id: tool_use_id,
                 result: ToolResult {
-                    text: content.as_text(),
+                    text: strip_tool_use_error(content.as_text()),
                     is_error: is_error.unwrap_or(false),
                     // The sidecar `tool_use_result` field, whose shape is
                     // per-tool: a Read carries its file contents, a Task its
@@ -541,6 +541,26 @@ impl Mapper {
 /// turn-end.
 fn is_interrupt_notice(text: &str) -> bool {
     text.starts_with("[Request interrupted by user")
+}
+
+/// Claude Code wraps a failed tool's message in `<tool_use_error>` tags. That is
+/// wire framing, not content — the `is_error` flag already carries the fact — so
+/// it comes off here rather than leaking into the UI and the on-disk log.
+///
+/// Only an exact whole-string wrap is unwrapped. A result that merely mentions
+/// the tag (a grep hit on this very file, say) is left alone.
+fn strip_tool_use_error(text: String) -> String {
+    const OPEN: &str = "<tool_use_error>";
+    const CLOSE: &str = "</tool_use_error>";
+
+    let trimmed = text.trim();
+    match trimmed
+        .strip_prefix(OPEN)
+        .and_then(|rest| rest.strip_suffix(CLOSE))
+    {
+        Some(inner) => inner.trim().to_string(),
+        None => text,
+    }
 }
 
 fn user_message(text: String) -> AgentEventPayload {
@@ -721,6 +741,34 @@ mod tests {
         assert_eq!(tool_type("Agent"), ToolType::SubagentSpawn);
         assert_eq!(tool_type("mcp__supabase__query"), ToolType::Mcp);
         assert_eq!(tool_type("SomethingNew"), ToolType::Other);
+    }
+
+    /// The `<tool_use_error>` wrapper is framing the UI must never see. Pinned
+    /// by hand because no committed fixture carries a failed tool result.
+    #[test]
+    fn strips_the_tool_use_error_wrapper() {
+        assert_eq!(
+            strip_tool_use_error("<tool_use_error>Not found.</tool_use_error>".into()),
+            "Not found."
+        );
+
+        // Multi-line bodies are the common shape — an Edit reports the string it
+        // failed to match.
+        assert_eq!(
+            strip_tool_use_error("<tool_use_error>line one\nline two</tool_use_error>".into()),
+            "line one\nline two"
+        );
+
+        // Untagged text is returned untouched, wrapper-shaped or not.
+        assert_eq!(strip_tool_use_error("plain failure".into()), "plain failure");
+        assert_eq!(
+            strip_tool_use_error("grep hit: <tool_use_error> appears here".into()),
+            "grep hit: <tool_use_error> appears here"
+        );
+        assert_eq!(
+            strip_tool_use_error("<tool_use_error>unterminated".into()),
+            "<tool_use_error>unterminated"
+        );
     }
 
     /// Every `user` event in the fixture is a tool result, and each one must

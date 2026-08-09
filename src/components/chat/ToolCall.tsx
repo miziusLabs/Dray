@@ -141,16 +141,17 @@ export default function ToolCall({
         </pre>
       )}
 
-      {/* A failure drops the box: the destructive text is the signal, and
-          wrapping it in the same surface as ordinary output made the error read
-          as just more output. */}
+      {/* A failure drops the box and reads at the row's own size: an error is
+          the reason to look at the row, so it should not be the smallest text on
+          it. It is tinted well short of the destructive color the name carries
+          — see `--color-destructive-muted`. */}
       {open && shown && (
         <pre
           className={cn(
-            "max-h-96 overflow-auto font-mono text-tool whitespace-pre-wrap",
+            "max-h-96 overflow-auto whitespace-pre-wrap",
             failed
-              ? "text-destructive"
-              : "rounded-md bg-surface-raised px-2.5 py-2 text-muted-foreground",
+              ? "font-mono text-chat text-destructive-muted"
+              : "rounded-md bg-surface-raised px-2.5 py-2 font-mono text-tool text-muted-foreground",
           )}
         >
           {shown}

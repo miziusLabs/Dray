@@ -114,6 +114,11 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  /* Error *body* text. Barely tinted, well short of the `--destructive` the
+     failing label keeps: matching them blurs the two into one red block, while
+     plain foreground reads as ordinary output. Mixed rather than a second
+     literal so it follows whatever a palette sets destructive to. */
+  --color-destructive-muted: color-mix(in oklab, var(--destructive) 20%, var(--foreground));
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
