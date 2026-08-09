@@ -1,4 +1,4 @@
-import { PlusIcon } from "@heroicons/react/24/outline";
+import { Plus } from "lucide-react";
 
 import BranchSelector from "@/components/composer/BranchSelector";
 import BranchSwitchDialog from "@/components/composer/BranchSwitchDialog";
@@ -83,7 +83,7 @@ export default function ComposerToolbar({
         title="Attach"
         className="rounded-full text-muted-foreground"
       >
-        <PlusIcon />
+        <Plus />
       </Button>
 
       <PermissionSelector value={permissionMode} onChange={onPermissionModeChange} />

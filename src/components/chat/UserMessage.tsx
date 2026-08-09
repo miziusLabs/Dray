@@ -1,4 +1,4 @@
-import { PhotoIcon } from "@heroicons/react/24/outline";
+import { Image } from "lucide-react";
 
 import { shortenPath } from "@/lib/tools";
 import type { ImageRef } from "@/types/events";
@@ -30,7 +30,7 @@ export default function UserMessage({
             />
           ) : (
             <span key={i} className="flex items-center gap-1.5 text-chat text-muted-foreground">
-              <PhotoIcon className="size-3.5 shrink-0" />
+              <Image className="size-3.5 shrink-0" />
               <span className="truncate">{src ? shortenPath(src) : "image"}</span>
             </span>
           );

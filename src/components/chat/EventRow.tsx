@@ -1,4 +1,4 @@
-import { ArchiveBoxIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
+import { Archive, TriangleAlert } from "lucide-react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import Reasoning from "@/components/chat/Reasoning";
@@ -14,7 +14,7 @@ function Notice({
   children,
   tone = "muted",
 }: {
-  icon: typeof ArchiveBoxIcon;
+  icon: typeof Archive;
   children: React.ReactNode;
   tone?: "muted" | "destructive";
 }) {
@@ -76,7 +76,7 @@ export default function EventRow({
     case "error":
       return (
         <div className="flex items-start gap-2 text-chat text-destructive">
-          <ExclamationTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
           <span className="min-w-0 whitespace-pre-wrap">{payload.message}</span>
         </div>
       );
@@ -87,14 +87,14 @@ export default function EventRow({
       // every message.
       if (payload.status !== "error") return null;
       return (
-        <Notice icon={ExclamationTriangleIcon} tone="destructive">
+        <Notice icon={TriangleAlert} tone="destructive">
           Turn failed{payload.stopReason ? ` — ${payload.stopReason}` : ""}
         </Notice>
       );
 
     case "context_compacted":
       return (
-        <Notice icon={ArchiveBoxIcon}>
+        <Notice icon={Archive}>
           {payload.message ??
             `Context compacted${payload.windowNumber != null ? ` (window ${payload.windowNumber})` : ""}`}
         </Notice>

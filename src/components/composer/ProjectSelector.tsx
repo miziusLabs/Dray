@@ -1,4 +1,4 @@
-import { FolderPlusIcon } from "@heroicons/react/24/outline";
+import { FolderPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +35,7 @@ export default function ProjectSelector({
         onClick={onAttach}
         className="gap-1.5 px-1.5 text-ui text-muted-foreground"
       >
-        <FolderPlusIcon className="size-3.5 shrink-0" />
+        <FolderPlus className="size-3.5 shrink-0" />
         Attach project
       </Button>
     );
@@ -75,7 +75,7 @@ export default function ProjectSelector({
         <DropdownMenuSeparator />
 
         <DropdownMenuItem onSelect={onAttach} className="text-ui">
-          <FolderPlusIcon />
+          <FolderPlus />
           Attach project…
         </DropdownMenuItem>
       </DropdownMenuContent>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CpuChipIcon } from "@heroicons/react/24/outline";
+import { Cpu } from "lucide-react";
 
 import "./App.css";
 import Chat from "@/components/Chat";
@@ -133,7 +133,7 @@ function App() {
               onClick={() => setPanelOpen((prev) => !prev)}
               title={`${subagents.length} subagent${subagents.length > 1 ? "s" : ""}`}
             >
-              <CpuChipIcon />
+              <Cpu />
             </Button>
           )}
         </header>

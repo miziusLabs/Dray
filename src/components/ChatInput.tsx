@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowUpIcon, StopIcon } from "@heroicons/react/24/outline";
-import { CornerDownLeft, X } from "lucide-react";
+import { ArrowUp, CornerDownLeft, Square, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -203,9 +202,9 @@ export default function ChatInput({
                 className="rounded-full"
               >
                 {busy ? (
-                  <StopIcon className="fill-current" />
+                  <Square className="fill-current" />
                 ) : (
-                  <ArrowUpIcon strokeWidth={2} />
+                  <ArrowUp strokeWidth={2} />
                 )}
               </Button>
             )}

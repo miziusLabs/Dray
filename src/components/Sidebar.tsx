@@ -1,10 +1,5 @@
 import { useMemo } from "react";
-import {
-  FunnelIcon,
-  MagnifyingGlassIcon,
-  PlusIcon,
-} from "@heroicons/react/24/outline";
-import { Check, Pin } from "lucide-react";
+import { Check, Filter, Pin, Plus, Search } from "lucide-react";
 
 import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import { Button } from "@/components/ui/button";
@@ -140,7 +135,7 @@ export default function Sidebar({
           onClick={onNewSession}
           className="w-full justify-start px-1.5 text-ui"
         >
-          <PlusIcon />
+          <Plus />
           New Task
           <KbdGroup className="ml-auto">
             <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
@@ -149,7 +144,7 @@ export default function Sidebar({
         </Button>
 
         <Button variant="ghost" size="sm" className="w-full justify-start px-1.5 text-ui">
-          <MagnifyingGlassIcon />
+          <Search />
           Search
         </Button>
       </div>
@@ -161,7 +156,7 @@ export default function Sidebar({
 
         <div className="flex items-center gap-0.5">
           <Button variant="ghost" size="icon-xs" title="Filter">
-            <FunnelIcon />
+            <Filter />
           </Button>
         </div>
       </div>
