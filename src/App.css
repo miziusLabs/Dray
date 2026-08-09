@@ -226,3 +226,25 @@
     @apply bg-muted-foreground/40;
   }
 }
+
+@layer utilities {
+  /* Thin scrollbar that appears while the list is hovered. The gutter is
+     reserved permanently, so the thumb showing never reflows the rows — the
+     gutter is the container's right padding.
+
+     Standard properties, not ::-webkit-scrollbar. WebKit re-resolves the pseudo
+     styles only when the bar itself takes pointer events, so a hover-driven
+     pseudo rule shows up late and never clears. `scrollbar-color` lives on the
+     element and invalidates like any other property, so `:hover` just works.
+     Setting it also disables the base layer's pseudo styling here. */
+  .scrollbar-overlay {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .scrollbar-overlay:hover {
+    scrollbar-color: color-mix(in oklab, var(--color-muted-foreground) 35%, transparent)
+      transparent;
+  }
+}
