@@ -250,6 +250,18 @@ const handleSendMsg = async (
   }
 };
 
+// Signals the CLI to abort the in-flight turn; the session stays alive. Status
+// is not touched here — the abort produces a result event, and the backend's
+// machine reports the transition on `session_status` like any other ending.
+const handleInterrupt = async () => {
+  if (!selectedSessionId) return;
+  try {
+    await invoke("interrupt_session", { sessionId: selectedSessionId });
+  } catch (e) {
+    setError(String(e));
+  }
+};
+
 // Restores the user's own defaults, not the app's. Selecting a session overwrote
 // the live controls with that session's settings, so every field they can change
 // has to be put back from prefs here — otherwise the last session clicked in the
@@ -459,9 +471,12 @@ useEffect(() => {
             const sessionId = agentEvent.sessionId;
 
             if (payload.delta == "block_start") {
+                // The block announces its kind up front — this is the only
+                // frame that knows thinking from text, since thinking deltas
+                // arrive as plain text_delta afterwards.
                 setStreamingContentBlock((prev) => ({
                   ...prev,
-                  [sessionId]: { index: payload.block.index, text: "", type: null },
+                  [sessionId]: { index: payload.block.index, text: "", type: payload.blockType.type },
                 }));
             } else if (payload.delta == "text_delta") {
                 setStreamingContentBlock((prev) => {
@@ -469,7 +484,10 @@ useEffect(() => {
                   if (!cur || cur.index !== payload.block.index) return prev;
                   return {
                     ...prev,
-                    [sessionId]: { ...cur, type: "text", text: cur.text + payload.text },
+                    // Deltas append; the type stays what block_start declared.
+                    // Stamping "text" here is what used to make streamed
+                    // thinking render as assistant prose until it committed.
+                    [sessionId]: { ...cur, type: cur.type ?? "text", text: cur.text + payload.text },
                   };
                 });
             } else if (payload.delta == "input_delta") {
@@ -480,7 +498,6 @@ useEffect(() => {
                     ...prev,
                     [sessionId]: {
                       ...cur,
-                      type: "tool_use",
                       text: cur.text + payload.partialJson,
                     },
                   };
@@ -584,6 +601,6 @@ const backgroundTasks: BackgroundTask[] = (() => {
   return [];
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
 
 }

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import BackgroundTasksIndicator from "@/components/chat/BackgroundTasksIndicator";
+import Reasoning from "@/components/chat/Reasoning";
 import ThinkingIndicator from "@/components/chat/ThinkingIndicator";
 import TurnBlock from "@/components/chat/TurnBlock";
 import type { StreamingBlock } from "@/hooks/useSessions";
@@ -40,7 +41,13 @@ export default function Chat({
     [session?.events],
   );
 
+  // Told apart by the type `block_start` declared, not by content — thinking
+  // deltas are plain text on the wire. Only one block streams at a time, so at
+  // most one of these is non-empty.
   const streamingText = streamingBlock?.type === "text" ? streamingBlock.text : "";
+  const streamingThinking =
+    streamingBlock?.type === "thinking" ? streamingBlock.text : "";
+  const streamingAny = streamingText || streamingThinking;
 
   // The turn the indicator belongs to, or null when nothing is waiting on
   // output.
@@ -61,7 +68,7 @@ export default function Chat({
     busy &&
     lastTurn &&
     !lastTurn.completed &&
-    !streamingText &&
+    !streamingAny &&
     !lastTurn.work.some(rendersRow)
       ? lastTurn
       : null;
@@ -77,7 +84,7 @@ export default function Chat({
   // the next thing is a `user_message`, which opens the next turn before any
   // delta arrives. So this is non-null whenever `streamingText` is.
   const streamingTurn =
-    streamingText && lastTurn && !lastTurn.completed ? lastTurn : null;
+    streamingAny && lastTurn && !lastTurn.completed ? lastTurn : null;
 
   // A new session resets the pin, or the previous session's scroll position
   // would decide whether this one follows. Must run before the pin effect below,
@@ -92,7 +99,7 @@ export default function Chat({
     const el = scrollRef.current;
     if (!el || !followRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [session?.sessionId, events.length, streamingText]);
+  }, [session?.sessionId, events.length, streamingAny]);
 
   // Heights change with no React commit involved — Shiki highlighting lands
   // async and grows the content, and the composer growing shrinks this pane from
@@ -146,9 +153,16 @@ export default function Chat({
             footer={
               turn === waitingTurn ? (
                 <ThinkingIndicator />
-              ) : turn === streamingTurn ? (
+              ) : turn !== streamingTurn ? (
+                undefined
+              ) : streamingThinking ? (
+                // The same component the committed `reasoning` event renders
+                // with, so the preview and its replacement are pixel-identical
+                // and the swap is invisible.
+                <Reasoning text={streamingThinking} encrypted={false} />
+              ) : (
                 <AssistantMessage text={streamingText} streaming />
-              ) : undefined
+              )
             }
           />
         ))}

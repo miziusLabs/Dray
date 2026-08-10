@@ -294,6 +294,16 @@ impl SessionManager {
         Ok(None)
     }
 
+    /// Interrupts a session's in-flight turn. Errors when no live child holds
+    /// the id — nothing is running, so there is nothing to stop.
+    pub async fn interrupt(&self, session_id: &str) -> Result<()> {
+        let mut sessions_guard = self.sessions.lock().await;
+        let Some(session) = sessions_guard.get_mut(session_id) else {
+            bail!("no running session {session_id}");
+        };
+        session.interrupt().await
+    }
+
     /// Clears a finished session's unread mark: `Completed` → `Idle`, anything
     /// else untouched. Returns the status as written, `None` for no change.
     ///
@@ -430,6 +440,27 @@ impl Session {
             .await?;
         self.stdin.flush().await?;
         self.model = model.id;
+
+        Ok(())
+    }
+
+    /// Interrupts the in-flight turn without killing the child. Verified
+    /// against the CLI: it acks with a `control_response`, aborts running tools
+    /// (`terminal_reason: "aborted_tools"`) or streaming
+    /// (`"aborted_streaming"`), ends the turn as `error_during_execution`, and
+    /// usually opens a follow-up turn to narrate the abort — so the status
+    /// machine needs nothing special here, the resulting events drive it.
+    pub async fn interrupt(&mut self) -> Result<()> {
+        let request = json!({
+            "type": "control_request",
+            "request_id": Uuid::now_v7().to_string(),
+            "request": {"subtype": "interrupt"},
+        });
+
+        self.stdin
+            .write_all(format!("{request}\n").as_bytes())
+            .await?;
+        self.stdin.flush().await?;
 
         Ok(())
     }

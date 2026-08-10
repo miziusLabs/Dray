@@ -143,6 +143,19 @@ async fn set_session_flags(
         .map_err(|e| e.to_string())
 }
 
+/// Stops the in-flight turn without killing the session — the CLI aborts its
+/// tools and streaming, ends the turn, and stays alive for the next prompt.
+#[tauri::command]
+async fn interrupt_session(
+    session_id: &str,
+    manager: State<'_, SessionManager>,
+) -> Result<(), String> {
+    manager
+        .interrupt(session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Clears a finished session's unread mark. The frontend calls this when the
 /// user views the session; a `completed` badge is "finished and unread", so
 /// reading is what retires it. Returns the status as written, `None` when
@@ -189,6 +202,7 @@ pub fn run() {
             checkout_branch,
             set_session_flags,
             mark_session_idle,
+            interrupt_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

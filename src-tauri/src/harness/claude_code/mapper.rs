@@ -6,8 +6,7 @@
 use crate::{
     events::{
         now_rfc3339, AgentEvent, AgentEventPayload, BackgroundTask, BlockRef, BlockType,
-        DeltaEvent, ErrorSource, SessionInfo, Settings, Subagent, ToolResult, ToolType, TurnStatus,
-        Usage,
+        DeltaEvent, SessionInfo, Settings, Subagent, ToolResult, ToolType, TurnStatus, Usage,
     },
     harness::{
         claude_code::{
@@ -134,6 +133,10 @@ impl Mapper {
             // Parsed but unmapped: `RateLimit` wants RFC3339 where the wire
             // sends unix seconds, and nothing consumes it yet.
             ClaudeCodeEvent::RateLimitEvent { .. } => Ok(None),
+
+            // The ack for a control request this app wrote — interrupt,
+            // set_model, set_permission_mode. Nothing correlates ids yet.
+            ClaudeCodeEvent::ControlResponse { .. } => Ok(None),
         }
     }
 
@@ -214,12 +217,15 @@ impl Mapper {
                 description,
                 prompt,
                 subagent_type,
+                task_type,
                 ..
             } => Ok(AgentEventPayload::SubagentStarted {
                 agent_id: task_id,
-                label: subagent_type,
+                // A non-agent task has no subagent type; its kind
+                // (`local_bash`) is the closest honest label.
+                label: subagent_type.unwrap_or(task_type),
                 description: Some(description),
-                prompt: Some(prompt),
+                prompt,
             }),
             SystemEvent::TaskProgress {
                 task_id,
@@ -244,7 +250,7 @@ impl Mapper {
                 agent_id: task_id,
                 status,
                 summary: Some(summary),
-                usage: Some(Usage::from(usage)),
+                usage: usage.map(Usage::from),
             }),
             other => bail!("handle_task called with a non-task system event: {other:?}"),
         }
@@ -426,14 +432,10 @@ impl Mapper {
         match block {
             // A bare text block here is a prompt the CLI wrapped in an array, or
             // its own narration of an abort — never a tool result, which is why
-            // no `tool_use_id` accompanies it.
-            UserContentBlock::Text { text } if is_interrupt_notice(&text) => {
-                Some(AgentEventPayload::Error {
-                    source: ErrorSource::Harness,
-                    message: text,
-                    fatal: false,
-                })
-            }
+            // no `tool_use_id` accompanies it. The abort narration is dropped:
+            // the user stopping the turn is not an error, and the fact is
+            // recorded for real on the `result` line (`stop_reason: aborted_*`).
+            UserContentBlock::Text { text } if is_interrupt_notice(&text) => None,
             UserContentBlock::Text { text } => Some(user_message(text)),
 
             UserContentBlock::ToolResult {
@@ -543,8 +545,8 @@ impl Mapper {
 /// Whether a `user` text block is the CLI narrating an interruption rather than
 /// something the user said. The block carries no other signal, but matching
 /// prose fails safe: the abort is reported for real on the `result` line
-/// (`terminal_reason`), so a reworded notice costs a stray message, not a lost
-/// turn-end.
+/// (`terminal_reason`), so a reworded notice costs a stray message in the
+/// transcript, not a lost turn-end.
 fn is_interrupt_notice(text: &str) -> bool {
     text.starts_with("[Request interrupted by user")
 }
@@ -648,7 +650,11 @@ fn system_event_session_id(e: &SystemEvent) -> &str {
         | SystemEvent::TaskUpdated { session_id, .. }
         | SystemEvent::TaskNotification { session_id, .. }
         | SystemEvent::PostTurnSummary { session_id, .. }
-        | SystemEvent::BackgroundTasksChanged { session_id, .. } => session_id,
+        | SystemEvent::BackgroundTasksChanged { session_id, .. }
+        | SystemEvent::ThinkingTokens { session_id, .. } => session_id,
+        // No fields survive the catch-all. Harmless: an unrecognized subtype
+        // maps to `None`, so no envelope is ever built from this value.
+        SystemEvent::Unrecognized => "",
     }
 }
 
@@ -658,8 +664,8 @@ fn system_event_subagent_info(e: &SystemEvent) -> (Option<String>, Option<String
             tool_use_id,
             subagent_type,
             ..
-        }
-        | SystemEvent::TaskProgress {
+        } => (Some(tool_use_id.clone()), subagent_type.clone()),
+        SystemEvent::TaskProgress {
             tool_use_id,
             subagent_type,
             ..
@@ -1012,8 +1018,9 @@ mod tests {
     }
 
     /// An interrupted turn reports the abort twice — as prose in a `user` text
-    /// block, and as `terminal_reason` on the result. The prose must not become
-    /// a `UserMessage`, and the result must still close the turn.
+    /// block, and as `terminal_reason` on the result. The prose maps to
+    /// nothing: it must not become a `UserMessage`, and a user stopping the
+    /// turn is not an error to surface. The result alone closes the turn.
     #[test]
     fn maps_an_interrupted_turn() {
         let mut mapper = Mapper::default();
@@ -1031,14 +1038,12 @@ mod tests {
             "the interrupt notice was attributed to the user"
         );
 
-        assert!(payloads.iter().any(|p| matches!(
-            p,
-            AgentEventPayload::Error {
-                source: ErrorSource::Harness,
-                fatal: false,
-                ..
-            }
-        )));
+        assert!(
+            !payloads
+                .iter()
+                .any(|p| matches!(p, AgentEventPayload::Error { .. })),
+            "the interrupt notice surfaced as an error"
+        );
 
         assert!(payloads.iter().any(|p| matches!(
             p,

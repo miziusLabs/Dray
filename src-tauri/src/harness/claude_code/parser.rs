@@ -48,6 +48,11 @@ pub enum ClaudeCodeEvent {
         uuid: String,
         session_id: String,
     },
+    /// The CLI's reply to a `control_request` we wrote to stdin — the ack for
+    /// `interrupt`, `set_model`, `set_permission_mode`. Kept as a raw `Value`:
+    /// the inner shape varies per request subtype, and nothing correlates
+    /// request ids yet.
+    ControlResponse { response: Value },
 }
 
 /// Camel-cased on the wire, unlike every other Claude Code payload.
@@ -124,9 +129,13 @@ pub enum SystemEvent {
         task_id: String,
         tool_use_id: String,
         description: String,
-        subagent_type: String,
+        /// Absent for non-agent tasks — a `local_bash` task (an interrupted or
+        /// backgrounded shell command) has no agent type to name.
+        #[serde(default)]
+        subagent_type: Option<String>,
         task_type: String,
-        prompt: String,
+        #[serde(default)]
+        prompt: Option<String>,
         uuid: String,
         session_id: String,
     },
@@ -152,7 +161,9 @@ pub enum SystemEvent {
         status: String,
         output_file: String,
         summary: String,
-        usage: TaskUsage,
+        /// Absent for `local_bash` tasks, which spend no agent tokens.
+        #[serde(default)]
+        usage: Option<TaskUsage>,
         uuid: String,
         session_id: String,
     },
@@ -176,6 +187,20 @@ pub enum SystemEvent {
         uuid: String,
         session_id: String,
     },
+    /// A running estimate of the current thinking block's size, emitted every
+    /// few tokens while the model reasons. `estimated_tokens` is the block's
+    /// total so far, `_delta` the increment since the last line.
+    ThinkingTokens {
+        estimated_tokens: u64,
+        estimated_tokens_delta: u64,
+        uuid: String,
+        session_id: String,
+    },
+    /// A subtype this build doesn't model. The CLI adds subtypes over time
+    /// (`thinking_tokens` arrived unannounced), and without this every such
+    /// line failed whole — the loop logged a parse error and dropped it.
+    #[serde(other)]
+    Unrecognized,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -926,6 +951,60 @@ mod tests {
         let stream_usage = stream_usage.expect("message_delta carries usage");
         assert!(stream_usage.output_tokens > 0);
         assert!(stream_usage.cache_creation.is_none());
+    }
+
+    /// A tool call interrupted via a `control_request` on stdin. Captured live:
+    /// the CLI acks with `control_response`, ends the turn as
+    /// `error_during_execution` with `terminal_reason: "aborted_tools"`, then
+    /// opens a turn of its own to narrate the abort. Also the only capture with
+    /// thinking enabled, so it pins `thinking_tokens` — the subtype whose
+    /// arrival used to fail every carrying line.
+    #[test]
+    fn parses_an_interrupted_tool_call() {
+        let events = parse_fixture(include_str!("fixtures/interrupted_tools.jsonl"));
+        assert_eq!(events.len(), 45, "every line parses, none dropped");
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::ControlResponse { response }
+                if response["subtype"] == "success" && response["request_id"] == "req_test_1"
+        )));
+
+        let token_estimates: Vec<u64> = events
+            .iter()
+            .filter_map(|event| match event {
+                ClaudeCodeEvent::System(SystemEvent::ThinkingTokens {
+                    estimated_tokens, ..
+                }) => Some(*estimated_tokens),
+                _ => None,
+            })
+            .collect();
+        assert!(token_estimates.len() > 20);
+        assert!(token_estimates.iter().any(|&t| t > 0));
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::Result(ResultEvent::ErrorDuringExecution { terminal_reason, .. })
+                if terminal_reason == "aborted_tools"
+        )));
+        // The narration turn closes normally after the aborted one.
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::Result(ResultEvent::Success { .. })
+        )));
+    }
+
+    /// A subtype this build has never seen must degrade to `Unrecognized`, not
+    /// fail the line — `thinking_tokens` arriving unannounced cost every
+    /// thinking session its lines until it was modeled.
+    #[test]
+    fn unknown_system_subtypes_degrade_instead_of_failing() {
+        let line = r#"{"type":"system","subtype":"from_the_future","payload":9001,"uuid":"u","session_id":"s"}"#;
+        let event = parse_line(line).expect("unknown subtype still parses");
+        assert!(matches!(
+            event,
+            ClaudeCodeEvent::System(SystemEvent::Unrecognized)
+        ));
     }
 
     /// A real stdin-driven session: two prompts, an async subagent, and a third

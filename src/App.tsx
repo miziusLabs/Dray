@@ -53,6 +53,7 @@ function App() {
     runCheckout,
     setUseWorktree,
     handleSendMsg,
+    handleInterrupt,
     handleSelectSessionIndexItem,
     handleNewSession,
     setSessionFlags,
@@ -164,6 +165,7 @@ function App() {
       footer={
         <ChatInput
           onSend={handleSendMsg}
+          onStop={handleInterrupt}
           busy={busy}
           sessionId={selectedSessionId}
           isNewTask={!selectedSession}

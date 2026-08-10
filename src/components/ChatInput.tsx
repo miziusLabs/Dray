@@ -6,6 +6,9 @@ import { cn } from "@/lib/utils";
 
 type ChatInputProps = {
   onSend: (message: string) => void;
+  /// Interrupts the running turn. Only reachable while `busy` — the same
+  /// button is Send otherwise.
+  onStop?: () => void;
   /// Rendered outside the card — below it normally, above it on a new task. A
   /// node rather than the controls' own props, so this component keeps owning
   /// layout and measurement and nothing else.
@@ -35,6 +38,7 @@ const MAX_ROWS = 10;
 
 export default function ChatInput({
   onSend,
+  onStop,
   toolbar,
   busy = false,
   sessionId = null,
@@ -227,16 +231,20 @@ export default function ChatInput({
               )}
             />
 
-            {/* Enter-to-send lives in `onKeyDown`, not in this button being the
+            {/* One button, two jobs. Busy makes it a Stop: `type="button"` so
+                pressing it can't also submit whatever is typed, and it stays
+                enabled where Send would be disabled — stopping needs no text.
+                Enter-to-send lives in `onKeyDown`, not in this button being the
                 form's submitter, so the empty state can drop it for the hint
                 below without losing the keyboard path. `busy` is unreachable
                 there too — nothing is running before a session exists. */}
             {!isNewTask && (
               <Button
-                type="submit"
+                type={busy ? "button" : "submit"}
                 size="icon-sm"
-                disabled={!canSend}
-                title={busy ? "Running…" : "Send"}
+                disabled={busy ? !onStop : !canSend}
+                onClick={busy ? onStop : undefined}
+                title={busy ? "Stop" : "Send"}
                 className="rounded-full"
               >
                 {busy ? (

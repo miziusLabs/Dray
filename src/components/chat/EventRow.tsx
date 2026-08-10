@@ -90,6 +90,10 @@ export default function EventRow({
       // conversation, and belong in a session-level surface rather than after
       // every message.
       if (payload.status !== "error") return null;
+      // A user abort ends the turn as an error on the wire (`aborted_streaming`
+      // mid-response, `aborted_tools` mid-call), but the user did it on
+      // purpose — reporting their own stop back as a failure is noise.
+      if (payload.stopReason?.startsWith("aborted")) return null;
       return (
         <Notice icon={TriangleAlert} tone="destructive">
           Turn failed{payload.stopReason ? ` — ${payload.stopReason}` : ""}
