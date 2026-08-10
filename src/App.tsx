@@ -56,6 +56,7 @@ function App() {
     setUseWorktree,
     handleSendMsg,
     handleInterrupt,
+    handleRespondPermission,
     handleSelectSessionIndexItem,
     handleNewSession,
     setSessionFlags,
@@ -212,6 +213,7 @@ function App() {
           selectedSessionId ? streamingContentBlock[selectedSessionId] ?? null : null
         }
         onOpenSubagent={openSubagent}
+        onRespondPermission={handleRespondPermission}
         busy={busy}
         backgroundTaskCount={backgroundTasks.length}
         compacting={compacting}

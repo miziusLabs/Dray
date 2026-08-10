@@ -84,7 +84,60 @@ usingOverage: boolean,
 /**
  * Why overage isn't available — `org_level_disabled` observed.
  */
-overageDisabledReason: string | null, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compaction_started" } | { "type": "context_compacted", 
+overageDisabledReason: string | null, } | { "type": "permission_requested", 
+/**
+ * Correlates the reply. Also what
+ * [`PermissionDecided`](Self::PermissionDecided) joins on, which is how
+ * a reloaded transcript knows an answered request from a live one.
+ */
+requestId: string, 
+/**
+ * The call being held. The matching
+ * [`ToolCallStarted`](Self::ToolCallStarted) is already in the
+ * transcript, so a renderer can show the request against the call
+ * rather than repeating its arguments.
+ */
+toolUseId: string, toolName: string, 
+/**
+ * Preferred over `tool_name` for display when present.
+ */
+displayName: string | null, title: string | null, description: string | null, input: JsonValue, 
+/**
+ * The path that caused a working-directory escalation.
+ */
+blockedPath: string | null, 
+/**
+ * Why this escalated, in prose. May carry ANSI escapes — sanitize
+ * before rendering.
+ */
+decisionReason: string | null, 
+/**
+ * Machine-readable counterpart to `decision_reason`: `safetyCheck`,
+ * `rule`, `mode`, `workingDir` and others. Lets a consumer treat a
+ * safety escalation differently without parsing prose.
+ */
+decisionReasonType: string | null, 
+/**
+ * Set when a subagent made the call rather than the main thread.
+ *
+ * Not a correlation key — it is the harness's own handle and matches no
+ * other id — so it answers exactly one question: whether the call being
+ * consented to is visible to the reader. A main-thread request renders
+ * directly under its own `ToolCallStarted` row; a subagent's renders
+ * with that row filed away in a panel, so the card has to carry the
+ * arguments itself or it asks about something invisible.
+ */
+agentId: string | null, options: Array<PermissionOption>, } | { "type": "permission_decided", requestId: string, toolUseId: string, behavior: PermissionBehavior, 
+/**
+ * The chosen option's label, so the transcript reads back as what the
+ * user actually picked rather than a bare allow/deny.
+ */
+label: string, 
+/**
+ * True when the app answered on its own — an unsupported request
+ * subtype, or a shutdown clearing what it could not ask about.
+ */
+automatic: boolean, } | { "type": "permission_denied", toolName: string, toolUseId: string, message: string, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compaction_started" } | { "type": "context_compacted", 
 /**
  * `manual` or `auto`.
  */
@@ -228,6 +281,8 @@ model: string, inputTokens: number | null, outputTokens: number | null, cachedIn
  */
 contextWindow: number | null, maxOutputTokens: number | null, };
 
+export type PermissionBehavior = "allow" | "deny";
+
 /**
  * What the CLI *reports* in `system/init`, which is a wider set than it
  * accepts: `default` names the harness's own prompting stance, and
@@ -236,6 +291,34 @@ contextWindow: number | null, maxOutputTokens: number | null, };
  * round trip can't quietly turn one into the other.
  */
 export type PermissionMode = "default" | "plan" | "manual" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions";
+
+/**
+ * One answer the user can give to a [permission
+ * request](AgentEventPayload::PermissionRequested).
+ *
+ * Deliberately carries no wire payload. The standing rule an option would
+ * apply is the harness's to compose and the harness's to send, so the app
+ * replies with [`id`](Self::id) alone and the harness resolves it — which keeps
+ * a rule that grants more than it appears to from ever being assembled on the
+ * UI side.
+ */
+export type PermissionOption = { 
+/**
+ * Unique within its request, and the whole of what the app sends back.
+ */
+id: string, label: string, kind: PermissionOptionKind, 
+/**
+ * Whether picking this lets the call run. Both `Deny` kinds carry
+ * [`Deny`](PermissionBehavior::Deny); everything else allows.
+ */
+behavior: PermissionBehavior, };
+
+/**
+ * What an option *does*, for a renderer that wants to group or order them.
+ * The set is closed on purpose: an unmappable suggestion is dropped rather
+ * than shown as a button whose effect can't be described.
+ */
+export type PermissionOptionKind = "once" | "always_rule" | "always_directory" | "switch_mode" | "deny";
 
 /**
  * A directory the user attached, and the root a session runs in. Distinct from

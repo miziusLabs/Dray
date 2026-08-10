@@ -38,6 +38,13 @@ export type ToolGroup = {
 /// Either a lone event or a collapsed run of same-tool calls.
 export type WorkItem = AgentEvent | ToolGroup;
 
+/// The `permission_requested` payload, narrowed out of the union once here so
+/// the renderer doesn't re-check a type the builder already established.
+export type PermissionRequestPayload = Extract<
+  AgentEvent["payload"],
+  { type: "permission_requested" }
+>;
+
 export function isToolGroup(item: WorkItem): item is ToolGroup {
   return "kind" in item && item.kind === "tool_group";
 }
@@ -79,6 +86,7 @@ const RENDERS = new Set([
   "error",
   "context_compacted",
   "rate_limited",
+  "permission_denied",
 ]);
 
 /// Whether an item draws a row. A group always does — it is built from tool
@@ -311,15 +319,34 @@ export function buildTranscript(source: AgentEvent[]): {
   subagents: SubagentRun[];
   subagentById: Map<string, SubagentRun>;
   resultByCallId: Map<string, ToolResult>;
+  /// Requests still waiting on the user, oldest first.
+  ///
+  /// Lifted out of the turns on purpose. A subagent's request would otherwise
+  /// have nowhere to render — its events are filed into the panel, not the
+  /// chat — and a main-thread one would sit buried in a turn that collapses
+  /// once it closes. One place, below the transcript, works for both.
+  pendingPermissions: PermissionRequestPayload[];
 } {
   const events = [...source].sort(bySeq);
 
   const resultByCallId = new Map<string, ToolResult>();
+  const requests: PermissionRequestPayload[] = [];
+  const answered = new Set<string>();
   for (const event of events) {
     if (event.payload.type === "tool_call_completed") {
       resultByCallId.set(event.payload.callId, event.payload.result);
     }
+    if (event.payload.type === "permission_requested") {
+      requests.push(event.payload);
+    }
+    if (event.payload.type === "permission_decided") {
+      answered.add(event.payload.requestId);
+    }
   }
+
+  const pendingPermissions = requests.filter(
+    (request) => !answered.has(request.requestId),
+  );
 
   const subagentById = new Map<string, SubagentRun>();
   for (const event of events) {
@@ -375,5 +402,6 @@ export function buildTranscript(source: AgentEvent[]): {
     subagents: [...subagentById.values()],
     subagentById,
     resultByCallId,
+    pendingPermissions,
   };
 }

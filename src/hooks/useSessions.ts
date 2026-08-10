@@ -262,6 +262,25 @@ const handleInterrupt = async () => {
   }
 };
 
+// Answers a permission request the agent is blocked on. The decision comes back
+// as an event like any other, so nothing is written to local state here — the
+// card learns it was answered from the transcript, the same way a reload does.
+//
+// `optionId` is opaque on purpose: the standing rule behind it lives in the
+// backend, so the frontend can neither widen a grant nor invent one.
+const handleRespondPermission = async (requestId: string, optionId: string) => {
+  if (!selectedSessionId) return;
+  try {
+    await invoke("respond_permission", {
+      sessionId: selectedSessionId,
+      requestId,
+      optionId,
+    });
+  } catch (e) {
+    setError(String(e));
+  }
+};
+
 // Restores the user's own defaults, not the app's. Selecting a session overwrote
 // the live controls with that session's settings, so every field they can change
 // has to be put back from prefs here — otherwise the last session clicked in the
@@ -656,6 +675,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
 
 }

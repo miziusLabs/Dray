@@ -10,12 +10,14 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{ChildStderr, ChildStdout, Command},
+    process::{ChildStderr, ChildStdin, ChildStdout, Command},
     sync::Mutex,
 };
 pub mod parser;
 pub use parser::ClaudeCodeEvent;
 pub mod mapper;
+pub mod permissions;
+use permissions::PendingPermissions;
 
 /// Takes a resolved [`Model`] rather than an id: there's no way to build one
 /// outside `models`, so an unknown model can't reach the spawn and this doesn't
@@ -52,6 +54,13 @@ pub async fn init(
 
     args.extend(["--permission-mode", permission_mode.as_arg()]);
 
+    // The literal `stdio` is a special case, not a tool name: the flag otherwise
+    // takes an MCP tool, and it is undocumented in `--help`. Without it the CLI
+    // never asks — it auto-denies every call needing approval and reports
+    // `system`/`permission_denied` — which is what made `manual` and `plan` look
+    // broken rather than unasked.
+    args.extend(["--permission-prompt-tool", "stdio"]);
+
     if is_new_session {
         args.extend(["--session-id", session_id]);
     } else {
@@ -76,7 +85,7 @@ pub async fn init(
         .spawn()
         .context("couldn't start claude")?;
 
-    let stdin = child.stdin.take().context("failed to take stdin")?;
+    let stdin = Arc::new(Mutex::new(child.stdin.take().context("failed to take stdin")?));
     let stdout = child.stdout.take().context("failed to take stdout")?;
     let stderr = child.stderr.take().context("failed to take stderr")?;
 
@@ -85,6 +94,10 @@ pub async fn init(
 
     let status: Arc<Mutex<StatusTracker>> = Arc::new(Mutex::new(StatusTracker::default()));
     let stdout_status = status.clone();
+
+    let pending_permissions = PendingPermissions::default();
+    let stdout_pending = pending_permissions.clone();
+    let stdout_stdin = stdin.clone();
 
     let seq_start: u64 = if is_new_session {
         0
@@ -106,6 +119,8 @@ pub async fn init(
             stdout_events,
             stdout_seq,
             stdout_status,
+            stdout_pending,
+            stdout_stdin,
             &app,
         )
         .await
@@ -131,6 +146,7 @@ pub async fn init(
         events,
         seq,
         status,
+        pending_permissions,
     })
 }
 
@@ -142,13 +158,15 @@ async fn read_stdout(
     events: Arc<Mutex<Vec<AgentEvent>>>,
     stdout_seq: Arc<AtomicU64>,
     status: Arc<Mutex<StatusTracker>>,
+    pending_permissions: PendingPermissions,
+    stdin: Arc<Mutex<ChildStdin>>,
     app: &AppHandle,
 ) -> Result<()> {
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
     // One mapper per session: it carries state across lines (the open message
     // id, the seq counter), so it must outlive the loop body.
-    let mut mapper = claude_code::mapper::Mapper::new(stdout_seq);
+    let mut mapper = claude_code::mapper::Mapper::new(stdout_seq, pending_permissions);
 
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
@@ -162,6 +180,27 @@ async fn read_stdout(
                 continue;
             }
         };
+
+        // A control request the CLI is blocked on, of a subtype this build
+        // can't put to the user. Refused from here rather than left alone:
+        // silence hangs the turn until the CLI's own deadline, and the read
+        // loop is the only place holding both the request and the pipe back.
+        if let ClaudeCodeEvent::ControlRequest {
+            request_id,
+            request: parser::ControlRequest::Unsupported,
+        } = &claude_event
+        {
+            record_failure(session_id, "unsupported_request", "unanswerable", &line).await;
+
+            let denial = permissions::auto_deny_response(
+                request_id,
+                "This client cannot answer that request.",
+            );
+            if let Err(err) = crate::session::write_line(&stdin, &denial).await {
+                eprintln!("[claude auto-deny err] {err}");
+            }
+            continue;
+        }
 
         // Parsed, but only by a catch-all — the line is a subtype this build
         // has never seen. Recorded alongside outright failures because it is
@@ -191,9 +230,20 @@ async fn read_stdout(
         // committed event; a usage update is a running counter whose final
         // value lands on `turn_completed` — and `thinking_tokens` alone fires
         // dozens of times per turn, which would be most of a session's log.
+        //
+        // A permission request is here for a different reason: it is a question,
+        // and it can only be answered by the child that asked. That child does
+        // not survive a restart, so a persisted request would come back as a
+        // card whose buttons cannot work. Dropping it is what makes the stale
+        // card impossible rather than merely unlikely. Nothing is lost — the
+        // tool call it belongs to is persisted and shows the outcome either way,
+        // and a live card survives re-selection because the frontend keeps a
+        // loaded session in memory rather than re-reading it.
         if matches!(
             agent_event.payload,
-            AgentEventPayload::Delta(_) | AgentEventPayload::UsageUpdate(_)
+            AgentEventPayload::Delta(_)
+                | AgentEventPayload::UsageUpdate(_)
+                | AgentEventPayload::PermissionRequested { .. }
         ) {
             continue;
         }

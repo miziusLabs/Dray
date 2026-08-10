@@ -1,4 +1,4 @@
-import { Archive, CircleAlert, CircleDollarSign, TriangleAlert } from "lucide-react";
+import { Archive, CircleAlert, CircleDollarSign, ShieldX, TriangleAlert } from "lucide-react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import Reasoning from "@/components/chat/Reasoning";
@@ -32,7 +32,10 @@ function Notice({
         tone === "destructive" ? "text-destructive" : "text-muted-foreground/70",
       )}
     >
-      <Icon className={cn("size-3.5 shrink-0", wrap && "mt-[0.2em]")} />
+      {/* A flat 4px, not an em fraction. `items-start` puts the icon's box at
+          the line's top edge while its glyph sits inset within that box, so it
+          reads high against the first line of text. */}
+      <Icon className={cn("size-3.5 shrink-0", wrap && "mt-1")} />
       <span className={wrap ? "min-w-0" : "truncate"}>{children}</span>
     </p>
   );
@@ -131,6 +134,13 @@ export default function EventRow({
       );
     }
 
+    case "permission_denied":
+      return (
+        <Notice icon={ShieldX} tone="destructive" wrap>
+          {payload.message}
+        </Notice>
+      );
+
     // Shaped like a settled tool call — label then detail — because that is what
     // it is: work the harness did on the conversation, reported after the fact.
     // No caret; there is nothing underneath to open.
@@ -169,6 +179,12 @@ export default function EventRow({
     // Drives the live indicator, not a row — the compaction it opens draws its
     // own line when it closes.
     case "context_compaction_started":
+    // Both halves of a permission live outside the turn stack: `Chat` renders
+    // the open ones below the transcript, where a subagent's request has
+    // somewhere to go and a main-thread one can't be buried in a turn that
+    // collapses. A settled one draws nothing anywhere.
+    case "permission_requested":
+    case "permission_decided":
       return null;
 
     default:

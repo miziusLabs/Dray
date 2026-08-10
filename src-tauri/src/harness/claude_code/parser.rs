@@ -63,6 +63,122 @@ pub enum ClaudeCodeEvent {
     /// the inner shape varies per request subtype, and nothing correlates
     /// request ids yet.
     ControlResponse { response: Value },
+    /// The only line that travels *into* the app expecting an answer: every
+    /// other event is a report. The CLI blocks the tool call until a
+    /// `control_response` carrying this `request_id` comes back on stdin, so an
+    /// unhandled one stalls the turn rather than merely losing information.
+    ///
+    /// Only arrives when the child was spawned with `--permission-prompt-tool
+    /// stdio`; without it the CLI auto-denies and reports `system`/
+    /// `permission_denied` instead.
+    ControlRequest {
+        request_id: String,
+        request: ControlRequest,
+    },
+}
+
+/// A question from the CLI. Externally tagged on `subtype`, like the control
+/// requests we send in the other direction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "subtype", rename_all = "snake_case")]
+pub enum ControlRequest {
+    CanUseTool(PermissionRequest),
+    /// A subtype this build doesn't answer. Distinct from a parse failure: the
+    /// line is understood well enough to know it needs a reply we can't give,
+    /// which the mapper turns into an automatic denial so the turn proceeds.
+    #[serde(other)]
+    Unsupported,
+}
+
+/// A tool call held pending the user's decision. Most fields are absent most of
+/// the time — the shape is one union across every reason a call can escalate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionRequest {
+    pub tool_name: String,
+    pub input: Value,
+    pub tool_use_id: String,
+    /// Pre-built rules the host may apply alongside its answer. These are what
+    /// "always allow" and "switch mode" offer — the CLI composes them, so the
+    /// app never has to author a rule itself.
+    #[serde(default)]
+    pub permission_suggestions: Vec<PermissionUpdate>,
+    /// The path that triggered a working-directory escalation.
+    #[serde(default)]
+    pub blocked_path: Option<String>,
+    /// Human-readable reason the call escalated. May carry ANSI escapes.
+    #[serde(default)]
+    pub decision_reason: Option<String>,
+    #[serde(default)]
+    pub decision_reason_type: Option<String>,
+    /// Set when a safety check is involved: `false` means at least one check
+    /// wants a human, `true` that a classifier could approve it.
+    #[serde(default)]
+    pub classifier_approvable: Option<bool>,
+    /// The ask's own verb is narrower than a whole-tool rule would be, so
+    /// offering "always allow" here would grant more than the question asked.
+    #[serde(default)]
+    pub suppress_always_allow_rule: bool,
+    /// The tool's own card is the interaction surface, so a one-tap answer
+    /// isn't enough — the user has to open the session.
+    #[serde(default)]
+    pub requires_user_interaction: bool,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Set when the call came from inside a subagent.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+/// A change to the session's permission state, applied by sending it back on the
+/// decision. Camel-cased on the wire — this is SDK-facing rather than
+/// transcript-facing, and the two halves of the CLI disagree on case.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PermissionUpdate {
+    #[serde(rename_all = "camelCase")]
+    AddRules {
+        rules: Vec<PermissionRule>,
+        behavior: String,
+        destination: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    ReplaceRules {
+        rules: Vec<PermissionRule>,
+        behavior: String,
+        destination: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    RemoveRules {
+        rules: Vec<PermissionRule>,
+        behavior: String,
+        destination: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    SetMode { mode: String, destination: String },
+    #[serde(rename_all = "camelCase")]
+    AddDirectories {
+        directories: Vec<String>,
+        destination: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    RemoveDirectories {
+        directories: Vec<String>,
+        destination: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionRule {
+    pub tool_name: String,
+    /// The specific invocation the rule covers — a command for `Bash`, a path
+    /// glob for the file tools. Absent means the whole tool.
+    #[serde(default)]
+    pub rule_content: Option<String>,
 }
 
 /// Camel-cased on the wire, unlike every other Claude Code payload.
@@ -82,19 +198,48 @@ pub struct RateLimitInfo {
     pub overage_disabled_reason: Option<String>,
     #[serde(default)]
     pub is_using_overage: Option<bool>,
+    /// Fraction of the window spent, `0.93` at 93%. Only sent alongside
+    /// `allowed_warning`.
+    #[serde(default)]
+    pub utilization: Option<f64>,
+    /// The threshold that tripped the warning — `0.9` observed.
+    #[serde(default)]
+    pub surpassed_threshold: Option<f64>,
 }
+
+/// Statuses that mean work continues and nothing needs saying.
+///
+/// `allowed_warning` is the one that has to be listed rather than inferred: it
+/// arrives with `utilization` around 0.93 and means the window is *approaching*
+/// full, not spent. Reading it as trouble put "Usage limit reached" on screen
+/// during an ordinary turn.
+const HEALTHY_STATUSES: [&str; 2] = ["allowed", "allowed_warning"];
 
 impl RateLimitInfo {
     /// Whether this is worth surfacing. The CLI reports the limit on roughly
     /// every turn, almost always to say everything is fine, so emitting each
     /// one would bury the report that matters.
     ///
-    /// Written as "not the known-good state" rather than as a list of bad
-    /// statuses: `allowed` is the only value any capture contains, so an
-    /// unrecognized status — or a missing one — surfaces instead of being
-    /// silently treated as healthy.
+    /// Still written as "not a known-good state" rather than as a list of bad
+    /// ones, so an unrecognized status — or a missing one — surfaces instead of
+    /// being assumed healthy. The known-good list is what grows: it started at
+    /// `allowed` alone because that was the only value captured, and
+    /// `allowed_warning` showed up the moment a session ran near its ceiling.
+    /// Add to it only from a capture, never from a guess about the naming.
     pub fn is_noteworthy(&self) -> bool {
-        self.is_using_overage.unwrap_or(false) || self.status.as_deref() != Some("allowed")
+        let healthy = self
+            .status
+            .as_deref()
+            .is_some_and(|status| HEALTHY_STATUSES.contains(&status));
+
+        self.is_using_overage.unwrap_or(false) || !healthy
+    }
+
+    /// Whether the window is filling but not yet spent. Nothing consumes this
+    /// yet — approaching a limit is real information and wants its own quiet
+    /// surface, not the banner a reached limit gets.
+    pub fn is_approaching(&self) -> bool {
+        self.status.as_deref() == Some("allowed_warning")
     }
 }
 
@@ -226,6 +371,24 @@ pub enum SystemEvent {
     /// it.
     CompactBoundary {
         compact_metadata: CompactMetadata,
+        uuid: String,
+        session_id: String,
+    },
+    /// A tool call refused without ever being asked about. Two causes, and the
+    /// wire doesn't distinguish them: the working-directory sandbox blocked a
+    /// path, or the permission mode wanted an approval the host couldn't be
+    /// asked for. The second disappears once the child runs with
+    /// `--permission-prompt-tool stdio`; the first can't be answered at all, so
+    /// this stays a report rather than becoming a question.
+    ///
+    /// `message` is what the model receives back as the tool's error, so it is
+    /// the same text the transcript already shows on the failed call — carried
+    /// anyway because the denial is the reason, and the tool result is only the
+    /// symptom.
+    PermissionDenied {
+        tool_name: String,
+        tool_use_id: String,
+        message: String,
         uuid: String,
         session_id: String,
     },
@@ -1056,6 +1219,101 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             ClaudeCodeEvent::Result(ResultEvent::Success { .. })
+        )));
+    }
+
+    /// A `touch` under `--permission-mode manual --permission-prompt-tool
+    /// stdio`, approved. The only capture of a control request travelling
+    /// *inbound*, so it is what pins the field names the reply is built from.
+    #[test]
+    fn parses_an_inbound_permission_request() {
+        let events = parse_fixture(include_str!("fixtures/permission_allow.jsonl"));
+        assert_eq!(events.len(), 19, "every line parses, none dropped");
+
+        let request = events
+            .iter()
+            .find_map(|event| match event {
+                ClaudeCodeEvent::ControlRequest {
+                    request_id,
+                    request: ControlRequest::CanUseTool(request),
+                } => Some((request_id, request)),
+                _ => None,
+            })
+            .expect("the fixture holds one can_use_tool request");
+
+        let (request_id, request) = request;
+        assert!(!request_id.is_empty());
+        assert_eq!(request.tool_name, "Bash");
+        assert!(request.tool_use_id.starts_with("toolu_"));
+        assert_eq!(request.input["command"], "touch ./marker.txt");
+        assert!(request.blocked_path.is_some());
+
+        // The three the CLI composed: a rule for this exact command, the
+        // working directory, and the mode that stops it asking. They are what
+        // the app's "always allow" options are built from — inventing them
+        // locally is what this capture exists to prevent.
+        assert_eq!(request.permission_suggestions.len(), 3);
+        assert!(matches!(
+            request.permission_suggestions[0],
+            PermissionUpdate::AddRules { .. }
+        ));
+        assert!(matches!(
+            request.permission_suggestions[1],
+            PermissionUpdate::AddDirectories { .. }
+        ));
+        assert!(matches!(
+            request.permission_suggestions[2],
+            PermissionUpdate::SetMode { .. }
+        ));
+    }
+
+    /// Denial leaves no `permission_denied` line — the request was answered, so
+    /// the refusal is the tool's own error result. That absence is the whole
+    /// difference between a denial the user made and one the CLI made alone.
+    #[test]
+    fn a_denied_request_reports_no_system_denial() {
+        let events = parse_fixture(include_str!("fixtures/permission_deny.jsonl"));
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::ControlRequest {
+                request: ControlRequest::CanUseTool(_),
+                ..
+            }
+        )));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::System(SystemEvent::PermissionDenied { .. })
+        )));
+    }
+
+    /// The same `touch` with no answer channel open. The CLI refuses on its own
+    /// and says so on a `system` line, which is the only signal there is.
+    #[test]
+    fn parses_a_denial_the_cli_made_alone() {
+        let events = parse_fixture(include_str!("fixtures/permission_denied_system.jsonl"));
+
+        let denial = events
+            .iter()
+            .find_map(|event| match event {
+                ClaudeCodeEvent::System(SystemEvent::PermissionDenied {
+                    tool_name,
+                    tool_use_id,
+                    message,
+                    ..
+                }) => Some((tool_name, tool_use_id, message)),
+                _ => None,
+            })
+            .expect("the fixture holds one auto-denial");
+
+        let (tool_name, tool_use_id, message) = denial;
+        assert_eq!(tool_name, "Bash");
+        assert!(tool_use_id.starts_with("toolu_"));
+        assert!(message.contains("blocked"));
+
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            ClaudeCodeEvent::ControlRequest { .. }
         )));
     }
 

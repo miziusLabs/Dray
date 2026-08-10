@@ -9,7 +9,11 @@ import { formatToolInput, toolLabel, toolSummary } from "@/lib/tools";
 import type { ToolResult, ToolType } from "@/types/events";
 import type { JsonValue } from "@/types/serde_json/JsonValue";
 
-// Shown in the header, so the expanded body omits them to avoid repeating itself.
+// Shown in the header, so the expanded body omits them to avoid repeating
+// itself. `timeout` is here for a different reason: it is a ceiling the model
+// sets on its own call, not a fact about what the call does, and it left the
+// body of an otherwise fully-summarized Bash call reading `{"timeout": 300000}`
+// — which looks like the only thing worth knowing about the command.
 const SUMMARY_FIELDS = [
   "file_path",
   "path",
@@ -19,6 +23,7 @@ const SUMMARY_FIELDS = [
   "query",
   "url",
   "description",
+  "timeout",
 ];
 
 // Dropped from the body when a diff stands in for it: the diff already shows

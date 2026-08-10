@@ -1,7 +1,13 @@
 use crate::{
     events::{now_rfc3339, AgentEvent, AgentEventPayload, ApprovalPolicy},
     git,
-    harness::{claude_code, Harness::ClaudeCode},
+    harness::{
+        claude_code::{
+            self,
+            permissions::{decision_response, PendingPermissions},
+        },
+        Harness::ClaudeCode,
+    },
     models::{find_model, resolve_effort, Effort, Model, ModelId},
     store::{
         append_session_event, append_session_index_item, get_session_index_item,
@@ -304,6 +310,22 @@ impl SessionManager {
         session.interrupt().await
     }
 
+    /// Answers a permission request. Errors when the session has no live child:
+    /// the request died with the process, and the CLI will re-ask on resume.
+    pub async fn respond_permission(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        option_id: &str,
+        app: &AppHandle,
+    ) -> Result<()> {
+        let mut sessions_guard = self.sessions.lock().await;
+        let Some(session) = sessions_guard.get_mut(session_id) else {
+            bail!("no running session {session_id}");
+        };
+        session.respond_permission(request_id, option_id, app).await
+    }
+
     /// Clears a finished session's unread mark: `Completed` → `Idle`, anything
     /// else untouched. Returns the status as written, `None` for no change.
     ///
@@ -335,7 +357,10 @@ impl SessionManager {
 pub struct Session {
     pub id: String,
     pub child: Child,
-    pub stdin: ChildStdin,
+    /// Shared with the stdout task, which has to write back on its own: an
+    /// unanswerable `control_request` must be refused from where it is read,
+    /// since the CLI blocks its turn until something replies.
+    pub stdin: Arc<Mutex<ChildStdin>>,
     pub harness: Harness,
     pub model: ModelId,
     pub effort: Option<Effort>,
@@ -345,6 +370,8 @@ pub struct Session {
     /// Shared with the stdout task: sends flip it here, `result` and
     /// `background_tasks_changed` flip it there.
     pub status: Arc<Mutex<StatusTracker>>,
+    /// Permission requests the mapper has registered and nobody has answered.
+    pub pending_permissions: PendingPermissions,
 }
 
 impl Session {
@@ -409,11 +436,7 @@ impl Session {
         append_session_event(&self.id, agent_event).await?;
 
         let prompt = json!({"type":"user","message":{"role":"user","content": prompt}});
-
-        let line = format!("{prompt}\n");
-
-        let _ = self.stdin.write_all(line.as_bytes()).await?;
-        let _ = self.stdin.flush().await?;
+        write_line(&self.stdin, &prompt).await?;
 
         // After the write: a prompt that never reached the child starts
         // nothing, and the command's error is what the frontend acts on.
@@ -435,10 +458,7 @@ impl Session {
             "request": {"subtype": "set_model", "model": model.id.as_arg()},
         });
 
-        self.stdin
-            .write_all(format!("{request}\n").as_bytes())
-            .await?;
-        self.stdin.flush().await?;
+        write_line(&self.stdin, &request).await?;
         self.model = model.id;
 
         Ok(())
@@ -457,10 +477,7 @@ impl Session {
             "request": {"subtype": "interrupt"},
         });
 
-        self.stdin
-            .write_all(format!("{request}\n").as_bytes())
-            .await?;
-        self.stdin.flush().await?;
+        write_line(&self.stdin, &request).await?;
 
         Ok(())
     }
@@ -476,11 +493,77 @@ impl Session {
             "request": {"subtype": "set_permission_mode", "mode": arg},
         });
 
-        self.stdin
-            .write_all(format!("{request}\n").as_bytes())
-            .await?;
-        self.stdin.flush().await?;
+        write_line(&self.stdin, &request).await?;
         self.permission_mode = mode;
+
+        Ok(())
+    }
+
+    /// Answers a pending permission request and records the decision.
+    ///
+    /// The reply goes out before the event is minted: the CLI's turn is blocked
+    /// on it, and a failure to persist the transcript row is not worth holding
+    /// an agent still for. Taking the entry out of the map is what makes this
+    /// single-shot — a second click on a card the frontend hasn't repainted yet
+    /// finds nothing and errors rather than double-answering.
+    pub async fn respond_permission(
+        &mut self,
+        request_id: &str,
+        option_id: &str,
+        app: &AppHandle,
+    ) -> Result<()> {
+        let (pending, chosen) = {
+            let mut guard = self
+                .pending_permissions
+                .lock()
+                .expect("pending permissions mutex poisoned");
+
+            let pending = guard
+                .get(request_id)
+                .with_context(|| format!("no pending permission request {request_id}"))?;
+
+            let chosen = pending
+                .options
+                .get(option_id)
+                .with_context(|| format!("unknown permission option {option_id}"))?
+                .clone();
+
+            // Only removed once the option resolved: an unknown id leaves the
+            // request answerable rather than stranding the turn.
+            let pending = guard.remove(request_id).expect("just read under this lock");
+            (pending, chosen)
+        };
+
+        write_line(
+            &self.stdin,
+            &decision_response(request_id, &pending, &chosen),
+        )
+        .await?;
+
+        let payload = AgentEventPayload::PermissionDecided {
+            request_id: request_id.to_string(),
+            tool_use_id: pending.tool_use_id,
+            behavior: chosen.option.behavior,
+            label: chosen.option.label,
+            automatic: false,
+        };
+
+        // Emitted, never persisted — it exists to retire the request's card, and
+        // the request itself is not persisted either. Still numbered through the
+        // shared counter so the live transcript orders it correctly.
+        let decision = AgentEvent {
+            id: Uuid::now_v7().to_string(),
+            session_id: self.id.clone(),
+            harness: ClaudeCode,
+            seq: self.seq.fetch_add(1, Relaxed),
+            ts: now_rfc3339(),
+            turn_id: None,
+            subagent: None,
+            payload,
+            raw: None,
+        };
+
+        app.emit("agent_event", &decision)?;
 
         Ok(())
     }
@@ -491,6 +574,16 @@ impl Session {
         let _ = self.child.kill().await?;
         Ok(())
     }
+}
+
+/// Writes one JSON line to a child's stdin. The CLI's input format is
+/// line-delimited, so the newline and the flush are part of the message rather
+/// than tidiness.
+pub async fn write_line(stdin: &Arc<Mutex<ChildStdin>>, value: &serde_json::Value) -> Result<()> {
+    let mut guard = stdin.lock().await;
+    guard.write_all(format!("{value}\n").as_bytes()).await?;
+    guard.flush().await?;
+    Ok(())
 }
 
 #[cfg(test)]

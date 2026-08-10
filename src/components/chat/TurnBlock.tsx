@@ -111,7 +111,11 @@ export default function TurnBlock({
           return run ? (
             <SubagentRow key={item.id} run={run} onOpen={onOpenSubagent} />
           ) : (
-            <EventRow key={item.id} event={item} resultByCallId={resultByCallId} />
+            <EventRow
+              key={item.id}
+              event={item}
+              resultByCallId={resultByCallId}
+            />
           );
         })}
 

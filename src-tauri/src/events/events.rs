@@ -223,6 +223,78 @@ pub enum AgentEventPayload {
         /// Why overage isn't available — `org_level_disabled` observed.
         overage_disabled_reason: Option<String>,
     },
+    // ---------- permissions ----------
+    /// A tool call the agent cannot make without an answer. Unlike every other
+    /// payload this one is a *question*: the harness is blocked until the app
+    /// replies, so a consumer that renders it and offers no way to answer stalls
+    /// the session rather than merely under-reporting it.
+    ///
+    /// [`options`](Self::PermissionRequested::options) is the whole answer
+    /// surface. The harness composes it — "allow once" and "deny" always,
+    /// plus whatever standing rules *this* call could establish — because what a
+    /// rule may say is wire knowledge, not UI knowledge.
+    PermissionRequested {
+        /// Correlates the reply. Also what
+        /// [`PermissionDecided`](Self::PermissionDecided) joins on, which is how
+        /// a reloaded transcript knows an answered request from a live one.
+        request_id: String,
+        /// The call being held. The matching
+        /// [`ToolCallStarted`](Self::ToolCallStarted) is already in the
+        /// transcript, so a renderer can show the request against the call
+        /// rather than repeating its arguments.
+        tool_use_id: String,
+        tool_name: String,
+        /// Preferred over `tool_name` for display when present.
+        display_name: Option<String>,
+        title: Option<String>,
+        description: Option<String>,
+        input: Value,
+        /// The path that caused a working-directory escalation.
+        blocked_path: Option<String>,
+        /// Why this escalated, in prose. May carry ANSI escapes — sanitize
+        /// before rendering.
+        decision_reason: Option<String>,
+        /// Machine-readable counterpart to `decision_reason`: `safetyCheck`,
+        /// `rule`, `mode`, `workingDir` and others. Lets a consumer treat a
+        /// safety escalation differently without parsing prose.
+        decision_reason_type: Option<String>,
+        /// Set when a subagent made the call rather than the main thread.
+        ///
+        /// Not a correlation key — it is the harness's own handle and matches no
+        /// other id — so it answers exactly one question: whether the call being
+        /// consented to is visible to the reader. A main-thread request renders
+        /// directly under its own `ToolCallStarted` row; a subagent's renders
+        /// with that row filed away in a panel, so the card has to carry the
+        /// arguments itself or it asks about something invisible.
+        agent_id: Option<String>,
+        options: Vec<PermissionOption>,
+    },
+    /// How a [`PermissionRequested`](Self::PermissionRequested) was answered.
+    /// Minted by the app when it replies, not by the harness — the CLI's own ack
+    /// carries nothing worth keeping — so the transcript survives a reload with
+    /// the outcome intact.
+    PermissionDecided {
+        request_id: String,
+        tool_use_id: String,
+        behavior: PermissionBehavior,
+        /// The chosen option's label, so the transcript reads back as what the
+        /// user actually picked rather than a bare allow/deny.
+        label: String,
+        /// True when the app answered on its own — an unsupported request
+        /// subtype, or a shutdown clearing what it could not ask about.
+        #[serde(default)]
+        automatic: bool,
+    },
+    /// A call refused with no question asked, because none could be. The
+    /// working-directory sandbox is the durable cause; a permission mode with no
+    /// answer channel is the other, and that one disappears once the harness can
+    /// ask.
+    PermissionDenied {
+        tool_name: String,
+        tool_use_id: String,
+        message: String,
+    },
+
     Hook {
         name: String,
         event: String,
@@ -261,6 +333,54 @@ pub enum AgentEventPayload {
     /// [`Unknown`](Self::Unknown), a harness line the mapper couldn't classify.
     #[serde(other)]
     Unrecognized,
+}
+
+/// One answer the user can give to a [permission
+/// request](AgentEventPayload::PermissionRequested).
+///
+/// Deliberately carries no wire payload. The standing rule an option would
+/// apply is the harness's to compose and the harness's to send, so the app
+/// replies with [`id`](Self::id) alone and the harness resolves it — which keeps
+/// a rule that grants more than it appears to from ever being assembled on the
+/// UI side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionOption {
+    /// Unique within its request, and the whole of what the app sends back.
+    pub id: String,
+    pub label: String,
+    pub kind: PermissionOptionKind,
+    /// Whether picking this lets the call run. Both `Deny` kinds carry
+    /// [`Deny`](PermissionBehavior::Deny); everything else allows.
+    pub behavior: PermissionBehavior,
+}
+
+/// What an option *does*, for a renderer that wants to group or order them.
+/// The set is closed on purpose: an unmappable suggestion is dropped rather
+/// than shown as a button whose effect can't be described.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionOptionKind {
+    /// Allow this call and nothing else. Always offered, always first.
+    Once,
+    /// Allow this and everything matching a standing rule.
+    AlwaysRule,
+    /// Allow this and everything under a directory.
+    AlwaysDirectory,
+    /// Allow this and switch the session's stance so the next one doesn't ask.
+    SwitchMode,
+    /// Refuse. Always offered, always last.
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionBehavior {
+    Allow,
+    Deny,
 }
 
 /// One outstanding background task. The harness's wire shape is snake_case, so

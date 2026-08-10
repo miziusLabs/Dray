@@ -156,6 +156,24 @@ async fn interrupt_session(
         .map_err(|e| e.to_string())
 }
 
+/// Answers a permission request the agent is blocked on. `option_id` names one
+/// of the options carried on the `permission_requested` event — the standing
+/// rule it may apply never leaves the backend, so the frontend cannot widen a
+/// grant beyond what the CLI proposed.
+#[tauri::command]
+async fn respond_permission(
+    session_id: &str,
+    request_id: &str,
+    option_id: &str,
+    manager: State<'_, SessionManager>,
+    app: AppHandle,
+) -> Result<(), String> {
+    manager
+        .respond_permission(session_id, request_id, option_id, &app)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Clears a finished session's unread mark. The frontend calls this when the
 /// user views the session; a `completed` badge is "finished and unread", so
 /// reading is what retires it. Returns the status as written, `None` when
@@ -203,6 +221,7 @@ pub fn run() {
             set_session_flags,
             mark_session_idle,
             interrupt_session,
+            respond_permission,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

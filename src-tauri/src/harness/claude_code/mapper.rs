@@ -12,9 +12,10 @@ use crate::{
     harness::{
         claude_code::{
             parser::{
-                self, AssistantMessage, ContentBlock, ContentDelta, ResultEvent, StreamFrame,
-                SystemEvent, UserContent, UserContentBlock, UserMessage,
+                self, AssistantMessage, ContentBlock, ContentDelta, ControlRequest, ResultEvent,
+                StreamFrame, SystemEvent, UserContent, UserContentBlock, UserMessage,
             },
+            permissions::{PendingPermissions, PendingRequest},
             ClaudeCodeEvent,
         },
         Harness,
@@ -52,24 +53,33 @@ pub struct Mapper {
     seq: Arc<AtomicU64>,
     // tool_use_id/subagent_id as str
     subagent_seq: HashMap<String, u64>,
+    /// Requests registered here as they are mapped, and removed by
+    /// [`Session`](crate::session::Session) when it answers them. The mapper
+    /// owns the registration because the options it emits and the rules they
+    /// carry are built together, and only one of the two is fit to leave Rust.
+    pending_permissions: PendingPermissions,
+    /// The session every line so far belonged to. See [`Self::build`].
+    session_id: Option<String>,
 }
 
 /// A mapper with a counter of its own, for tests and one-off mapping. The real
 /// session shares its counter with [`Session`](crate::session::Session).
 impl Default for Mapper {
     fn default() -> Self {
-        Self::new(Arc::new(AtomicU64::new(0)))
+        Self::new(Arc::new(AtomicU64::new(0)), PendingPermissions::default())
     }
 }
 
 impl Mapper {
-    pub fn new(seq: Arc<AtomicU64>) -> Self {
+    pub fn new(seq: Arc<AtomicU64>, pending_permissions: PendingPermissions) -> Self {
         Self {
             current_msg_id: None,
             block_indices: HashMap::new(),
             model: None,
             seq,
             subagent_seq: HashMap::new(),
+            pending_permissions,
+            session_id: None,
         }
     }
 
@@ -174,6 +184,54 @@ impl Mapper {
             // The ack for a control request this app wrote — interrupt,
             // set_model, set_permission_mode. Nothing correlates ids yet.
             ClaudeCodeEvent::ControlResponse { .. } => Ok(None),
+
+            ClaudeCodeEvent::ControlRequest {
+                request_id,
+                request,
+            } => {
+                let ControlRequest::CanUseTool(request) = request else {
+                    // Answered in the read loop, which owns the pipe back. The
+                    // request needs a reply either way, and this one can't
+                    // become a question the user could answer.
+                    return Ok(None);
+                };
+
+                let session_id = self.session_id.clone().unwrap_or_default();
+                let (pending, options) = PendingRequest::new(&request);
+
+                let payload = AgentEventPayload::PermissionRequested {
+                    request_id: request_id.clone(),
+                    tool_use_id: request.tool_use_id,
+                    tool_name: request.tool_name,
+                    display_name: request.display_name,
+                    title: request.title,
+                    description: request.description,
+                    input: request.input,
+                    blocked_path: request.blocked_path,
+                    decision_reason: request.decision_reason,
+                    decision_reason_type: request.decision_reason_type,
+                    agent_id: request.agent_id,
+                    options,
+                };
+
+                // Registered before the event goes out: the frontend can answer
+                // the moment it renders, and an entry missing then would read as
+                // an already-settled request.
+                self.pending_permissions
+                    .lock()
+                    .expect("pending permissions mutex poisoned")
+                    .insert(request_id, pending);
+
+                // Deliberately main-thread even when `agent_id` says a subagent
+                // asked. Two reasons, either one sufficient: subagent events are
+                // filtered out of the chat and rendered in a panel, so the card
+                // would be invisible while the agent hung waiting on it — and
+                // `agent_id` is the harness's own handle, not the spawning
+                // call's id this app correlates subagents by, so it would invent
+                // a run that matches nothing. Whoever asked, the user answers in
+                // one place.
+                Ok(Some(self.build(session_id, None, None, payload)))
+            }
         }
     }
 
@@ -203,6 +261,11 @@ impl Mapper {
         timestamp: Option<String>,
         payload: AgentEventPayload,
     ) -> AgentEvent {
+        // Remembered for the one line that omits it: a `control_request` carries
+        // no session id, and the mapper is per-session, so the last one seen is
+        // this session's.
+        self.session_id = Some(session_id.clone());
+
         let seq = match &subagent {
             // The spawn announcement is the main thread's, even though it names
             // a subagent.
@@ -247,6 +310,16 @@ impl Mapper {
                 reasoning_tokens: Some(estimated_tokens),
                 ..Default::default()
             }))),
+            SystemEvent::PermissionDenied {
+                tool_name,
+                tool_use_id,
+                message,
+                ..
+            } => Ok(Some(AgentEventPayload::PermissionDenied {
+                tool_name,
+                tool_use_id,
+                message,
+            })),
             SystemEvent::TaskStarted { .. }
             | SystemEvent::TaskProgress { .. }
             | SystemEvent::TaskNotification { .. } => Self::handle_task(e).map(Some),
@@ -803,6 +876,7 @@ fn system_event_session_id(e: &SystemEvent) -> &str {
         | SystemEvent::PostTurnSummary { session_id, .. }
         | SystemEvent::BackgroundTasksChanged { session_id, .. }
         | SystemEvent::ThinkingTokens { session_id, .. }
+        | SystemEvent::PermissionDenied { session_id, .. }
         | SystemEvent::CompactBoundary { session_id, .. } => session_id,
         // No fields survive the catch-all. Harmless: an unrecognized subtype
         // maps to `None`, so no envelope is ever built from this value.
@@ -830,6 +904,7 @@ fn system_event_subagent_info(e: &SystemEvent) -> (Option<String>, Option<String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::PermissionOptionKind;
 
     fn map_fixture(mapper: &mut Mapper, fixture: &str) -> Vec<AgentEvent> {
         fixture
@@ -1077,7 +1152,7 @@ mod tests {
         let prompt_seq = seq.fetch_add(1, Relaxed);
         assert_eq!(prompt_seq, 0);
 
-        let mut mapper = Mapper::new(Arc::clone(&seq));
+        let mut mapper = Mapper::new(Arc::clone(&seq), PendingPermissions::default());
         let events = map_fixture(&mut mapper, include_str!("fixtures/printed.jsonl"));
         let first = events.first().expect("the fixture maps at least one event");
         assert_eq!(first.seq, 1, "the mapper resumed after the prompt");
@@ -1226,8 +1301,23 @@ mod tests {
             "the steady state must not reach the transcript"
         );
 
+        // Verbatim from a `say hi` turn against an unremarkable session. The
+        // window was 93% spent and nothing was blocked — reading this as
+        // trouble put "Usage limit reached" on screen mid-conversation.
+        assert!(
+            event(
+                r#"{"status":"allowed_warning","resetsAt":1786366800,"rateLimitType":"five_hour","utilization":0.93,"isUsingOverage":false,"surpassedThreshold":0.9}"#
+            )
+            .is_none(),
+            "approaching a limit is not reaching one"
+        );
+
         // Healthy status, but the user is paying per request — worth saying.
         assert!(event(r#"{"status":"allowed","isUsingOverage":true}"#).is_some());
+        assert!(
+            event(r#"{"status":"allowed_warning","isUsingOverage":true}"#).is_some(),
+            "overage outranks a healthy status"
+        );
         assert!(event(r#"{"status":"rejected"}"#).is_some());
         assert!(event(r#"{"status":"some_future_status"}"#).is_some());
         assert!(event("{}").is_some(), "a missing status is not a healthy one");
@@ -1423,6 +1513,110 @@ mod tests {
                 }] if model == "claude-haiku-4-5-20251001"
             ));
         }
+    }
+
+    /// The request must reach the UI *and* the registry in one pass. Only the
+    /// second can answer the CLI, and the agent stays blocked until something
+    /// does — so an event emitted without a matching entry is a hung turn, not
+    /// a missing row.
+    #[test]
+    fn a_permission_request_is_registered_as_it_is_mapped() {
+        let pending = PendingPermissions::default();
+        let mut mapper = Mapper::new(Arc::new(AtomicU64::new(0)), Arc::clone(&pending));
+
+        let events = map_fixture(&mut mapper, include_str!("fixtures/permission_allow.jsonl"));
+
+        let request = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                AgentEventPayload::PermissionRequested {
+                    request_id,
+                    tool_name,
+                    options,
+                    blocked_path,
+                    ..
+                } => Some((request_id, tool_name, options, blocked_path)),
+                _ => None,
+            })
+            .expect("the fixture asks once");
+
+        let (request_id, tool_name, options, blocked_path) = request;
+        assert_eq!(tool_name, "Bash");
+        assert!(blocked_path.is_some());
+
+        // Allow-once and deny bracket the three the CLI suggested.
+        let kinds: Vec<_> = options.iter().map(|o| o.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                PermissionOptionKind::Once,
+                PermissionOptionKind::AlwaysRule,
+                PermissionOptionKind::AlwaysDirectory,
+                PermissionOptionKind::SwitchMode,
+                PermissionOptionKind::Deny,
+            ]
+        );
+
+        let guard = pending.lock().unwrap();
+        let entry = guard
+            .get(request_id)
+            .expect("the emitted request is answerable");
+        assert_eq!(entry.tool_name, "Bash");
+        for option in options {
+            assert!(
+                entry.options.contains_key(&option.id),
+                "option {} has no rule behind it",
+                option.id
+            );
+        }
+    }
+
+    /// A subagent's request must still land on the main thread. Subagent events
+    /// are filtered out of the chat and rendered in a panel, so tagging this one
+    /// would hide the card while the agent hung waiting for it — and `agent_id`
+    /// is the harness's own handle rather than the spawning call's id, so it
+    /// would key a subagent run that matches nothing. No fixture carries the
+    /// field, so this pins the documented shape.
+    #[test]
+    fn a_subagents_permission_request_stays_on_the_main_thread() {
+        let line = r#"{"type":"control_request","request_id":"req_1","request":{
+            "subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"toolu_1",
+            "input":{"command":"ls"},"agent_id":"agent_abc"}}"#;
+
+        let event = Mapper::default()
+            .map(parser::parse_line(line).unwrap())
+            .unwrap()
+            .expect("a request always emits");
+
+        assert!(event.subagent.is_none());
+        assert!(matches!(
+            event.payload,
+            AgentEventPayload::PermissionRequested { .. }
+        ));
+    }
+
+    /// A denial with no question behind it. Worth its own payload rather than an
+    /// `Error`: nothing went wrong, the agent asked for something outside what
+    /// the session allows.
+    #[test]
+    fn maps_a_denial_the_cli_made_alone() {
+        let events = map_fixture(
+            &mut Mapper::default(),
+            include_str!("fixtures/permission_denied_system.jsonl"),
+        );
+
+        let denied = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                AgentEventPayload::PermissionDenied {
+                    tool_name, message, ..
+                } => Some((tool_name, message)),
+                _ => None,
+            })
+            .expect("the fixture holds one auto-denial");
+
+        assert_eq!(denied.0, "Bash");
+        assert!(denied.1.contains("blocked"));
     }
 
     /// A field that changes type must cost that field and nothing else — this
