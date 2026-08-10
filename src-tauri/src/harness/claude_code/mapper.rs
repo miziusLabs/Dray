@@ -6,8 +6,8 @@
 use crate::{
     events::{
         now_rfc3339, rfc3339_from_unix, AgentEvent, AgentEventPayload, BackgroundTask, BlockRef,
-        BlockType, DeltaEvent, SessionInfo, Settings, Subagent, ToolResult, ToolType, TurnStatus,
-        Usage,
+        BlockType, ContextWindow, DeltaEvent, ModelUsage, SessionInfo, Settings, Subagent,
+        ToolResult, ToolType, TurnStatus, Usage,
     },
     harness::{
         claude_code::{
@@ -42,6 +42,11 @@ pub struct Mapper {
     /// address a block is to count arrivals. Deltas can't supply it either:
     /// subagent messages get no stream frames at all.
     block_indices: HashMap<String, u32>,
+    /// The dated model id `init` reported, which is the key the `result` line's
+    /// `modelUsage` map uses. Kept only to read the context window back out of
+    /// that map — a session whose subagents ran a second model has two entries,
+    /// and only the main thread's window describes the gauge.
+    model: Option<String>,
     /// Events the app synthesizes itself (the user's own prompt) must be
     /// numbered through this same counter, or `seq` develops gaps.
     seq: Arc<AtomicU64>,
@@ -62,6 +67,7 @@ impl Mapper {
         Self {
             current_msg_id: None,
             block_indices: HashMap::new(),
+            model: None,
             seq,
             subagent_seq: HashMap::new(),
         }
@@ -138,7 +144,8 @@ impl Mapper {
                     | ResultEvent::ErrorDuringExecution { session_id, .. } => session_id.clone(),
                 };
 
-                let payload = Self::handle_result_event(result_event)
+                let payload = self
+                    .handle_result_event(result_event)
                     .with_context(|| format!("mapping result event for session {session_id}"))?;
                 Ok(Some(self.build(session_id, None, None, payload)))
             }
@@ -225,7 +232,12 @@ impl Mapper {
     /// and fall through to `None`.
     fn handle_system_event(&mut self, e: SystemEvent) -> Result<Option<AgentEventPayload>> {
         match e {
-            SystemEvent::Init { .. } => Self::handle_init(e).map(Some),
+            SystemEvent::Init { .. } => {
+                if let SystemEvent::Init { model, .. } = &e {
+                    self.model = Some(model.clone());
+                }
+                Self::handle_init(e).map(Some)
+            }
             // A live counter for the thinking block in flight. Reported as
             // usage rather than given its own payload: it is the same fact
             // `result` reports at the end, only sooner and coarser.
@@ -514,7 +526,7 @@ impl Mapper {
 
     /// Maps a turn's terminal `result` line — success or an interrupted turn —
     /// into `TurnCompleted`.
-    fn handle_result_event(e: ResultEvent) -> Result<AgentEventPayload> {
+    fn handle_result_event(&self, e: ResultEvent) -> Result<AgentEventPayload> {
         match e {
             ResultEvent::Success {
                 is_error,
@@ -523,6 +535,7 @@ impl Mapper {
                 total_cost_usd,
                 result,
                 stop_reason,
+                model_usage,
                 ..
             } => {
                 let status = if is_error {
@@ -535,7 +548,7 @@ impl Mapper {
                     status,
                     stop_reason,
                     final_text: Some(result),
-                    usage: Some(map_usage(&usage, Some(total_cost_usd))),
+                    usage: Some(self.map_result_usage(&usage, total_cost_usd, &model_usage)),
                     duration_ms: Some(duration_ms),
                 })
             }
@@ -548,15 +561,31 @@ impl Mapper {
                 usage,
                 total_cost_usd,
                 terminal_reason,
+                model_usage,
                 ..
             } => Ok(AgentEventPayload::TurnCompleted {
                 status: TurnStatus::Error,
                 stop_reason: Some(terminal_reason),
                 final_text: None,
-                usage: Some(map_usage(&usage, Some(total_cost_usd))),
+                usage: Some(self.map_result_usage(&usage, total_cost_usd, &model_usage)),
                 duration_ms: Some(duration_ms),
             }),
         }
+    }
+
+    /// The accounting on a `result`, which both variants carry identically.
+    /// `modelUsage` is walked once here and feeds two things: the record a usage
+    /// page will read back, and the window the composer's gauge measures against.
+    fn map_result_usage(
+        &self,
+        usage: &parser::Usage,
+        total_cost_usd: f64,
+        model_usage: &Value,
+    ) -> Usage {
+        let per_model = map_model_usage(model_usage);
+        let window = context_window(&per_model, self.model.as_deref());
+
+        map_usage(usage, Some(total_cost_usd), per_model, window)
     }
 
     /// Address the next block of a committed message.
@@ -670,12 +699,70 @@ impl From<parser::TaskUsage> for Usage {
     }
 }
 
-/// `total_cost_usd` is a sibling of `usage` on the wire rather than a member, so
-/// it arrives separately.
+/// The `result` line's `modelUsage` map, one [`ModelUsage`] per entry.
 ///
-/// Claude Code reports no context window or rate limits, and folds thinking
-/// tokens into `output_tokens`.
-fn map_usage(wire: &parser::Usage, cost_usd: Option<f64>) -> Usage {
+/// Read field by field out of the raw `Value` rather than deserialized into a
+/// struct, and deliberately: this rides `turn_completed`, and a `result` that
+/// fails to parse strands the session on `in_progress` — a lesson the compaction
+/// capture taught the hard way. Serde would reject the whole line over one field
+/// that changed type; here that costs one field.
+///
+/// Entry order is the map's own, which serde_json sorts by key — so a session's
+/// log doesn't churn between runs.
+fn map_model_usage(model_usage: &Value) -> Vec<ModelUsage> {
+    let Some(map) = model_usage.as_object() else {
+        return Vec::new();
+    };
+
+    map.iter()
+        .map(|(model, v)| ModelUsage {
+            model: model.clone(),
+            input_tokens: v.get("inputTokens").and_then(Value::as_u64),
+            output_tokens: v.get("outputTokens").and_then(Value::as_u64),
+            cached_input_tokens: v.get("cacheReadInputTokens").and_then(Value::as_u64),
+            cache_write_tokens: v.get("cacheCreationInputTokens").and_then(Value::as_u64),
+            web_search_requests: v.get("webSearchRequests").and_then(Value::as_u64),
+            cost_usd: v.get("costUSD").and_then(Value::as_f64),
+            context_window: v.get("contextWindow").and_then(Value::as_u64),
+            max_output_tokens: v.get("maxOutputTokens").and_then(Value::as_u64),
+        })
+        .collect()
+}
+
+/// Which of those windows the composer's gauge measures against. A session whose
+/// subagents ran a second model has an entry each, so `init`'s own model picks
+/// the main thread's. A lone entry is taken as-is, covering a `result` reached
+/// without an `init` in front of it.
+fn context_window(per_model: &[ModelUsage], model: Option<&str>) -> Option<u64> {
+    let named = model.and_then(|m| per_model.iter().find(|e| e.model == m));
+    let lone = match per_model {
+        [only] => Some(only),
+        _ => None,
+    };
+
+    named.or(lone)?.context_window
+}
+
+/// `total_cost_usd` and the context window are siblings of `usage` on the wire
+/// rather than members, so both arrive separately.
+///
+/// Claude Code reports no rate limits here, and folds thinking tokens into
+/// `output_tokens`.
+fn map_usage(
+    wire: &parser::Usage,
+    cost_usd: Option<f64>,
+    per_model: Vec<ModelUsage>,
+    window: Option<u64>,
+) -> Usage {
+    // The four counts are disjoint slices of one prompt — fresh input, what was
+    // written to cache, what was read back from it, and the reply — so their sum
+    // is what the next turn starts from. Checked against a compaction's own
+    // accounting: 31870 here against its `pre_tokens` of 31872.
+    let used = wire.input_tokens
+        + wire.cache_creation_input_tokens
+        + wire.cache_read_input_tokens
+        + wire.output_tokens;
+
     Usage {
         input_tokens: Some(wire.input_tokens),
         output_tokens: Some(wire.output_tokens),
@@ -684,9 +771,21 @@ fn map_usage(wire: &parser::Usage, cost_usd: Option<f64>) -> Usage {
         reasoning_tokens: None,
         total_tokens: Some(wire.input_tokens + wire.output_tokens),
         cost_usd,
-        context_window: None,
+        // Zero used means the turn ran no inference of its own — the `result`
+        // closing a compaction is the case, and it arrives *after* the boundary
+        // — and zero is not an occupancy reading. Dropping it here leaves every
+        // consumer a plain "latest wins" instead of making each special-case
+        // the same line.
+        context_window: match (used, window) {
+            (0, _) | (_, None) => None,
+            (used_tokens, Some(max_tokens)) => Some(ContextWindow {
+                used_tokens,
+                max_tokens,
+            }),
+        },
         rate_limit: None,
         model: None,
+        per_model,
     }
 }
 
@@ -1217,6 +1316,136 @@ mod tests {
             .filter(|event| matches!(event.payload, AgentEventPayload::UserMessage { .. }))
             .count();
         assert_eq!(prompts, 0, "this app mints its own user events");
+    }
+
+    /// The gauge's whole input, checked end to end on the one capture that
+    /// exercises both halves: a turn's occupancy climbs, the compaction's
+    /// `post_tokens` resets it, and the zeroed `result` that lands *after* the
+    /// boundary reports no window at all rather than blanking it back to 0/200k.
+    #[test]
+    fn context_occupancy_tracks_a_compaction() {
+        let fixture = include_str!("fixtures/compaction.jsonl");
+        let mut mapper = Mapper::default();
+        let mut windows = Vec::new();
+
+        for line in fixture.lines().filter(|line| !line.trim().is_empty()) {
+            let Ok(Some(event)) = mapper.map(parser::parse_line(line).unwrap()) else {
+                continue;
+            };
+
+            if let AgentEventPayload::TurnCompleted {
+                usage: Some(usage), ..
+            } = event.payload
+            {
+                windows.push(usage.context_window);
+            }
+        }
+
+        // The second is what the compaction then reported as `pre_tokens`
+        // (31872), reached by summing the four disjoint counts.
+        assert_eq!(
+            windows,
+            vec![
+                Some(ContextWindow {
+                    used_tokens: 31307,
+                    max_tokens: 200_000
+                }),
+                Some(ContextWindow {
+                    used_tokens: 31870,
+                    max_tokens: 200_000
+                }),
+                None,
+            ]
+        );
+    }
+
+    /// A window keyed by a model this session never ran is not this session's
+    /// window. Only reachable with a subagent on a second model, which no
+    /// capture has — so it is pinned by hand.
+    #[test]
+    fn a_context_window_for_another_model_is_ignored() {
+        let per_model = map_model_usage(&serde_json::json!({
+            "claude-opus-4-6-20260115": { "contextWindow": 1_000_000 },
+            "claude-haiku-4-5-20251001": { "contextWindow": 200_000 },
+        }));
+
+        assert_eq!(
+            context_window(&per_model, Some("claude-haiku-4-5-20251001")),
+            Some(200_000)
+        );
+        // No `init` seen and more than one candidate: guessing is worse than a
+        // gauge that stays hidden until the next turn names its model.
+        assert_eq!(context_window(&per_model, None), None);
+        assert_eq!(context_window(&[], None), None);
+    }
+
+    /// What a usage page will read back. `result.usage` describes a turn's *last
+    /// message* — 239 and 485 output tokens across this session's two turns —
+    /// while the model actually produced 4682, so this map is the only record of
+    /// real consumption and the only thing a per-turn figure can be differenced
+    /// out of.
+    #[test]
+    fn per_model_usage_is_cumulative_and_survives_into_the_event() {
+        let fixture = include_str!("fixtures/complex.jsonl");
+        let mut mapper = Mapper::default();
+        let mut per_turn = Vec::new();
+
+        for line in fixture.lines().filter(|line| !line.trim().is_empty()) {
+            let Ok(Some(event)) = mapper.map(parser::parse_line(line).unwrap()) else {
+                continue;
+            };
+
+            if let AgentEventPayload::TurnCompleted {
+                usage: Some(usage), ..
+            } = event.payload
+            {
+                per_turn.push((usage.output_tokens, usage.per_model));
+            }
+        }
+
+        let [(first_msg, first), (second_msg, second)] = per_turn.as_slice() else {
+            panic!("expected two turns, got {}", per_turn.len());
+        };
+
+        assert_eq!((*first_msg, *second_msg), (Some(239), Some(485)));
+
+        for cumulative in [first, second] {
+            assert!(matches!(
+                cumulative.as_slice(),
+                [ModelUsage {
+                    model,
+                    output_tokens: Some(4682),
+                    cached_input_tokens: Some(339_010),
+                    cost_usd: Some(_),
+                    context_window: Some(200_000),
+                    max_output_tokens: Some(32_000),
+                    ..
+                }] if model == "claude-haiku-4-5-20251001"
+            ));
+        }
+    }
+
+    /// A field that changes type must cost that field and nothing else — this
+    /// rides `turn_completed`, and a `result` that fails to parse leaves the
+    /// session stuck on `in_progress`.
+    #[test]
+    fn an_unfamiliar_model_usage_shape_costs_one_field() {
+        let per_model = map_model_usage(&serde_json::json!({
+            "some-model": { "contextWindow": "200k", "outputTokens": 12 },
+        }));
+
+        assert!(matches!(
+            per_model.as_slice(),
+            [ModelUsage {
+                context_window: None,
+                output_tokens: Some(12),
+                ..
+            }]
+        ));
+
+        // Not a map at all, which is what an interrupted turn's `{}` degrades to
+        // if the CLI ever sends something else there.
+        assert!(map_model_usage(&Value::Null).is_empty());
     }
 
     /// `requesting` opens every turn on the same channel that reports

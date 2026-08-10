@@ -203,6 +203,32 @@ efforts: Array<Effort>, defaultEffort: Effort | null, };
 export type ModelId = "opus" | "sonnet" | "haiku" | "unknown";
 
 /**
+ * What one model has consumed **for the session so far** — cumulative and
+ * monotonic across turns, not a per-turn figure.
+ *
+ * That is the whole reason it is carried and persisted. [`Usage`]'s own counts
+ * describe a turn's *last message* rather than the turn (which is what makes
+ * them a context reading), so nothing else in the log can say what a turn
+ * actually burned. Here it is the difference between consecutive readings.
+ *
+ * Every field is optional and the harness's own map is left untyped upstream:
+ * this rides `turn_completed`, and a `result` line that fails to parse strands
+ * the session on `in_progress`. A shape we don't recognize must cost this
+ * struct a field, never the line.
+ */
+export type ModelUsage = { 
+/**
+ * The harness's own key — a dated id (`claude-haiku-4-5-20251001`), not the
+ * alias a session was started with.
+ */
+model: string, inputTokens: number | null, outputTokens: number | null, cachedInputTokens: number | null, cacheWriteTokens: number | null, webSearchRequests: number | null, costUsd: number | null, 
+/**
+ * This model's context window. Also what the composer's gauge measures
+ * against — see `context_window` in the Claude Code mapper.
+ */
+contextWindow: number | null, maxOutputTokens: number | null, };
+
+/**
  * What the CLI *reports* in `system/init`, which is a wider set than it
  * accepts: `default` names the harness's own prompting stance, and
  * `--permission-mode` rejects that name while offering `manual` for the same
@@ -403,4 +429,9 @@ export type Usage = { inputTokens: number | null, outputTokens: number | null, c
  * Broken out only by harnesses that report it separately; others fold
  * thinking tokens into `output_tokens`.
  */
-reasoningTokens: number | null, totalTokens: number | null, costUsd: number | null, contextWindow: ContextWindow | null, rateLimit: RateLimit | null, model: string | null, };
+reasoningTokens: number | null, totalTokens: number | null, costUsd: number | null, contextWindow: ContextWindow | null, rateLimit: RateLimit | null, model: string | null, 
+/**
+ * Session-cumulative consumption, split by model. Empty on every harness
+ * and every event that doesn't report one. See [`ModelUsage`].
+ */
+perModel: Array<ModelUsage>, };

@@ -2,6 +2,7 @@ import { Plus } from "lucide-react";
 
 import BranchSelector from "@/components/composer/BranchSelector";
 import BranchSwitchDialog from "@/components/composer/BranchSwitchDialog";
+import ContextMeter from "@/components/composer/ContextMeter";
 import ModelSelector from "@/components/composer/ModelSelector";
 import PermissionSelector from "@/components/composer/PermissionSelector";
 import ProjectSelector from "@/components/composer/ProjectSelector";
@@ -42,6 +43,11 @@ export type ComposerToolbarProps = {
   useWorktree: boolean;
   onToggleWorktree: () => void;
 
+  /// How full the model's context is, or `null` before any turn has reported
+  /// it. Sits at the far end of the row rather than among the pickers: it
+  /// reports rather than sets, and nothing here changes it.
+  contextUsage: { used: number; max: number } | null;
+
   /// Where the session runs is fixed at creation, so the last three controls
   /// only exist before one starts.
   isNewSession: boolean;
@@ -71,6 +77,7 @@ export default function ComposerToolbar({
   onCancelBranchSwitch,
   useWorktree,
   onToggleWorktree,
+  contextUsage,
   isNewSession,
 }: ComposerToolbarProps) {
   return (
@@ -140,6 +147,14 @@ export default function ComposerToolbar({
             </>
           )}
         </>
+      )}
+
+      {/* `ml-auto` rather than a spacer, so a long branch name still gets the
+          whole middle of the row and this stays pinned to the right edge. */}
+      {contextUsage && (
+        <div className="ml-auto">
+          <ContextMeter used={contextUsage.used} max={contextUsage.max} />
+        </div>
       )}
     </div>
   );

@@ -42,6 +42,7 @@ function App() {
     busy,
     backgroundTasks,
     compacting,
+    contextUsage,
     error,
     setError,
     handleModelChange,
@@ -198,6 +199,7 @@ function App() {
               onCancelBranchSwitch={() => setPendingBranch(null)}
               useWorktree={useWorktree}
               onToggleWorktree={() => setUseWorktree((v) => !v)}
+              contextUsage={contextUsage}
               isNewSession={!selectedSessionId}
             />
           }

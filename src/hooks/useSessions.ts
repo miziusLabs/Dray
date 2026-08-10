@@ -615,6 +615,47 @@ const compacting: boolean = (() => {
   return false;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
+// How full the model's context is. Derived from the log rather than tracked,
+// because both things that move it are already persisted there — a turn's own
+// occupancy, and what a compaction left behind.
+//
+// The two counts are collected independently because they arrive on different
+// events: a compaction reports what it kept but not how large the window is,
+// and the turn before it does the reverse. Not gated on `busy` like the two
+// above — occupancy is a fact about the conversation, not about a live run, so
+// a settled session's last reading is still the right one.
+const contextUsage: { used: number; max: number } | null = (() => {
+  if (!selectedSession) return null;
+
+  let used: number | null = null;
+  let usedSettled = false;
+  let max: number | null = null;
+  const events = selectedSession.events;
+
+  for (let i = events.length - 1; i >= 0 && !(usedSettled && max !== null); i--) {
+    const p = events[i].payload;
+
+    if (p.type === "context_compacted") {
+      // Settles `used` whether or not it carried a count. Everything before it
+      // left the window, so an earlier turn's figure isn't a fallback here —
+      // it's the wrong answer, and a high one.
+      if (!usedSettled) {
+        used = p.postTokens;
+        usedSettled = true;
+      }
+    } else if (p.type === "turn_completed" && p.usage?.contextWindow) {
+      const w = p.usage.contextWindow;
+      if (!usedSettled) {
+        used = w.usedTokens;
+        usedSettled = true;
+      }
+      max ??= w.maxTokens;
+    }
+  }
+
+  return used !== null && max !== null ? { used, max } : null;
+})();
+
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
 
 }
