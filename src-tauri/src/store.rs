@@ -500,6 +500,65 @@ pub async fn append_session_event(session_id: &str, event: AgentEvent) -> Result
     Ok(())
 }
 
+/// One unreadable line, kept for investigation.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParseFailure {
+    pub ts: String,
+    pub session_id: String,
+    /// Which stage gave up: `parse` (no variant matched the wire), `map` (the
+    /// mapper errored), or `unknown_subtype` (parsed only by a catch-all).
+    pub stage: String,
+    pub detail: String,
+    /// The raw line, whole. Truncating it would cost exactly the context these
+    /// records exist to provide.
+    pub raw: String,
+}
+
+static FAILURES_LOCK: Mutex<()> = Mutex::const_new(());
+
+/// Records a line the harness layer could not turn into an event.
+///
+/// One file for the whole app, not one per session: these describe how well
+/// this build covers the wire format, which is a property of the build rather
+/// than of any conversation — and hunting a coverage gap across N session logs
+/// is the thing that makes it never get done. Deliberately kept out of the
+/// session `.jsonl`, whose contract is the normalized event model.
+///
+/// Unlike a session log this file has many concurrent writers, so it takes a
+/// lock: a raw line can exceed the size the OS appends atomically, and two
+/// sessions failing at once would interleave into unparseable records.
+pub async fn record_parse_failure(
+    session_id: &str,
+    stage: &str,
+    detail: &str,
+    raw: &str,
+) -> Result<()> {
+    let failure = ParseFailure {
+        ts: now_rfc3339(),
+        session_id: session_id.to_string(),
+        stage: stage.to_string(),
+        detail: detail.to_string(),
+        raw: raw.to_string(),
+    };
+
+    let path = get_home_app_dir().await?.join("parse_failures.jsonl");
+    let line = format!("{}\n", serde_json::to_string(&failure)?);
+
+    let _guard = FAILURES_LOCK.lock().await;
+
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await
+        .context("failed to open parse failure log")?;
+
+    file.write_all(line.as_bytes()).await?;
+
+    Ok(())
+}
+
 /// Tail-reads the log's last line to continue its `seq` counter on resume.
 pub async fn next_seq_by_session_id(session_id: &str) -> Result<u64> {
     let path = get_session_path(session_id).await?;

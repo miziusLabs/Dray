@@ -74,6 +74,20 @@ pub struct RateLimitInfo {
     pub is_using_overage: Option<bool>,
 }
 
+impl RateLimitInfo {
+    /// Whether this is worth surfacing. The CLI reports the limit on roughly
+    /// every turn, almost always to say everything is fine, so emitting each
+    /// one would bury the report that matters.
+    ///
+    /// Written as "not the known-good state" rather than as a list of bad
+    /// statuses: `allowed` is the only value any capture contains, so an
+    /// unrecognized status — or a missing one — surfaces instead of being
+    /// silently treated as healthy.
+    pub fn is_noteworthy(&self) -> bool {
+        self.is_using_overage.unwrap_or(false) || self.status.as_deref() != Some("allowed")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
 pub enum SystemEvent {

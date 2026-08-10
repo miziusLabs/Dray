@@ -12,6 +12,36 @@ export function relativeTime(iso: string): string {
   return new Date(then).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/// A future clock time, qualified by day only when it needs to be.
+///
+/// A five-hour limit usually resets later today, where a bare time reads
+/// fastest. But hit one late in the evening and it rolls over past midnight —
+/// and "resets at 1:00" then means tomorrow, which is the one reading a bare
+/// time gets wrong. Longer windows land days out and get a date outright.
+export function resetTime(iso: string): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return "";
+
+  const time = new Date(at).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  // Compared as calendar days rather than as a 24-hour distance: 11pm to 1am
+  // is two hours away and still needs "tomorrow" on it.
+  const days = daysApart(new Date(), new Date(at));
+  if (days <= 0) return time;
+  if (days === 1) return `${time} tomorrow`;
+
+  const date = new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${time} on ${date}`;
+}
+
+function daysApart(from: Date, to: Date): number {
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((midnight(to) - midnight(from)) / 86_400_000);
+}
+
 /// Trailing path segment, for showing a project as its folder name.
 export function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");

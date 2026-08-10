@@ -5,8 +5,9 @@
 
 use crate::{
     events::{
-        now_rfc3339, AgentEvent, AgentEventPayload, BackgroundTask, BlockRef, BlockType,
-        DeltaEvent, SessionInfo, Settings, Subagent, ToolResult, ToolType, TurnStatus, Usage,
+        now_rfc3339, rfc3339_from_unix, AgentEvent, AgentEventPayload, BackgroundTask, BlockRef,
+        BlockType, DeltaEvent, SessionInfo, Settings, Subagent, ToolResult, ToolType, TurnStatus,
+        Usage,
     },
     harness::{
         claude_code::{
@@ -130,9 +131,26 @@ impl Mapper {
                 Ok(Some(self.build(session_id, None, None, payload)))
             }
 
-            // Parsed but unmapped: `RateLimit` wants RFC3339 where the wire
-            // sends unix seconds, and nothing consumes it yet.
-            ClaudeCodeEvent::RateLimitEvent { .. } => Ok(None),
+            ClaudeCodeEvent::RateLimitEvent {
+                rate_limit_info,
+                session_id,
+                ..
+            } => {
+                if !rate_limit_info.is_noteworthy() {
+                    return Ok(None);
+                }
+
+                let payload = AgentEventPayload::RateLimited {
+                    status: rate_limit_info.status,
+                    resets_at: rate_limit_info.resets_at.map(rfc3339_from_unix),
+                    limit_type: rate_limit_info.rate_limit_type,
+                    overage_status: rate_limit_info.overage_status,
+                    using_overage: rate_limit_info.is_using_overage.unwrap_or(false),
+                    overage_disabled_reason: rate_limit_info.overage_disabled_reason,
+                };
+
+                Ok(Some(self.build(session_id, None, None, payload)))
+            }
 
             // The ack for a control request this app wrote — interrupt,
             // set_model, set_permission_mode. Nothing correlates ids yet.
@@ -196,6 +214,15 @@ impl Mapper {
     fn handle_system_event(&mut self, e: SystemEvent) -> Result<Option<AgentEventPayload>> {
         match e {
             SystemEvent::Init { .. } => Self::handle_init(e).map(Some),
+            // A live counter for the thinking block in flight. Reported as
+            // usage rather than given its own payload: it is the same fact
+            // `result` reports at the end, only sooner and coarser.
+            SystemEvent::ThinkingTokens {
+                estimated_tokens, ..
+            } => Ok(Some(AgentEventPayload::UsageUpdate(Usage {
+                reasoning_tokens: Some(estimated_tokens),
+                ..Default::default()
+            }))),
             SystemEvent::TaskStarted { .. }
             | SystemEvent::TaskProgress { .. }
             | SystemEvent::TaskNotification { .. } => Self::handle_task(e).map(Some),
@@ -1054,6 +1081,72 @@ mod tests {
                 ..
             } if reason == "aborted_streaming"
         )));
+    }
+
+    /// The healthy report arrives on roughly every turn and must stay silent;
+    /// anything else has to reach the user. The unknown-status case is the
+    /// point of the inverted check — a status this build has never seen is
+    /// far more likely to be bad news than routine.
+    #[test]
+    fn emits_only_actionable_rate_limits() {
+        let event = |info: &str| {
+            let line = format!(
+                r#"{{"type":"rate_limit_event","rate_limit_info":{info},"uuid":"u","session_id":"s"}}"#
+            );
+            Mapper::default().map(parser::parse_line(&line).unwrap()).unwrap()
+        };
+
+        assert!(
+            event(r#"{"status":"allowed","isUsingOverage":false}"#).is_none(),
+            "the steady state must not reach the transcript"
+        );
+
+        // Healthy status, but the user is paying per request — worth saying.
+        assert!(event(r#"{"status":"allowed","isUsingOverage":true}"#).is_some());
+        assert!(event(r#"{"status":"rejected"}"#).is_some());
+        assert!(event(r#"{"status":"some_future_status"}"#).is_some());
+        assert!(event("{}").is_some(), "a missing status is not a healthy one");
+
+        let payload = event(
+            r#"{"status":"rejected","resetsAt":1785494400,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false}"#,
+        )
+        .expect("a rejected limit is actionable")
+        .payload;
+
+        // The wire sends unix seconds; everything downstream reads RFC3339.
+        assert!(matches!(
+            payload,
+            AgentEventPayload::RateLimited {
+                resets_at: Some(ref at),
+                limit_type: Some(ref kind),
+                overage_status: Some(ref overage),
+                using_overage: false,
+                ..
+            } if at == "2026-07-31T10:40:00.000Z"
+                && kind == "five_hour"
+                && overage == "rejected"
+        ));
+    }
+
+    /// A thinking-token estimate is a running counter for the block in flight,
+    /// so it maps to usage rather than to a payload of its own.
+    #[test]
+    fn maps_thinking_token_estimates_to_usage() {
+        let line = r#"{"type":"system","subtype":"thinking_tokens","estimated_tokens":42,"estimated_tokens_delta":3,"uuid":"u","session_id":"s"}"#;
+
+        let payload = Mapper::default()
+            .map(parser::parse_line(line).unwrap())
+            .unwrap()
+            .expect("a token estimate is an event")
+            .payload;
+
+        assert!(matches!(
+            payload,
+            AgentEventPayload::UsageUpdate(Usage {
+                reasoning_tokens: Some(42),
+                ..
+            })
+        ));
     }
 
     /// The wire is snake_case and every `Usage` field is `Option`, so a plain

@@ -57,7 +57,34 @@ rawInput: string | null, title: string | null, } | { "type": "tool_call_complete
  * progress event, so it drives a live status line without expanding
  * the subagent's own events.
  */
-description: string | null, lastTool: string | null, usage: Usage | null, } | { "type": "subagent_completed", agentId: string, status: string, summary: string | null, usage: Usage | null, } | { "type": "background_tasks_changed", tasks: Array<BackgroundTask>, } | { "type": "usage_update" } & Usage | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compacted", message: string | null, windowNumber: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
+description: string | null, lastTool: string | null, usage: Usage | null, } | { "type": "subagent_completed", agentId: string, status: string, summary: string | null, usage: Usage | null, } | { "type": "background_tasks_changed", tasks: Array<BackgroundTask>, } | { "type": "usage_update" } & Usage | { "type": "rate_limited", 
+/**
+ * `allowed` is the steady state and never reaches here.
+ */
+status: string | null, 
+/**
+ * When the window rolls over, RFC3339 — converted from the unix
+ * seconds the wire sends.
+ */
+resetsAt: string | null, 
+/**
+ * Which window. `five_hour` observed, and at least one longer window
+ * is believed to exist; not branched on anywhere.
+ */
+limitType: string | null, 
+/**
+ * Whether overage is available, which is what separates "blocked
+ * until it resets" from "still working, now billed as usage".
+ */
+overageStatus: string | null, 
+/**
+ * Requests are already being billed as usage rather than covered.
+ */
+usingOverage: boolean, 
+/**
+ * Why overage isn't available — `org_level_disabled` observed.
+ */
+overageDisabledReason: string | null, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compacted", message: string | null, windowNumber: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
 
 /**
  * Permission stance a session *runs under*, in roughly increasing order of

@@ -2,7 +2,7 @@ use crate::events::{AgentEvent, AgentEventPayload, ApprovalPolicy};
 use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::models::{Effort, Model};
 use crate::session::{publish_status, Session, StatusTracker};
-use crate::store::{append_session_event, next_seq_by_session_id};
+use crate::store::{self, append_session_event, next_seq_by_session_id};
 use anyhow::{Context, Result};
 use std::process::Stdio;
 use std::sync::atomic::AtomicU64;
@@ -158,16 +158,23 @@ async fn read_stdout(
         let claude_event = match parser::parse_line(&line) {
             Ok(ev) => ev,
             Err(err) => {
-                eprintln!("[claude parse err] {err}\n[parse err] raw line: {line}");
+                record_failure(session_id, "parse", &err.to_string(), &line).await;
                 continue;
             }
         };
+
+        // Parsed, but only by a catch-all — the line is a subtype this build
+        // has never seen. Recorded alongside outright failures because it is
+        // the same coverage gap; the catch-all only stops it costing the line.
+        if let ClaudeCodeEvent::System(parser::SystemEvent::Unrecognized) = &claude_event {
+            record_failure(session_id, "unknown_subtype", "unmodeled system subtype", &line).await;
+        }
 
         let agent_event = match mapper.map(claude_event) {
             Ok(Some(ev)) => ev,
             Ok(None) => continue,
             Err(err) => {
-                eprintln!("[claude map err] {err}");
+                record_failure(session_id, "map", &err.to_string(), &line).await;
                 continue;
             }
         };
@@ -180,8 +187,14 @@ async fn read_stdout(
             publish_status(session_id, next, app).await;
         }
 
-        // Deltas are emitted for the live view but never retained
-        if matches!(agent_event.payload, AgentEventPayload::Delta(_)) {
+        // Live-view only, never retained. Deltas are superseded by the
+        // committed event; a usage update is a running counter whose final
+        // value lands on `turn_completed` — and `thinking_tokens` alone fires
+        // dozens of times per turn, which would be most of a session's log.
+        if matches!(
+            agent_event.payload,
+            AgentEventPayload::Delta(_) | AgentEventPayload::UsageUpdate(_)
+        ) {
             continue;
         }
 
@@ -193,6 +206,16 @@ async fn read_stdout(
     }
 
     Ok(())
+}
+
+/// Logs an unreadable line and files it for investigation. Failing to *record*
+/// a failure is itself only logged: the read loop must survive anything.
+async fn record_failure(session_id: &str, stage: &str, detail: &str, raw: &str) {
+    eprintln!("[claude {stage} err] {detail}\n[{stage} err] raw line: {raw}");
+
+    if let Err(err) = store::record_parse_failure(session_id, stage, detail, raw).await {
+        eprintln!("[claude failure log err] {err}");
+    }
 }
 
 /// Copies the child's stderr to this process's, for logging only.

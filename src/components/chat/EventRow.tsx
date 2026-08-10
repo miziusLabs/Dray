@@ -1,10 +1,11 @@
-import { Archive, TriangleAlert } from "lucide-react";
+import { Archive, CircleAlert, CircleDollarSign, TriangleAlert } from "lucide-react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import Reasoning from "@/components/chat/Reasoning";
 import ToolCall from "@/components/chat/ToolCall";
 import UserMessage from "@/components/chat/UserMessage";
 import FileEdits from "@/components/chat/FileEdits";
+import { resetTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { AgentEvent, ToolResult } from "@/types/events";
 
@@ -13,20 +14,26 @@ function Notice({
   icon: Icon,
   children,
   tone = "muted",
+  wrap = false,
 }: {
   icon: typeof Archive;
   children: React.ReactNode;
   tone?: "muted" | "destructive";
+  /// Lets the text run onto a second line. Off by default — most notices are
+  /// context the reader skims — but on where every word carries information the
+  /// reader has to act on, and a clipped tail would hide it.
+  wrap?: boolean;
 }) {
   return (
     <p
       className={cn(
-        "flex items-center gap-2 text-chat",
+        "flex gap-2 text-chat",
+        wrap ? "items-start" : "items-center",
         tone === "destructive" ? "text-destructive" : "text-muted-foreground/70",
       )}
     >
-      <Icon className="size-3.5 shrink-0" />
-      <span className="truncate">{children}</span>
+      <Icon className={cn("size-3.5 shrink-0", wrap && "mt-[0.2em]")} />
+      <span className={wrap ? "min-w-0" : "truncate"}>{children}</span>
     </p>
   );
 }
@@ -99,6 +106,30 @@ export default function EventRow({
           Turn failed{payload.stopReason ? ` — ${payload.stopReason}` : ""}
         </Notice>
       );
+
+    case "rate_limited": {
+      // Only actionable reports reach here — the mapper drops the healthy ones
+      // — so anything that arrives is worth a line. Overage in use is the
+      // softer case: work continues, but the bill moves to usage.
+      const resets = payload.resetsAt ? resetTime(payload.resetsAt) : "";
+      const suffix = resets ? ` Resets ${resets}.` : "";
+
+      if (payload.usingOverage) {
+        return (
+          <Notice icon={CircleDollarSign} wrap>
+            Plan limit reached — now billed as usage.{suffix}
+          </Notice>
+        );
+      }
+
+      return (
+        <Notice icon={CircleAlert} tone="destructive" wrap>
+          Usage limit reached.{suffix}
+          {payload.overageDisabledReason === "org_level_disabled" &&
+            " Your organization has overage turned off."}
+        </Notice>
+      );
+    }
 
     case "context_compacted":
       return (

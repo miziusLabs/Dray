@@ -78,6 +78,7 @@ const RENDERS = new Set([
   "file_edits",
   "error",
   "context_compacted",
+  "rate_limited",
 ]);
 
 /// Whether an item draws a row. A group always does — it is built from tool

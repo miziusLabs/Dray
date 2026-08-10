@@ -197,6 +197,32 @@ pub enum AgentEventPayload {
     /// Debounce these in the mapper: harnesses emit token counts far more often
     /// than the figures meaningfully change.
     UsageUpdate(Usage),
+    /// The plan's usage limit, emitted **only when there is something to act
+    /// on** — the limit is reached, or requests have moved to usage billing. A
+    /// session running comfortably under its limit reports the fact constantly
+    /// and produces none of these.
+    ///
+    /// The status vocabulary is only partly known (`allowed` is the one value
+    /// captured), so the wire's own strings are carried through rather than
+    /// collapsed into a boolean the mapper would have to guess at.
+    RateLimited {
+        /// `allowed` is the steady state and never reaches here.
+        status: Option<String>,
+        /// When the window rolls over, RFC3339 — converted from the unix
+        /// seconds the wire sends.
+        resets_at: Option<String>,
+        /// Which window. `five_hour` observed, and at least one longer window
+        /// is believed to exist; not branched on anywhere.
+        limit_type: Option<String>,
+        /// Whether overage is available, which is what separates "blocked
+        /// until it resets" from "still working, now billed as usage".
+        overage_status: Option<String>,
+        /// Requests are already being billed as usage rather than covered.
+        #[serde(default)]
+        using_overage: bool,
+        /// Why overage isn't available — `org_level_disabled` observed.
+        overage_disabled_reason: Option<String>,
+    },
     Hook {
         name: String,
         event: String,
@@ -502,9 +528,17 @@ pub fn now_rfc3339() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    let secs = now.as_secs() as i64;
-    let millis = now.subsec_millis();
 
+    rfc3339(now.as_secs() as i64, now.subsec_millis())
+}
+
+/// Unix seconds → RFC3339, for wire fields carrying an epoch timestamp where
+/// this model uses strings — Claude Code's `resetsAt`, notably.
+pub fn rfc3339_from_unix(secs: i64) -> String {
+    rfc3339(secs, 0)
+}
+
+fn rfc3339(secs: i64, millis: u32) -> String {
     // Days since epoch → civil date, per Howard Hinnant's algorithm.
     let days = secs.div_euclid(86_400);
     let secs_of_day = secs.rem_euclid(86_400);
