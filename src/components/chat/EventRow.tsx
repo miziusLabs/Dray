@@ -179,11 +179,13 @@ export default function EventRow({
     // Drives the live indicator, not a row — the compaction it opens draws its
     // own line when it closes.
     case "context_compaction_started":
-    // Both halves of a permission live outside the turn stack: `Chat` renders
-    // the open ones below the transcript, where a subagent's request has
-    // somewhere to go and a main-thread one can't be buried in a turn that
-    // collapses. A settled one draws nothing anywhere.
+    // Every held request lives outside the turn stack: `Chat` renders the open
+    // ones below the transcript, where a subagent's request has somewhere to go
+    // and a main-thread one can't be buried in a turn that collapses. A settled
+    // one draws nothing anywhere — for a question because the `AskUserQuestion`
+    // row underneath reports what was answered.
     case "permission_requested":
+    case "questions_asked":
     case "permission_decided":
       return null;
 

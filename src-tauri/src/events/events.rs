@@ -269,6 +269,24 @@ pub enum AgentEventPayload {
         agent_id: Option<String>,
         options: Vec<PermissionOption>,
     },
+    /// The agent asking the user something in its own words. Blocks the harness
+    /// exactly like a [`PermissionRequested`](Self::PermissionRequested), shares
+    /// its `request_id` space, and is retired by the same
+    /// [`PermissionDecided`](Self::PermissionDecided) — it arrives on the same
+    /// wire channel, and only what the user is shown differs.
+    ///
+    /// What differs is that there is no allow/deny in it. The call may always
+    /// run; the answer *is* the reply. So this payload carries no `options`, and
+    /// a consumer that renders it must offer a form rather than buttons —
+    /// approving it with nothing filled in tells the agent it was ignored.
+    QuestionsAsked {
+        request_id: String,
+        /// The `AskUserQuestion` call being held. Its own row is already in the
+        /// transcript and will show the answers once it completes.
+        tool_use_id: String,
+        /// One to four, per the tool's own schema.
+        questions: Vec<Question>,
+    },
     /// How a [`PermissionRequested`](Self::PermissionRequested) was answered.
     /// Minted by the app when it replies, not by the harness — the CLI's own ack
     /// carries nothing worth keeping — so the transcript survives a reload with
@@ -381,6 +399,41 @@ pub enum PermissionOptionKind {
 pub enum PermissionBehavior {
     Allow,
     Deny,
+}
+
+/// One question from a [`QuestionsAsked`](AgentEventPayload::QuestionsAsked).
+///
+/// [`question`](Self::question) is both the prompt and the key its answer is
+/// filed under, so the text has to survive the round trip unchanged — the
+/// harness matches on it verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub struct Question {
+    pub question: String,
+    /// A short chip label for the question — "Indentation", "Auth method".
+    pub header: Option<String>,
+    /// Whether several options may be picked, in which case the answer is one
+    /// comma-separated string rather than a list.
+    pub multi_select: bool,
+    /// Two to four, per the tool's own schema. Never exhaustive: the harness
+    /// promises the user a free-text box alongside them, and instructs the model
+    /// not to offer an "Other" option because of it — so a renderer that shows
+    /// only these takes an answer away.
+    pub options: Vec<QuestionOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionOption {
+    /// What the user picks, and what travels back as the answer — the harness
+    /// has no option ids, so the label is the value.
+    pub label: String,
+    pub description: Option<String>,
+    /// Markdown the harness expects shown in a monospace box. Single-select
+    /// questions only.
+    pub preview: Option<String>,
 }
 
 /// One outstanding background task. The harness's wire shape is snake_case, so

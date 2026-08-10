@@ -127,7 +127,16 @@ decisionReasonType: string | null,
  * with that row filed away in a panel, so the card has to carry the
  * arguments itself or it asks about something invisible.
  */
-agentId: string | null, options: Array<PermissionOption>, } | { "type": "permission_decided", requestId: string, toolUseId: string, behavior: PermissionBehavior, 
+agentId: string | null, options: Array<PermissionOption>, } | { "type": "questions_asked", requestId: string, 
+/**
+ * The `AskUserQuestion` call being held. Its own row is already in the
+ * transcript and will show the answers once it completes.
+ */
+toolUseId: string, 
+/**
+ * One to four, per the tool's own schema.
+ */
+questions: Array<Question>, } | { "type": "permission_decided", requestId: string, toolUseId: string, behavior: PermissionBehavior, 
 /**
  * The chosen option's label, so the transcript reads back as what the
  * user actually picked rather than a bare allow/deny.
@@ -342,6 +351,43 @@ name: string,
  * `last_selected` pointer would be a second place to keep the same fact.
  */
 lastSelected: string, };
+
+/**
+ * One question from a [`QuestionsAsked`](AgentEventPayload::QuestionsAsked).
+ *
+ * [`question`](Self::question) is both the prompt and the key its answer is
+ * filed under, so the text has to survive the round trip unchanged — the
+ * harness matches on it verbatim.
+ */
+export type Question = { question: string, 
+/**
+ * A short chip label for the question — "Indentation", "Auth method".
+ */
+header: string | null, 
+/**
+ * Whether several options may be picked, in which case the answer is one
+ * comma-separated string rather than a list.
+ */
+multiSelect: boolean, 
+/**
+ * Two to four, per the tool's own schema. Never exhaustive: the harness
+ * promises the user a free-text box alongside them, and instructs the model
+ * not to offer an "Other" option because of it — so a renderer that shows
+ * only these takes an answer away.
+ */
+options: Array<QuestionOption>, };
+
+export type QuestionOption = { 
+/**
+ * What the user picks, and what travels back as the answer — the harness
+ * has no option ids, so the label is the value.
+ */
+label: string, description: string | null, 
+/**
+ * Markdown the harness expects shown in a monospace box. Single-select
+ * questions only.
+ */
+preview: string | null, };
 
 export type RateLimit = { usedPercent: number | null, windowMinutes: number | null, 
 /**

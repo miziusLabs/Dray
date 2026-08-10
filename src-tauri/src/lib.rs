@@ -6,6 +6,7 @@ use crate::{
     session::{Harness, SessionManager},
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot, SessionStatus},
 };
+use std::collections::HashMap;
 use tauri::{AppHandle, State};
 
 pub mod binpath;
@@ -174,6 +175,24 @@ async fn respond_permission(
         .map_err(|e| e.to_string())
 }
 
+/// Answers the questions on a `questions_asked` event. `answers` is keyed by
+/// each question's verbatim text — the CLI matches on the string — and a
+/// question left out of it is one the user skipped, which is a real answer
+/// rather than a refusal.
+#[tauri::command]
+async fn answer_questions(
+    session_id: &str,
+    request_id: &str,
+    answers: HashMap<String, String>,
+    manager: State<'_, SessionManager>,
+    app: AppHandle,
+) -> Result<(), String> {
+    manager
+        .answer_questions(session_id, request_id, answers, &app)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Clears a finished session's unread mark. The frontend calls this when the
 /// user views the session; a `completed` badge is "finished and unread", so
 /// reading is what retires it. Returns the status as written, `None` when
@@ -222,6 +241,7 @@ pub fn run() {
             mark_session_idle,
             interrupt_session,
             respond_permission,
+            answer_questions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

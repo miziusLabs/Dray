@@ -133,6 +133,51 @@ pub struct PermissionRequest {
     pub agent_id: Option<String>,
 }
 
+/// The name the CLI gives its own question-asking tool. It arrives as an
+/// ordinary `can_use_tool` request and there is no channel of its own: the CLI's
+/// `request_user_dialog` subtype exists but is gated on a `supportedDialogKinds`
+/// handshake this app doesn't do, and no dialog kind covers questions anyway.
+pub const ASK_USER_QUESTION: &str = "AskUserQuestion";
+
+/// The `AskUserQuestion` tool's arguments, read out of
+/// [`PermissionRequest::input`] when the tool name matches.
+///
+/// The answer travels back the same way: an *allow* whose `updatedInput` is this
+/// object with an `answers` map added, keyed by each question's own text. So the
+/// question is never whether the call may run — it always may — but what it
+/// should return. Allowing without answers is what produces the CLI's "The user
+/// did not answer the questions."
+#[derive(Debug, Clone, Deserialize)]
+pub struct AskUserQuestionInput {
+    pub questions: Vec<AskQuestion>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskQuestion {
+    /// The full question, and the key its answer is filed under.
+    pub question: String,
+    /// A short chip label — "Indentation", "Auth method".
+    #[serde(default)]
+    pub header: Option<String>,
+    /// Whether several options may be picked. A multi-select answer is one
+    /// comma-separated string, not a list.
+    #[serde(default)]
+    pub multi_select: bool,
+    pub options: Vec<AskOption>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AskOption {
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Markdown the CLI expects rendered in a monospace box. Only ever set on
+    /// single-select questions.
+    #[serde(default)]
+    pub preview: Option<String>,
+}
+
 /// A change to the session's permission state, applied by sending it back on the
 /// decision. Camel-cased on the wire — this is SDK-facing rather than
 /// transcript-facing, and the two halves of the CLI disagree on case.

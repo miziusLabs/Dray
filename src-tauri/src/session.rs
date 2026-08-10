@@ -1,10 +1,10 @@
 use crate::{
-    events::{now_rfc3339, AgentEvent, AgentEventPayload, ApprovalPolicy},
+    events::{now_rfc3339, AgentEvent, AgentEventPayload, ApprovalPolicy, PermissionBehavior},
     git,
     harness::{
         claude_code::{
             self,
-            permissions::{decision_response, PendingPermissions},
+            permissions::{answer_response, decision_response, PendingPermissions},
         },
         Harness::ClaudeCode,
     },
@@ -326,6 +326,23 @@ impl SessionManager {
         session.respond_permission(request_id, option_id, app).await
     }
 
+    /// Answers an `AskUserQuestion`. Fails for a dead child like
+    /// [`respond_permission`](Self::respond_permission) does, and for the same
+    /// reason: only the process that asked can be told.
+    pub async fn answer_questions(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        answers: HashMap<String, String>,
+        app: &AppHandle,
+    ) -> Result<()> {
+        let mut sessions_guard = self.sessions.lock().await;
+        let Some(session) = sessions_guard.get_mut(session_id) else {
+            bail!("no running session {session_id}");
+        };
+        session.answer_questions(request_id, answers, app).await
+    }
+
     /// Clears a finished session's unread mark: `Completed` → `Idle`, anything
     /// else untouched. Returns the status as written, `None` for no change.
     ///
@@ -551,6 +568,65 @@ impl Session {
         // Emitted, never persisted — it exists to retire the request's card, and
         // the request itself is not persisted either. Still numbered through the
         // shared counter so the live transcript orders it correctly.
+        let decision = AgentEvent {
+            id: Uuid::now_v7().to_string(),
+            session_id: self.id.clone(),
+            harness: ClaudeCode,
+            seq: self.seq.fetch_add(1, Relaxed),
+            ts: now_rfc3339(),
+            turn_id: None,
+            subagent: None,
+            payload,
+            raw: None,
+        };
+
+        app.emit("agent_event", &decision)?;
+
+        Ok(())
+    }
+
+    /// Sends the user's answers back and retires the card.
+    ///
+    /// Single-shot and reply-first for the same reasons as
+    /// [`respond_permission`](Self::respond_permission), and it mints the same
+    /// `PermissionDecided` — the frontend has one way to clear a pending card,
+    /// and giving questions a second one would mean two things to keep in step.
+    /// The verdict is always an allow; the label is what actually happened,
+    /// since no option was picked.
+    ///
+    /// An empty map is a skip, not an error: the harness turns it into "the user
+    /// did not answer", which is the truthful thing to tell the agent.
+    pub async fn answer_questions(
+        &mut self,
+        request_id: &str,
+        answers: HashMap<String, String>,
+        app: &AppHandle,
+    ) -> Result<()> {
+        let pending = {
+            let mut guard = self
+                .pending_permissions
+                .lock()
+                .expect("pending permissions mutex poisoned");
+
+            guard
+                .remove(request_id)
+                .with_context(|| format!("no pending permission request {request_id}"))?
+        };
+
+        write_line(&self.stdin, &answer_response(request_id, &pending, &answers)).await?;
+
+        let payload = AgentEventPayload::PermissionDecided {
+            request_id: request_id.to_string(),
+            tool_use_id: pending.tool_use_id,
+            behavior: PermissionBehavior::Allow,
+            label: if answers.is_empty() {
+                "Skipped".to_string()
+            } else {
+                "Answered".to_string()
+            },
+            automatic: false,
+        };
+
         let decision = AgentEvent {
             id: Uuid::now_v7().to_string(),
             session_id: self.id.clone(),

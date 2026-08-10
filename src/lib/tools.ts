@@ -68,6 +68,7 @@ const TOOL_VERBS: Record<string, Verbs> = {
   Glob: ["Searching", "Searched", "pattern"],
   WebFetch: ["Fetching", "Fetched", "page"],
   WebSearch: ["Searching web", "Searched web", "query"],
+  AskUserQuestion: ["Asking", "Asked", "question"],
 };
 
 /// The label for a single tool-call row. `pending` picks the tense — a live call

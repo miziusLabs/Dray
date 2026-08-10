@@ -57,6 +57,7 @@ function App() {
     handleSendMsg,
     handleInterrupt,
     handleRespondPermission,
+    handleAnswerQuestions,
     handleSelectSessionIndexItem,
     handleNewSession,
     setSessionFlags,
@@ -74,8 +75,10 @@ function App() {
   // The chat derives this too, but the panel and the header count need it here
   // and the memo makes the second pass free.
   const { subagents, resultByCallId } = useMemo(
-    () => buildTranscript(selectedSession?.events ?? []),
-    [selectedSession?.events],
+    // Same `busy` the chat passes. Left off, a subagent's in-flight call would
+    // show in the panel as one that never finished.
+    () => buildTranscript(selectedSession?.events ?? [], busy),
+    [selectedSession?.events, busy],
   );
 
   const openSubagent = (id: string) => {
@@ -214,6 +217,7 @@ function App() {
         }
         onOpenSubagent={openSubagent}
         onRespondPermission={handleRespondPermission}
+        onAnswerQuestions={handleAnswerQuestions}
         busy={busy}
         backgroundTaskCount={backgroundTasks.length}
         compacting={compacting}

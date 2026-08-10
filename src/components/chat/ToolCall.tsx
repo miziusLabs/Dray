@@ -122,8 +122,14 @@ export default function ToolCall({
   // ordinary path.
   const inert = read && range === null;
 
+  // The reader answered this on a card of its own, so its arguments are the
+  // questions and options they just read — reprinting them as JSON tells them
+  // nothing. What survives is the harness's own sentence naming each question
+  // and the answer given, which is prose and reads as prose.
+  const asked = name === "AskUserQuestion" && !rawInput;
+
   const omit = sides ? EDIT_FIELDS : range ? READ_FIELDS : SUMMARY_FIELDS;
-  const body = inert ? null : rawInput ?? formatToolInput(input, omit);
+  const body = inert || asked ? null : rawInput ?? formatToolInput(input, omit);
 
   // A successful edit's result is boilerplate ("The file ... has been updated
   // successfully") that the diff above already demonstrates, and a rendered
@@ -221,18 +227,25 @@ export default function ToolCall({
         </pre>
       )}
 
-      {/* A failure drops the box and reads at the row's own size: an error is
-          the reason to look at the row, so it should not be the smallest text on
-          it. Nothing here is tinted — the red label above already marks the row,
-          and the "Error:" lead-in names the text without a second color
-          repeating what the label said. */}
+      {/* Two results drop the box and read at the row's own size. A failure,
+          because an error is the reason to look at the row and should not be the
+          smallest text on it; an answered question, because the harness writes
+          it as a sentence and a code box would frame prose as output. Neither is
+          tinted — the red label above already marks a failure, and the "Error:"
+          lead-in names the text without a second color repeating it. */}
       {open && shown && (
         <pre
           className={cn(
             "max-h-96 overflow-auto whitespace-pre-wrap",
             failed
               ? "font-mono text-chat text-foreground/90"
-              : "rounded-md bg-surface-raised px-2.5 py-2 font-mono text-tool text-muted-foreground",
+              : asked
+                // Sans too, not just unboxed: this is the only result that is a
+                // written sentence rather than a program's output. Stated, not
+                // omitted — `pre` is monospace by default, so dropping the class
+                // leaves the font unchanged.
+                ? "font-sans text-chat text-foreground/90"
+                : "rounded-md bg-surface-raised px-2.5 py-2 font-mono text-tool text-muted-foreground",
           )}
         >
           {failed && "Error: "}

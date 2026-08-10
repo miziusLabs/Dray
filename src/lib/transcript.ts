@@ -45,6 +45,17 @@ export type PermissionRequestPayload = Extract<
   { type: "permission_requested" }
 >;
 
+export type QuestionsAskedPayload = Extract<
+  AgentEvent["payload"],
+  { type: "questions_asked" }
+>;
+
+/// Something the agent is blocked on until the user answers. Two shapes, one
+/// list: they arrive on the same channel, share a `requestId` space, and are
+/// retired by the same `permission_decided`, so splitting them would mean two
+/// pending sets that have to stay ordered against each other.
+export type PendingAsk = PermissionRequestPayload | QuestionsAskedPayload;
+
 export function isToolGroup(item: WorkItem): item is ToolGroup {
   return "kind" in item && item.kind === "tool_group";
 }
@@ -310,7 +321,29 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
 /// Correlation is `envelope.subagent.id === the spawning call's callId`, not the
 /// `agentId` on the subagent payloads — that is the harness's own handle and
 /// matches nothing else.
-export function buildTranscript(source: AgentEvent[]): {
+/// Stands in for the result a call will now never get.
+///
+/// Not an error: nothing went wrong with the call, the process it belonged to
+/// stopped existing. Flagging it would tint the row red and spring it open on
+/// load, which is a lot of noise for "this didn't finish".
+const ABANDONED: ToolResult = {
+  text: "No result — the session ended before this call finished.",
+  isError: false,
+  structured: null,
+  exitCode: null,
+  durationMs: null,
+};
+
+export function buildTranscript(
+  source: AgentEvent[],
+  /// Whether a child is actually running this session. A call with no result is
+  /// only *pending* while something could still produce one; with the process
+  /// gone it is abandoned, and rendering it as in-flight leaves a row shimmering
+  /// forever. Most visible on `AskUserQuestion`, which blocks the harness until
+  /// the app answers and so is the call most likely to be open at a quit — but
+  /// it is true of any tool call caught mid-flight.
+  live = false,
+): {
   /// Main-thread events only, in `seq` order. Subagent work is excluded; the
   /// spawning tool call stays so the chat can show a row linking to the panel.
   events: AgentEvent[];
@@ -319,34 +352,65 @@ export function buildTranscript(source: AgentEvent[]): {
   subagents: SubagentRun[];
   subagentById: Map<string, SubagentRun>;
   resultByCallId: Map<string, ToolResult>;
-  /// Requests still waiting on the user, oldest first.
+  /// Consent requests and questions still waiting on the user, oldest first.
   ///
   /// Lifted out of the turns on purpose. A subagent's request would otherwise
   /// have nowhere to render — its events are filed into the panel, not the
   /// chat — and a main-thread one would sit buried in a turn that collapses
   /// once it closes. One place, below the transcript, works for both.
-  pendingPermissions: PermissionRequestPayload[];
+  pendingAsks: PendingAsk[];
 } {
   const events = [...source].sort(bySeq);
 
   const resultByCallId = new Map<string, ToolResult>();
-  const requests: PermissionRequestPayload[] = [];
+  // Calls with no result yet, and the ones a later event proved will never get
+  // one. Only the second is decided during the walk — a result routinely lands
+  // many events after its call, so "still open" is a running state, not a
+  // verdict.
+  const open = new Set<string>();
+  const abandoned = new Set<string>();
+  const asks: PendingAsk[] = [];
   const answered = new Set<string>();
   for (const event of events) {
+    if (event.payload.type === "tool_call_started") {
+      open.add(event.payload.callId);
+    }
     if (event.payload.type === "tool_call_completed") {
+      open.delete(event.payload.callId);
       resultByCallId.set(event.payload.callId, event.payload.result);
     }
-    if (event.payload.type === "permission_requested") {
-      requests.push(event.payload);
+    // A new prompt closes the book on everything before it: whatever the agent
+    // was mid-way through, this turn is not going to finish it. Without this the
+    // marks below would be undone by the next send — the session goes live
+    // again, and a row abandoned at the last restart would start shimmering a
+    // second time.
+    if (event.payload.type === "user_message") {
+      for (const callId of open) abandoned.add(callId);
+      open.clear();
+    }
+    if (
+      event.payload.type === "permission_requested" ||
+      event.payload.type === "questions_asked"
+    ) {
+      asks.push(event.payload);
     }
     if (event.payload.type === "permission_decided") {
       answered.add(event.payload.requestId);
     }
   }
 
-  const pendingPermissions = requests.filter(
-    (request) => !answered.has(request.requestId),
-  );
+  const pendingAsks = asks.filter((ask) => !answered.has(ask.requestId));
+
+  // Whatever is still open at the end of the log is only pending while something
+  // could still produce a result. With no child running, nothing can.
+  if (!live) for (const callId of open) abandoned.add(callId);
+
+  // Applied last, and only where no real result exists. A background subagent
+  // can report back after the turn that spawned it, so a call marked here early
+  // in the walk must still lose to the result that eventually arrives.
+  for (const callId of abandoned) {
+    if (!resultByCallId.has(callId)) resultByCallId.set(callId, ABANDONED);
+  }
 
   const subagentById = new Map<string, SubagentRun>();
   for (const event of events) {
@@ -402,6 +466,6 @@ export function buildTranscript(source: AgentEvent[]): {
     subagents: [...subagentById.values()],
     subagentById,
     resultByCallId,
-    pendingPermissions,
+    pendingAsks,
   };
 }

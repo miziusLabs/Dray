@@ -239,11 +239,17 @@ async fn read_stdout(
         // tool call it belongs to is persisted and shows the outcome either way,
         // and a live card survives re-selection because the frontend keeps a
         // loaded session in memory rather than re-reading it.
+        //
+        // Questions are dropped on the same reasoning, and the "nothing is lost"
+        // half holds harder there: the `AskUserQuestion` result the harness
+        // writes carries both the questions and the answers, so the transcript
+        // keeps the whole exchange without this line.
         if matches!(
             agent_event.payload,
             AgentEventPayload::Delta(_)
                 | AgentEventPayload::UsageUpdate(_)
                 | AgentEventPayload::PermissionRequested { .. }
+                | AgentEventPayload::QuestionsAsked { .. }
         ) {
             continue;
         }

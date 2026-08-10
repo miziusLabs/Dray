@@ -4,16 +4,13 @@ import AssistantMessage from "@/components/chat/AssistantMessage";
 import BackgroundTasksIndicator from "@/components/chat/BackgroundTasksIndicator";
 import CompactingIndicator from "@/components/chat/CompactingIndicator";
 import PermissionRequest from "@/components/chat/PermissionRequest";
+import QuestionRequest from "@/components/chat/QuestionRequest";
 import Reasoning from "@/components/chat/Reasoning";
 import ThinkingIndicator from "@/components/chat/ThinkingIndicator";
 import TurnBlock from "@/components/chat/TurnBlock";
 import type { StreamingBlock } from "@/hooks/useSessions";
 import { toolArgument } from "@/lib/tools";
-import {
-  buildTranscript,
-  rendersRow,
-  type PermissionRequestPayload,
-} from "@/lib/transcript";
+import { buildTranscript, rendersRow, type PendingAsk } from "@/lib/transcript";
 import type { SessionSnapshot } from "@/types/events";
 
 type ChatProps = {
@@ -24,6 +21,9 @@ type ChatProps = {
   /// is the one callback here whose absence stalls a session rather than
   /// degrading a view.
   onRespondPermission: (requestId: string, optionId: string) => void;
+  /// Answers an `AskUserQuestion`. Blocks the agent the same way, and an empty
+  /// map is a real answer — the reader skipped every question.
+  onAnswerQuestions: (requestId: string, answers: Record<string, string>) => void;
   /// Whether this session has a turn in flight, so the transcript can show the
   /// agent is still working.
   busy?: boolean;
@@ -52,7 +52,7 @@ type ChatProps = {
 const CARD_EXIT_MS = 500;
 
 /// The cards to draw: the live set, but one beat behind when it empties.
-function useLingeringCards(pending: PermissionRequestPayload[]): PermissionRequestPayload[] {
+function useLingeringCards(pending: PendingAsk[]): PendingAsk[] {
   const [shown, setShown] = useState(pending);
 
   // Identity changes on every event, so the effect keys off the ids instead —
@@ -83,6 +83,7 @@ export default function Chat({
   streamingBlock,
   onOpenSubagent,
   onRespondPermission,
+  onAnswerQuestions,
   busy = false,
   backgroundTaskCount = 0,
   compacting = false,
@@ -93,12 +94,12 @@ export default function Chat({
   // reading back through a transcript isn't yanked forward by incoming deltas.
   const followRef = useRef(true);
 
-  const { events, turns, subagentById, resultByCallId, pendingPermissions } = useMemo(
-    () => buildTranscript(session?.events ?? []),
-    [session?.events],
+  const { events, turns, subagentById, resultByCallId, pendingAsks } = useMemo(
+    () => buildTranscript(session?.events ?? [], busy),
+    [session?.events, busy],
   );
 
-  const permissionCards = useLingeringCards(pendingPermissions);
+  const cards = useLingeringCards(pendingAsks);
 
   // Told apart by the type `block_start` declared, not by content — thinking
   // deltas are plain text on the wire. Only one block streams at a time, so at
@@ -128,17 +129,18 @@ export default function Chat({
   // nothing, so every test above passes — but the agent is not thinking, it is
   // waiting on the compaction, and `CompactingIndicator` already says so.
   //
-  // An open permission request suppresses it for the same reason a compaction
-  // does, and now more strongly: the card renders outside the turn, so the turn
-  // genuinely draws nothing and every other test passes — but the agent is not
-  // thinking, it is waiting on the reader, who is looking at the card.
+  // An open request — for consent or for an answer — suppresses it for the same
+  // reason a compaction does, and now more strongly: the card renders outside
+  // the turn, so the turn genuinely draws nothing and every other test passes —
+  // but the agent is not thinking, it is waiting on the reader, who is looking
+  // at the card.
   //
   // Gated on what is drawn, not on what is pending, so the indicator can't slip
   // into a lingering card's window and undo the quiet it buys.
   const waitingTurn =
     busy &&
     !compacting &&
-    permissionCards.length === 0 &&
+    cards.length === 0 &&
     lastTurn &&
     !lastTurn.completed &&
     !streamingAny &&
@@ -240,22 +242,27 @@ export default function Chat({
           />
         ))}
 
-        {permissionCards.map((request) => (
-          <PermissionRequest
-            key={request.requestId}
-            // The agent writes a description for nearly every call; the tool's
-            // own name is the floor, so the card always has a subject.
-            description={
-              request.description ??
-              request.title ??
-              request.displayName ??
-              request.toolName
-            }
-            argument={toolArgument(request.input)}
-            options={request.options}
-            onRespond={(optionId) => onRespondPermission(request.requestId, optionId)}
-          />
-        ))}
+        {cards.map((ask) =>
+          ask.type === "questions_asked" ? (
+            <QuestionRequest
+              key={ask.requestId}
+              questions={ask.questions}
+              onAnswer={(answers) => onAnswerQuestions(ask.requestId, answers)}
+            />
+          ) : (
+            <PermissionRequest
+              key={ask.requestId}
+              // The agent writes a description for nearly every call; the tool's
+              // own name is the floor, so the card always has a subject.
+              description={
+                ask.description ?? ask.title ?? ask.displayName ?? ask.toolName
+              }
+              argument={toolArgument(ask.input)}
+              options={ask.options}
+              onRespond={(optionId) => onRespondPermission(ask.requestId, optionId)}
+            />
+          ),
+        )}
 
         {backgroundTaskCount > 0 && (
           <BackgroundTasksIndicator count={backgroundTaskCount} />

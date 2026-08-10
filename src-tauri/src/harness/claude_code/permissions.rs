@@ -69,6 +69,19 @@ impl PendingRequest {
 
         (pending, offered)
     }
+
+    /// A request answered by a filled-in form rather than a button, so it holds
+    /// no options: nothing the frontend can send resolves to a rule, and the
+    /// standing-rule suggestions the CLI attaches would grant a *tool* the user
+    /// was never asked about.
+    pub fn for_questions(request: &PermissionRequest) -> Self {
+        Self {
+            tool_use_id: request.tool_use_id.clone(),
+            tool_name: request.tool_name.clone(),
+            input: request.input.clone(),
+            options: HashMap::new(),
+        }
+    }
 }
 
 /// Allow-once first, deny last, and whatever standing rules this particular call
@@ -210,6 +223,44 @@ pub fn decision_response(
             "subtype": "success",
             "request_id": request_id,
             "response": decision,
+        },
+    })
+}
+
+/// The reply to an `AskUserQuestion`, whose verdict is always *allow*: the call
+/// is never in question, only what it should return.
+///
+/// The answers ride inside the tool's own input, keyed by each question's
+/// verbatim text — the harness matches on the string, so a key it doesn't
+/// recognize is silently no answer at all. Everything else about the input is
+/// echoed back untouched, since the harness reads its own `questions` array out
+/// of the same object to build the tool result.
+///
+/// An unanswered question is simply absent. That is what makes skipping a real
+/// answer rather than a refusal: the harness honours a partial map, and reports
+/// "the user did not answer" only for an empty one.
+pub fn answer_response(
+    request_id: &str,
+    pending: &PendingRequest,
+    answers: &HashMap<String, String>,
+) -> Value {
+    let mut input = pending.input.clone();
+    // Only reachable for input that parsed as questions, so it is an object —
+    // but a non-object still has to produce a reply rather than none.
+    if let Some(object) = input.as_object_mut() {
+        object.insert("answers".to_string(), json!(answers));
+    }
+
+    json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "request_id": request_id,
+            "response": {
+                "behavior": "allow",
+                "updatedInput": input,
+                "toolUseID": pending.tool_use_id,
+            },
         },
     })
 }
@@ -356,6 +407,51 @@ mod tests {
             inner["updatedPermissions"][0]["rules"][0]["toolName"],
             "Bash"
         );
+    }
+
+    /// Pins the two facts a working answer depends on, both verified against the
+    /// CLI: the verdict is an allow, and the answers ride *inside* the tool's own
+    /// input keyed by the question's verbatim text. Send them anywhere else and
+    /// the call runs reporting that nobody answered.
+    #[test]
+    fn an_answer_rides_back_inside_the_tools_own_input() {
+        let mut request = request_with(Vec::new());
+        request.tool_name = "AskUserQuestion".to_string();
+        request.input = json!({
+            "questions": [{"question": "Tabs or spaces?", "header": "Indentation",
+                           "options": [{"label": "Tabs"}, {"label": "Spaces"}],
+                           "multiSelect": false}]
+        });
+        let pending = PendingRequest::for_questions(&request);
+
+        let answers = HashMap::from([("Tabs or spaces?".to_string(), "Tabs".to_string())]);
+        let inner = answer_response("req_1", &pending, &answers)["response"]["response"].clone();
+
+        assert_eq!(inner["behavior"], "allow");
+        assert_eq!(inner["toolUseID"], "toolu_1");
+        assert_eq!(inner["updatedInput"]["answers"]["Tabs or spaces?"], "Tabs");
+        // Echoed untouched: the harness rebuilds the tool result from this same
+        // object, so a dropped `questions` array loses what was asked.
+        assert_eq!(
+            inner["updatedInput"]["questions"][0]["question"],
+            "Tabs or spaces?"
+        );
+    }
+
+    /// Skipping everything is still an allow. Denying instead would report a
+    /// refused tool call, which is not what happened.
+    #[test]
+    fn skipping_every_question_still_allows_the_call() {
+        let mut request = request_with(Vec::new());
+        request.tool_name = "AskUserQuestion".to_string();
+        request.input = json!({"questions": []});
+        let pending = PendingRequest::for_questions(&request);
+
+        let inner =
+            answer_response("req_1", &pending, &HashMap::new())["response"]["response"].clone();
+
+        assert_eq!(inner["behavior"], "allow");
+        assert_eq!(inner["updatedInput"]["answers"], json!({}));
     }
 
     #[test]

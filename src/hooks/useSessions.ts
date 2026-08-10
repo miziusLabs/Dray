@@ -281,6 +281,22 @@ const handleRespondPermission = async (requestId: string, optionId: string) => {
   }
 };
 
+const handleAnswerQuestions = async (
+  requestId: string,
+  answers: Record<string, string>,
+) => {
+  if (!selectedSessionId) return;
+  try {
+    await invoke("answer_questions", {
+      sessionId: selectedSessionId,
+      requestId,
+      answers,
+    });
+  } catch (e) {
+    setError(String(e));
+  }
+};
+
 // Restores the user's own defaults, not the app's. Selecting a session overwrote
 // the live controls with that session's settings, so every field they can change
 // has to be put back from prefs here — otherwise the last session clicked in the
@@ -675,6 +691,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
 
 }

@@ -6,14 +6,15 @@
 use crate::{
     events::{
         now_rfc3339, rfc3339_from_unix, AgentEvent, AgentEventPayload, BackgroundTask, BlockRef,
-        BlockType, ContextWindow, DeltaEvent, ModelUsage, SessionInfo, Settings, Subagent,
-        ToolResult, ToolType, TurnStatus, Usage,
+        BlockType, ContextWindow, DeltaEvent, ModelUsage, Question, QuestionOption, SessionInfo,
+        Settings, Subagent, ToolResult, ToolType, TurnStatus, Usage,
     },
     harness::{
         claude_code::{
             parser::{
-                self, AssistantMessage, ContentBlock, ContentDelta, ControlRequest, ResultEvent,
-                StreamFrame, SystemEvent, UserContent, UserContentBlock, UserMessage,
+                self, AskUserQuestionInput, AssistantMessage, ContentBlock, ContentDelta,
+                ControlRequest, PermissionRequest, ResultEvent, StreamFrame, SystemEvent,
+                UserContent, UserContentBlock, UserMessage, ASK_USER_QUESTION,
             },
             permissions::{PendingPermissions, PendingRequest},
             ClaudeCodeEvent,
@@ -197,6 +198,16 @@ impl Mapper {
                 };
 
                 let session_id = self.session_id.clone().unwrap_or_default();
+
+                if let Some((pending, payload)) = as_questions(&request_id, &request) {
+                    self.pending_permissions
+                        .lock()
+                        .expect("pending permissions mutex poisoned")
+                        .insert(request_id, pending);
+
+                    return Ok(Some(self.build(session_id, None, None, payload)));
+                }
+
                 let (pending, options) = PendingRequest::new(&request);
 
                 let payload = AgentEventPayload::PermissionRequested {
@@ -860,6 +871,58 @@ fn map_usage(
         model: None,
         per_model,
     }
+}
+
+/// Recognizes the one held call that is a question rather than a request for
+/// consent, and builds both halves of it.
+///
+/// Keyed on the tool name, not on `requires_user_interaction`. The flag says a
+/// one-tap allow/deny must not be offered, which is true of any tool whose own
+/// card is the answer surface — but a card can only be drawn for a shape this
+/// app knows, and `AskUserQuestion` is the only one it knows. Everything else
+/// carrying the flag still falls through to the consent card: wrong, and
+/// answerable, which beats a question with no way to reply.
+///
+/// Input that doesn't parse falls through the same way, deliberately. The
+/// consent card asks the wrong thing about it, but it does unblock the harness,
+/// whereas a form built from half a shape would not.
+fn as_questions(
+    request_id: &str,
+    request: &PermissionRequest,
+) -> Option<(PendingRequest, AgentEventPayload)> {
+    if request.tool_name != ASK_USER_QUESTION {
+        return None;
+    }
+
+    let input: AskUserQuestionInput = serde_json::from_value(request.input.clone()).ok()?;
+
+    let questions = input
+        .questions
+        .into_iter()
+        .map(|q| Question {
+            question: q.question,
+            header: q.header,
+            multi_select: q.multi_select,
+            options: q
+                .options
+                .into_iter()
+                .map(|o| QuestionOption {
+                    label: o.label,
+                    description: o.description,
+                    preview: o.preview,
+                })
+                .collect(),
+        })
+        .collect();
+
+    Some((
+        PendingRequest::for_questions(request),
+        AgentEventPayload::QuestionsAsked {
+            request_id: request_id.to_string(),
+            tool_use_id: request.tool_use_id.clone(),
+            questions,
+        },
+    ))
 }
 
 /// Reaches the `session_id` every variant carries without consuming the event.
@@ -1589,6 +1652,68 @@ mod tests {
             .expect("a request always emits");
 
         assert!(event.subagent.is_none());
+        assert!(matches!(
+            event.payload,
+            AgentEventPayload::PermissionRequested { .. }
+        ));
+    }
+
+    /// `AskUserQuestion` rides the permission channel but is not a permission:
+    /// mapping it to the consent card would offer Allow/Deny to a question, and
+    /// allowing tells the agent it was ignored.
+    #[test]
+    fn an_ask_user_question_becomes_questions_rather_than_a_consent_card() {
+        let pending = PendingPermissions::default();
+        let mut mapper = Mapper::new(Arc::new(AtomicU64::new(0)), Arc::clone(&pending));
+
+        let events = map_fixture(&mut mapper, include_str!("fixtures/ask_user_question.jsonl"));
+
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e.payload, AgentEventPayload::PermissionRequested { .. })));
+
+        let (request_id, questions) = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                AgentEventPayload::QuestionsAsked {
+                    request_id,
+                    questions,
+                    ..
+                } => Some((request_id, questions)),
+                _ => None,
+            })
+            .expect("the fixture asks once");
+
+        assert_eq!(questions.len(), 2);
+        assert_eq!(questions[0].question, "Tabs or spaces?");
+        assert_eq!(questions[0].header.as_deref(), Some("Indentation"));
+        assert!(!questions[0].multi_select);
+        assert_eq!(questions[1].options.len(), 3);
+        // The one field that changes how the second question is answered.
+        assert!(questions[1].multi_select);
+
+        // Registered like any held request — the agent is blocked on it either
+        // way — but with no options, because the form is the answer.
+        let guard = pending.lock().unwrap();
+        let entry = guard.get(request_id).expect("the question is answerable");
+        assert_eq!(entry.tool_name, "AskUserQuestion");
+        assert!(entry.options.is_empty());
+    }
+
+    /// Input that doesn't parse must still reach the user as *something*. The
+    /// consent card asks the wrong question about it, but it unblocks the
+    /// harness, which a half-built form would not.
+    #[test]
+    fn an_unreadable_question_shape_falls_back_to_the_consent_card() {
+        let line = r#"{"type":"control_request","request_id":"req_1","request":{
+            "subtype":"can_use_tool","tool_name":"AskUserQuestion","tool_use_id":"toolu_1",
+            "input":{"prompts":["what?"]},"requires_user_interaction":true}}"#;
+
+        let event = Mapper::default()
+            .map(parser::parse_line(line).unwrap())
+            .unwrap()
+            .expect("a request always emits");
+
         assert!(matches!(
             event.payload,
             AgentEventPayload::PermissionRequested { .. }
