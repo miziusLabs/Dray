@@ -41,6 +41,7 @@ function App() {
     useWorktree,
     busy,
     backgroundTasks,
+    compacting,
     error,
     setError,
     handleModelChange,
@@ -211,6 +212,7 @@ function App() {
         onOpenSubagent={openSubagent}
         busy={busy}
         backgroundTaskCount={backgroundTasks.length}
+        compacting={compacting}
       />
     </AppShell>
     </TooltipProvider>

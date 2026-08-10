@@ -601,6 +601,20 @@ const backgroundTasks: BackgroundTask[] = (() => {
   return [];
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
+// Two events with nothing between them, so whichever came last says whether a
+// compaction is still running. Gated on `busy` for the same reason as the task
+// set above: a `started` with no `completed` after it is the shape a killed
+// session leaves in the log forever.
+const compacting: boolean = (() => {
+  if (!busy || !selectedSession) return false;
+  for (let i = selectedSession.events.length - 1; i >= 0; i--) {
+    const p = selectedSession.events[i].payload;
+    if (p.type === "context_compacted") return false;
+    if (p.type === "context_compaction_started") return true;
+  }
+  return false;
+})();
+
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
 
 }

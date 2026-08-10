@@ -84,7 +84,11 @@ usingOverage: boolean,
 /**
  * Why overage isn't available — `org_level_disabled` observed.
  */
-overageDisabledReason: string | null, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compacted", message: string | null, windowNumber: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
+overageDisabledReason: string | null, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compaction_started" } | { "type": "context_compacted", 
+/**
+ * `manual` or `auto`.
+ */
+trigger: string | null, preTokens: number | null, postTokens: number | null, durationMs: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
 
 /**
  * Permission stance a session *runs under*, in roughly increasing order of

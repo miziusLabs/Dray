@@ -42,6 +42,14 @@ function daysApart(from: Date, to: Date): number {
   return Math.round((midnight(to) - midnight(from)) / 86_400_000);
 }
 
+/// A token count at a glance — "847", "30.6k", "1.2M". The exact figure is
+/// never the point here; the order of magnitude is.
+export function compactTokens(n: number): string {
+  if (n < 1_000) return `${n}`;
+  if (n < 1_000_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+}
+
 /// Trailing path segment, for showing a project as its folder name.
 export function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");

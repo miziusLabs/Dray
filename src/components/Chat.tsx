@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import BackgroundTasksIndicator from "@/components/chat/BackgroundTasksIndicator";
+import CompactingIndicator from "@/components/chat/CompactingIndicator";
 import Reasoning from "@/components/chat/Reasoning";
 import ThinkingIndicator from "@/components/chat/ThinkingIndicator";
 import TurnBlock from "@/components/chat/TurnBlock";
@@ -21,6 +22,9 @@ type ChatProps = {
   /// them — unlike the thinking indicator, which must sit where its turn's
   /// text will land.
   backgroundTaskCount?: number;
+  /// Whether a compaction is running. Sits beside the task indicator for the
+  /// same reason: it belongs to the session, not to any one turn.
+  compacting?: boolean;
 };
 
 export default function Chat({
@@ -29,6 +33,7 @@ export default function Chat({
   onOpenSubagent,
   busy = false,
   backgroundTaskCount = 0,
+  compacting = false,
 }: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -64,8 +69,13 @@ export default function Chat({
   // counts harness plumbing the transcript renders nothing for — `turn_started`
   // above all, which lands before any real output and hid the indicator early.
   const lastTurn = turns.at(-1);
+  //
+  // A compaction suppresses it outright. The turn is genuinely open and drawing
+  // nothing, so every test above passes — but the agent is not thinking, it is
+  // waiting on the compaction, and `CompactingIndicator` already says so.
   const waitingTurn =
     busy &&
+    !compacting &&
     lastTurn &&
     !lastTurn.completed &&
     !streamingAny &&
@@ -170,6 +180,8 @@ export default function Chat({
         {backgroundTaskCount > 0 && (
           <BackgroundTasksIndicator count={backgroundTaskCount} />
         )}
+
+        {compacting && <CompactingIndicator />}
       </div>
     </div>
   );

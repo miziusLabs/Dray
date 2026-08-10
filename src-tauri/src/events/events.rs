@@ -230,9 +230,18 @@ pub enum AgentEventPayload {
         exit_code: Option<i32>,
         outcome: Option<String>,
     },
+    /// A compaction is under way. Drives a live indicator and nothing else —
+    /// the counts only exist once it finishes.
+    ContextCompactionStarted,
+    /// A compaction finished, and the transcript before it no longer reaches the
+    /// model. Both counts are optional so an unfamiliar wire shape still closes
+    /// the indicator; the UI drops the saving rather than reporting a wrong one.
     ContextCompacted {
-        message: Option<String>,
-        window_number: Option<u32>,
+        /// `manual` or `auto`.
+        trigger: Option<String>,
+        pre_tokens: Option<u64>,
+        post_tokens: Option<u64>,
+        duration_ms: Option<u64>,
     },
     Error {
         source: ErrorSource,

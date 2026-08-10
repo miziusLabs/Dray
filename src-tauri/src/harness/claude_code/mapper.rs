@@ -113,8 +113,20 @@ impl Mapper {
                 timestamp,
                 tool_use_result,
                 subagent_type,
+                is_replay,
+                is_synthetic,
                 ..
             } => {
+                // The CLI feeding its own context back to itself, not
+                // conversation. A compaction replays its summary as a prompt
+                // and echoes the `/compact` command; this app mints its own
+                // user events, and the session log exists for the UI rather
+                // than to reconstruct the model's context, so neither is ours
+                // to keep.
+                if is_replay || is_synthetic {
+                    return Ok(None);
+                }
+
                 let payload = Self::handle_user_msg(message, tool_use_result);
                 let subagent = subagent(parent_tool_use_id, subagent_type);
                 Ok(payload.map(|p| self.build(session_id, subagent, timestamp, p)))
@@ -231,6 +243,19 @@ impl Mapper {
                     tasks: tasks.into_iter().map(BackgroundTask::from).collect(),
                 }))
             }
+            // `status` is a general channel — `requesting` opens every turn —
+            // so only the one value here means anything to us.
+            SystemEvent::Status { status, .. } if status.as_deref() == Some("compacting") => {
+                Ok(Some(AgentEventPayload::ContextCompactionStarted))
+            }
+            SystemEvent::CompactBoundary {
+                compact_metadata, ..
+            } => Ok(Some(AgentEventPayload::ContextCompacted {
+                trigger: compact_metadata.trigger,
+                pre_tokens: compact_metadata.pre_tokens,
+                post_tokens: compact_metadata.post_tokens,
+                duration_ms: compact_metadata.duration_ms,
+            })),
             _ => Ok(None),
         }
     }
@@ -508,7 +533,7 @@ impl Mapper {
 
                 Ok(AgentEventPayload::TurnCompleted {
                     status,
-                    stop_reason: Some(stop_reason),
+                    stop_reason,
                     final_text: Some(result),
                     usage: Some(map_usage(&usage, Some(total_cost_usd))),
                     duration_ms: Some(duration_ms),
@@ -678,7 +703,8 @@ fn system_event_session_id(e: &SystemEvent) -> &str {
         | SystemEvent::TaskNotification { session_id, .. }
         | SystemEvent::PostTurnSummary { session_id, .. }
         | SystemEvent::BackgroundTasksChanged { session_id, .. }
-        | SystemEvent::ThinkingTokens { session_id, .. } => session_id,
+        | SystemEvent::ThinkingTokens { session_id, .. }
+        | SystemEvent::CompactBoundary { session_id, .. } => session_id,
         // No fields survive the catch-all. Harmless: an unrecognized subtype
         // maps to `None`, so no envelope is ever built from this value.
         SystemEvent::Unrecognized => "",
@@ -1147,6 +1173,60 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// A compaction is exactly two events, and the CLI's own bookkeeping that
+    /// follows it is not conversation.
+    #[test]
+    fn maps_a_compaction_to_a_start_and_a_finish() {
+        let events = map_fixture(
+            &mut Mapper::default(),
+            include_str!("fixtures/compaction.jsonl"),
+        );
+
+        let compaction: Vec<&AgentEventPayload> = events
+            .iter()
+            .map(|event| &event.payload)
+            .filter(|payload| {
+                matches!(
+                    payload,
+                    AgentEventPayload::ContextCompactionStarted
+                        | AgentEventPayload::ContextCompacted { .. }
+                )
+            })
+            .collect();
+
+        assert!(matches!(
+            compaction.as_slice(),
+            [
+                AgentEventPayload::ContextCompactionStarted,
+                AgentEventPayload::ContextCompacted {
+                    trigger: Some(trigger),
+                    pre_tokens: Some(31872),
+                    post_tokens: Some(1318),
+                    duration_ms: Some(6681),
+                },
+            ] if trigger == "manual"
+        ));
+
+        // The replayed summary and the `/compact` echo both arrive as `user`
+        // lines. Two prompts were typed in this capture; a third bubble would
+        // mean one leaked through.
+        let prompts = events
+            .iter()
+            .filter(|event| matches!(event.payload, AgentEventPayload::UserMessage { .. }))
+            .count();
+        assert_eq!(prompts, 0, "this app mints its own user events");
+    }
+
+    /// `requesting` opens every turn on the same channel that reports
+    /// `compacting`, so the gate has to be the value and not the subtype.
+    #[test]
+    fn ignores_status_lines_that_are_not_a_compaction() {
+        let line = r#"{"type":"system","subtype":"status","status":"requesting","uuid":"u","session_id":"s"}"#;
+
+        let event = Mapper::default().map(parser::parse_line(line).unwrap()).unwrap();
+        assert!(event.is_none());
     }
 
     /// The wire is snake_case and every `Usage` field is `Option`, so a plain

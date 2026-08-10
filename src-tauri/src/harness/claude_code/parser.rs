@@ -41,6 +41,16 @@ pub enum ClaudeCodeEvent {
         subagent_type: Option<String>,
         #[serde(default)]
         task_description: Option<String>,
+        /// A message the CLI replayed into its own context rather than one the
+        /// user typed. Both flags are needed and neither implies the other: a
+        /// compaction emits its summary as `isSynthetic` and the `/compact`
+        /// command echo as `isReplay`. No tool result in any fixture carries
+        /// either, so the pair cleanly separates the CLI's own bookkeeping from
+        /// real conversation.
+        #[serde(default, rename = "isReplay")]
+        is_replay: bool,
+        #[serde(default, rename = "isSynthetic")]
+        is_synthetic: bool,
     },
     Result(ResultEvent),
     RateLimitEvent {
@@ -210,11 +220,44 @@ pub enum SystemEvent {
         uuid: String,
         session_id: String,
     },
+    /// The seam where a compaction dropped the earlier conversation. Arrives
+    /// *after* the fresh `init`, and is the only line carrying what the
+    /// compaction cost — `status: "compacting"` opens the window, this closes
+    /// it.
+    CompactBoundary {
+        compact_metadata: CompactMetadata,
+        uuid: String,
+        session_id: String,
+    },
     /// A subtype this build doesn't model. The CLI adds subtypes over time
     /// (`thinking_tokens` arrived unannounced), and without this every such
     /// line failed whole — the loop logged a parse error and dropped it.
     #[serde(other)]
     Unrecognized,
+}
+
+/// What a compaction cost. Every field is optional despite all being present in
+/// the one capture we have: a missing field would otherwise fail the line, and
+/// this is the only event that closes the compacting indicator — so a shape we
+/// haven't seen would leave the UI spinning rather than merely under-reporting.
+/// The wire also carries `preserved_segment`/`preserved_messages`, uuid sets
+/// naming what survived, and `cumulative_dropped_tokens`. None is carried:
+/// nothing can act on the uuids, and the cumulative count sums every compaction
+/// in the session, so what *this* one saved is `pre_tokens - post_tokens`. The
+/// two are equal on a first compaction and diverge after — reading it as the
+/// saving would overstate every compaction but the first.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompactMetadata {
+    /// `manual` for `/compact`, `auto` when the window filled. Only `manual` is
+    /// captured.
+    #[serde(default)]
+    pub trigger: Option<String>,
+    #[serde(default)]
+    pub pre_tokens: Option<u64>,
+    #[serde(default)]
+    pub post_tokens: Option<u64>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,6 +272,7 @@ pub struct BackgroundTask {
 pub enum ResultEvent {
     Success {
         is_error: bool,
+        #[serde(default)]
         api_error_status: Option<Value>,
         duration_ms: u64,
         duration_api_ms: u64,
@@ -240,7 +284,12 @@ pub enum ResultEvent {
         time_to_request_ms: Option<u64>,
         num_turns: u32,
         result: String,
-        stop_reason: String,
+        /// Null on the `result` that closes a compaction — the CLI ran no
+        /// inference of its own, so nothing stopped. A required `String` here
+        /// failed that whole line, and since `result` is what closes a turn, the
+        /// session then sat on `in_progress` until the user typed again.
+        #[serde(default)]
+        stop_reason: Option<String>,
         session_id: String,
         total_cost_usd: f64,
         usage: Usage,
@@ -249,7 +298,9 @@ pub enum ResultEvent {
         #[serde(rename = "modelUsage")]
         model_usage: Value,
         permission_denials: Vec<Value>,
-        terminal_reason: String,
+        /// Absent on a compaction's `result`, present on an ordinary turn's.
+        #[serde(default)]
+        terminal_reason: Option<String>,
         fast_mode_state: String,
         #[serde(default)]
         origin: Option<ResultOrigin>,
@@ -1006,6 +1057,62 @@ mod tests {
             event,
             ClaudeCodeEvent::Result(ResultEvent::Success { .. })
         )));
+    }
+
+    /// A live `/compact`. The replay log in `~/.claude/projects` writes this
+    /// metadata in camelCase and stdout writes it in snake_case, so this fixture
+    /// is the only thing that keeps the field names honest.
+    #[test]
+    fn parses_a_compaction() {
+        let events = parse_fixture(include_str!("fixtures/compaction.jsonl"));
+        assert_eq!(events.len(), 49, "every line parses, none dropped");
+
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ClaudeCodeEvent::System(SystemEvent::Status { status, .. })
+                    if status.as_deref() == Some("compacting")
+            )),
+            "the window opens on a status line"
+        );
+
+        let boundary = events
+            .iter()
+            .find_map(|event| match event {
+                ClaudeCodeEvent::System(SystemEvent::CompactBoundary {
+                    compact_metadata,
+                    ..
+                }) => Some(compact_metadata),
+                _ => None,
+            })
+            .expect("the window closes on a boundary");
+
+        assert_eq!(boundary.trigger.as_deref(), Some("manual"));
+        assert_eq!(boundary.pre_tokens, Some(31872));
+        assert_eq!(boundary.post_tokens, Some(1318));
+        assert_eq!(boundary.duration_ms, Some(6681));
+    }
+
+    /// The two lines a compaction leaves behind are flagged differently — the
+    /// summary is synthetic, the `/compact` echo is a replay — so dropping them
+    /// takes both flags. No tool result carries either.
+    #[test]
+    fn compaction_leftovers_carry_one_flag_each() {
+        let events = parse_fixture(include_str!("fixtures/compaction.jsonl"));
+
+        let flags: Vec<(bool, bool)> = events
+            .iter()
+            .filter_map(|event| match event {
+                ClaudeCodeEvent::User {
+                    is_replay,
+                    is_synthetic,
+                    ..
+                } => Some((*is_replay, *is_synthetic)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(flags, vec![(false, true), (true, false)]);
     }
 
     /// A subtype this build has never seen must degrade to `Unrecognized`, not

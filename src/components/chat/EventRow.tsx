@@ -5,7 +5,7 @@ import Reasoning from "@/components/chat/Reasoning";
 import ToolCall from "@/components/chat/ToolCall";
 import UserMessage from "@/components/chat/UserMessage";
 import FileEdits from "@/components/chat/FileEdits";
-import { resetTime } from "@/lib/format";
+import { compactTokens, resetTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { AgentEvent, ToolResult } from "@/types/events";
 
@@ -131,13 +131,26 @@ export default function EventRow({
       );
     }
 
-    case "context_compacted":
+    // Shaped like a settled tool call — label then detail — because that is what
+    // it is: work the harness did on the conversation, reported after the fact.
+    // No caret; there is nothing underneath to open.
+    case "context_compacted": {
+      const saved =
+        payload.preTokens != null && payload.postTokens != null
+          ? payload.preTokens - payload.postTokens
+          : null;
+
       return (
-        <Notice icon={Archive}>
-          {payload.message ??
-            `Context compacted${payload.windowNumber != null ? ` (window ${payload.windowNumber})` : ""}`}
-        </Notice>
+        <div className="flex w-full items-center gap-2 text-chat">
+          <span className="shrink-0 text-foreground/80">Compacted</span>
+          {saved != null && saved > 0 && (
+            <span className="min-w-0 max-w-fit truncate text-muted-foreground">
+              Saved {compactTokens(saved)} tokens
+            </span>
+          )}
+        </div>
       );
+    }
 
     // Deliberately unrendered. Hooks, settings changes, and unrecognized event
     // kinds are harness plumbing the reader never acts on; session setup, token
@@ -153,6 +166,9 @@ export default function EventRow({
     case "subagent_completed":
     case "background_tasks_changed":
     case "delta":
+    // Drives the live indicator, not a row — the compaction it opens draws its
+    // own line when it closes.
+    case "context_compaction_started":
       return null;
 
     default:
