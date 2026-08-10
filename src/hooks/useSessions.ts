@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useComposerPrefs, type EffortByModel } from "@/hooks/useComposerPrefs";
-import { AgentEvent, ApprovalPolicy, BranchList, Effort, Model, ModelId, Project, SessionIndexItem, SessionSnapshot, SessionTitleEvent } from "../types/events";
+import { AgentEvent, ApprovalPolicy, BackgroundTask, BranchList, Effort, Model, ModelId, Project, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
 // "unknown". Everything else seeds from the user's stored prefs.
@@ -47,8 +47,11 @@ export function useSessions() {
     const [pendingBranch, setPendingBranch] = useState<string | null>(null);
     const [useWorktree, setUseWorktreeState] = useState(() => prefs.useWorktree);
     // Per-session, not global: sessions run concurrently and all of their events
-    // arrive on the same channel, so a single flag would clear on another's turn.
-    const [busyBySession, setBusyBySession] = useState<Record<string, boolean>>({});
+    // arrive on the same channel, so a single value would clear on another's
+    // turn. The backend drives this via `session_status`; the index items carry
+    // the same field for the sidebar, but this map also covers sessions the
+    // current archived filter excludes from that list.
+    const [statusBySession, setStatusBySession] = useState<Record<string, SessionStatus>>({});
     const [error, setError] = useState<string | null>(null);
 
 // What actually gets sent for the current model: its remembered pick, else its
@@ -197,7 +200,9 @@ const handleSendMsg = async (
   }
 
   setError(null);
-  setBusyBySession((prev) => ({ ...prev, [sessionId]: true }));
+  // Optimistic: the backend publishes the same transition once the prompt
+  // reaches the child, but the composer must read busy the moment Enter lands.
+  setStatusBySession((prev) => ({ ...prev, [sessionId]: "in_progress" }));
 
   try {
     const snapshot = await invoke<SessionSnapshot | null>("send_msg", {
@@ -239,8 +244,8 @@ const handleSendMsg = async (
     );
   } catch (e) {
     // A rejected invoke means the turn never started, so nothing will arrive to
-    // clear the flag — release it here rather than leaving the composer stuck.
-    setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
+    // clear the status — release it here rather than leaving the composer stuck.
+    setStatusBySession((prev) => ({ ...prev, [sessionId]: "idle" }));
     setError(String(e));
   }
 };
@@ -264,6 +269,12 @@ const handleNewSession = () => {
 
 const handleSelectSessionIndexItem = async (sessionId: string) => {
   setSelectedSessionId(sessionId);
+
+  // Opening a finished session is reading it.
+  const clicked = sessionIndexItems.find((i) => i.sessionId === sessionId);
+  if ((statusBySession[sessionId] ?? clicked?.status) === "completed") {
+    markSessionRead(sessionId);
+  }
 
   // Restores what this session was started with. Every setter here is the raw
   // state setter, never the prefs-writing wrapper: these values are the session's,
@@ -435,17 +446,10 @@ useEffect(() => {
               });
             }
 
-            // The only signals that a turn is over. `turn_completed` fires once per
-            // turn rather than per session, so this releases exactly the session
-            // whose turn ended and leaves any other running one alone.
-            const done =
-              agentEvent.payload.type === "turn_completed" ||
-              (agentEvent.payload.type === "error" && agentEvent.payload.fatal);
-
-            if (done) {
-              setBusyBySession((prev) => ({ ...prev, [agentEvent.sessionId]: false }));
-            }
-
+            // Busy is no longer inferred from `turn_completed` here: a result
+            // can land while a background subagent is still running, so the
+            // backend's status machine owns the call and reports it on the
+            // `session_status` channel instead.
             if (agentEvent.payload.type === "error") {
               setError(agentEvent.payload.message);
             }
@@ -499,6 +503,45 @@ useEffect(() => {
   };
 }, []);
 
+// Inside the listener the closure would see the mount-time selection; the ref
+// tracks the live one so "already being viewed" is judged against reality.
+const selectedSessionIdRef = useRef(selectedSessionId);
+selectedSessionIdRef.current = selectedSessionId;
+
+// `completed` means finished *and unread*. Reading is what retires it, so both
+// paths to a read funnel through here: the status landing on the session
+// already on screen, and the user clicking a finished one in the sidebar.
+const markSessionRead = (sessionId: string) => {
+  setStatusBySession((prev) => ({ ...prev, [sessionId]: "idle" }));
+  setSessionIndexItems((prev) =>
+    prev.map((i) => (i.sessionId === sessionId ? { ...i, status: "idle" } : i)),
+  );
+  // Cleared locally first — the click must feel instant. Losing the write
+  // costs one stale unread dot after a restart, so a failure isn't surfaced.
+  void invoke("mark_session_idle", { sessionId }).catch(() => {});
+};
+
+useEffect(() => {
+  const listenerPromise = listen<SessionStatusEvent>("session_status", (event) => {
+    const { sessionId, status } = event.payload;
+
+    // A session finishing on screen is read the moment it finishes.
+    if (status === "completed" && sessionId === selectedSessionIdRef.current) {
+      markSessionRead(sessionId);
+      return;
+    }
+
+    setStatusBySession((prev) => ({ ...prev, [sessionId]: status }));
+    setSessionIndexItems((prev) =>
+      prev.map((i) => (i.sessionId === sessionId ? { ...i, status } : i)),
+    );
+  });
+
+  return () => {
+    listenerPromise.then((unlisten) => unlisten());
+  };
+}, []);
+
 // The backend generates a title a few seconds after a session starts and writes
 // it to the index itself, so this only mirrors what's already on disk. Its own
 // listener rather than a branch in `agent_event`: nothing here came from the
@@ -521,8 +564,26 @@ useEffect(() => {
 }, []);
 
 // A brand-new session has no id until its first send, so nothing can be in flight.
-const busy = selectedSessionId ? busyBySession[selectedSessionId] ?? false : false;
+// The live map wins over the index item: it's the one the backend pushes to.
+const selectedStatus: SessionStatus = selectedSessionId
+  ? statusBySession[selectedSessionId]
+    ?? sessionIndexItems.find((i) => i.sessionId === selectedSessionId)?.status
+    ?? "idle"
+  : "idle";
+const busy = selectedStatus === "in_progress";
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, busyBySession, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
+// The set is republished whole on every change, so the last one in the log *is*
+// the current set — but only while the session is live. A stale non-empty set
+// survives in the log across a restart, which is why this gates on `busy`.
+const backgroundTasks: BackgroundTask[] = (() => {
+  if (!busy || !selectedSession) return [];
+  for (let i = selectedSession.events.length - 1; i >= 0; i--) {
+    const p = selectedSession.events[i].payload;
+    if (p.type === "background_tasks_changed") return p.tasks;
+  }
+  return [];
+})();
+
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
 
 }

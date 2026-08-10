@@ -180,6 +180,18 @@ pub enum AgentEventPayload {
         summary: Option<String>,
         usage: Option<Usage>,
     },
+    /// The full set of outstanding background tasks, republished whole on every
+    /// change — an empty list means the session's async work has drained.
+    /// Latest wins; consumers keep the last one rather than accumulating.
+    ///
+    /// Not redundant with the subagent lifecycle events above: those describe
+    /// one task's own progress, this says how many are still open — which is
+    /// half of "is the session done", since a turn's result can arrive while
+    /// this is non-empty.
+    BackgroundTasksChanged {
+        #[serde(default)]
+        tasks: Vec<BackgroundTask>,
+    },
 
     // ---------- accounting / control ----------
     /// Debounce these in the mapper: harnesses emit token counts far more often
@@ -214,6 +226,19 @@ pub enum AgentEventPayload {
     /// [`Unknown`](Self::Unknown), a harness line the mapper couldn't classify.
     #[serde(other)]
     Unrecognized,
+}
+
+/// One outstanding background task. The harness's wire shape is snake_case, so
+/// the parser keeps its own struct and the mapper converts — sharing this one
+/// would break on `task_id` vs `taskId`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTask {
+    pub task_id: String,
+    /// Free-form kind string — `local_agent` observed, set undocumented.
+    pub task_type: String,
+    pub description: String,
 }
 
 /// How a turn ended. Claude Code reports this as `is_error` on its result

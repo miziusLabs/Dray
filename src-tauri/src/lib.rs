@@ -4,7 +4,7 @@ use crate::{
     models::{Effort, Model, ModelId},
     projects::Project,
     session::{Harness, SessionManager},
-    store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot},
+    store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot, SessionStatus},
 };
 use tauri::{AppHandle, State};
 
@@ -143,12 +143,38 @@ async fn set_session_flags(
         .map_err(|e| e.to_string())
 }
 
+/// Clears a finished session's unread mark. The frontend calls this when the
+/// user views the session; a `completed` badge is "finished and unread", so
+/// reading is what retires it. Returns the status as written, `None` when
+/// nothing changed — the session wasn't `completed`, or the id is unknown.
+#[tauri::command]
+async fn mark_session_idle(
+    session_id: &str,
+    manager: State<'_, SessionManager>,
+) -> Result<Option<SessionStatus>, String> {
+    manager
+        .mark_idle(session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(SessionManager::default())
+        .setup(|_app| {
+            // A persisted `in_progress` can't be true anymore — no child
+            // survived the restart. Spawned, not awaited: the reset needs no
+            // window, and the frontend's first fetch lands well after it.
+            tauri::async_runtime::spawn(async {
+                if let Err(e) = store::reset_in_progress_sessions().await {
+                    eprintln!("[status reset err] {e}");
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             send_msg,
             list_models,
@@ -162,6 +188,7 @@ pub fn run() {
             list_branches,
             checkout_branch,
             set_session_flags,
+            mark_session_idle,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -13,8 +13,9 @@ use crate::{
     session::Harness,
 };
 
-/// Nothing advances this past `Idle` yet — no turn-completion signal is mapped.
-/// It ships now so the on-disk index doesn't need a migration once one is.
+/// Driven by [`StatusTracker`](crate::session::StatusTracker). `Completed`
+/// means finished *and unread* — the transition back to `Idle` is the user
+/// looking at the session, not anything the agent does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
@@ -346,6 +347,56 @@ pub async fn set_session_flags(
     write_session_index(&sessions).await?;
 
     Ok(Some(updated))
+}
+
+/// Sets one entry's status. Returns the entry as written, or `None` if the id
+/// is unknown.
+///
+/// Only completion bumps `modified`: the field means "last activity", and the
+/// agent finishing is activity. `InProgress` is already covered by the send's
+/// touch, and clearing the unread mark is a read, not activity.
+pub async fn set_session_status(
+    session_id: &str,
+    status: SessionStatus,
+) -> Result<Option<SessionIndexItem>> {
+    let _guard = INDEX_LOCK.lock().await;
+
+    let mut sessions = list_session_index_items().await?;
+    let Some(item) = sessions.iter_mut().find(|i| i.session_id == session_id) else {
+        return Ok(None);
+    };
+
+    item.status = status;
+    if status == SessionStatus::Completed {
+        item.modified = now_rfc3339();
+    }
+    let updated = item.clone();
+
+    write_session_index(&sessions).await?;
+
+    Ok(Some(updated))
+}
+
+/// A persisted `in_progress` is a lie after a restart — no child survives the
+/// process — so every one resets to `idle` at startup. `completed` survives:
+/// unread is still unread.
+pub async fn reset_in_progress_sessions() -> Result<()> {
+    let _guard = INDEX_LOCK.lock().await;
+
+    let mut sessions = list_session_index_items().await?;
+    let mut changed = false;
+    for item in sessions.iter_mut() {
+        if item.status == SessionStatus::InProgress {
+            item.status = SessionStatus::Idle;
+            changed = true;
+        }
+    }
+
+    if changed {
+        write_session_index(&sessions).await?;
+    }
+
+    Ok(())
 }
 
 /// Replaces one entry's title. Returns the entry as written, or `None` if the

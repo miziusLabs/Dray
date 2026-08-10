@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
+import BackgroundTasksIndicator from "@/components/chat/BackgroundTasksIndicator";
 import ThinkingIndicator from "@/components/chat/ThinkingIndicator";
 import TurnBlock from "@/components/chat/TurnBlock";
 import type { StreamingBlock } from "@/hooks/useSessions";
@@ -14,6 +15,11 @@ type ChatProps = {
   /// Whether this session has a turn in flight, so the transcript can show the
   /// agent is still working.
   busy?: boolean;
+  /// Outstanding async subagents. Rendered after the turns rather than inside
+  /// one: the tasks outlive the turn that spawned them, so no single block owns
+  /// them — unlike the thinking indicator, which must sit where its turn's
+  /// text will land.
+  backgroundTaskCount?: number;
 };
 
 export default function Chat({
@@ -21,6 +27,7 @@ export default function Chat({
   streamingBlock,
   onOpenSubagent,
   busy = false,
+  backgroundTaskCount = 0,
 }: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -145,6 +152,10 @@ export default function Chat({
             }
           />
         ))}
+
+        {backgroundTaskCount > 0 && (
+          <BackgroundTasksIndicator count={backgroundTaskCount} />
+        )}
       </div>
     </div>
   );

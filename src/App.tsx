@@ -40,6 +40,7 @@ function App() {
     branch,
     useWorktree,
     busy,
+    backgroundTasks,
     error,
     setError,
     handleModelChange,
@@ -207,6 +208,7 @@ function App() {
         }
         onOpenSubagent={openSubagent}
         busy={busy}
+        backgroundTaskCount={backgroundTasks.length}
       />
     </AppShell>
     </TooltipProvider>

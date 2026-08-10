@@ -57,7 +57,7 @@ rawInput: string | null, title: string | null, } | { "type": "tool_call_complete
  * progress event, so it drives a live status line without expanding
  * the subagent's own events.
  */
-description: string | null, lastTool: string | null, usage: Usage | null, } | { "type": "subagent_completed", agentId: string, status: string, summary: string | null, usage: Usage | null, } | { "type": "usage_update" } & Usage | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compacted", message: string | null, windowNumber: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
+description: string | null, lastTool: string | null, usage: Usage | null, } | { "type": "subagent_completed", agentId: string, status: string, summary: string | null, usage: Usage | null, } | { "type": "background_tasks_changed", tasks: Array<BackgroundTask>, } | { "type": "usage_update" } & Usage | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compacted", message: string | null, windowNumber: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
 
 /**
  * Permission stance a session *runs under*, in roughly increasing order of
@@ -65,6 +65,17 @@ description: string | null, lastTool: string | null, usage: Usage | null, } | { 
  * sends — see [`PermissionMode`] for the wider set the CLI reports.
  */
 export type ApprovalPolicy = "plan" | "manual" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions";
+
+/**
+ * One outstanding background task. The harness's wire shape is snake_case, so
+ * the parser keeps its own struct and the mapper converts — sharing this one
+ * would break on `task_id` vs `taskId`.
+ */
+export type BackgroundTask = { taskId: string, 
+/**
+ * Free-form kind string — `local_agent` observed, set undocumented.
+ */
+taskType: string, description: string, };
 
 /**
  * Joins streamed content to its committed counterpart. A message is often
@@ -279,10 +290,18 @@ permissionMode: ApprovalPolicy,
 status: SessionStatus, created: string, modified: string, archived: boolean, pinned: boolean, };
 
 /**
- * Nothing advances this past `Idle` yet — no turn-completion signal is mapped.
- * It ships now so the on-disk index doesn't need a migration once one is.
+ * Driven by [`StatusTracker`](crate::session::StatusTracker). `Completed`
+ * means finished *and unread* — the transition back to `Idle` is the user
+ * looking at the session, not anything the agent does.
  */
 export type SessionStatus = "idle" | "in_progress" | "completed";
+
+/**
+ * Emitted as `session_status` when a session's status changes, so the sidebar
+ * and composer update without a refetch. Like `SessionTitleEvent`, this is not
+ * an `AgentEvent`: it's derived state, and must never reach the `.jsonl` log.
+ */
+export type SessionStatusEvent = { sessionId: string, status: SessionStatus, };
 
 /**
  * Emitted as `session_title` once a generated title lands, so the sidebar row

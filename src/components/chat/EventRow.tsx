@@ -116,6 +116,7 @@ export default function EventRow({
     case "subagent_started":
     case "subagent_progress":
     case "subagent_completed":
+    case "background_tasks_changed":
     case "delta":
       return null;
 

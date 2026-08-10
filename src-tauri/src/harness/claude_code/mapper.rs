@@ -5,8 +5,9 @@
 
 use crate::{
     events::{
-        now_rfc3339, AgentEvent, AgentEventPayload, BlockRef, BlockType, DeltaEvent, ErrorSource,
-        SessionInfo, Settings, Subagent, ToolResult, ToolType, TurnStatus, Usage,
+        now_rfc3339, AgentEvent, AgentEventPayload, BackgroundTask, BlockRef, BlockType,
+        DeltaEvent, ErrorSource, SessionInfo, Settings, Subagent, ToolResult, ToolType, TurnStatus,
+        Usage,
     },
     harness::{
         claude_code::{
@@ -195,6 +196,11 @@ impl Mapper {
             SystemEvent::TaskStarted { .. }
             | SystemEvent::TaskProgress { .. }
             | SystemEvent::TaskNotification { .. } => Self::handle_task(e).map(Some),
+            SystemEvent::BackgroundTasksChanged { tasks, .. } => {
+                Ok(Some(AgentEventPayload::BackgroundTasksChanged {
+                    tasks: tasks.into_iter().map(BackgroundTask::from).collect(),
+                }))
+            }
             _ => Ok(None),
         }
     }
@@ -591,6 +597,16 @@ fn tool_type(name: &str) -> ToolType {
     }
 }
 
+impl From<parser::BackgroundTask> for BackgroundTask {
+    fn from(wire: parser::BackgroundTask) -> Self {
+        Self {
+            task_id: wire.task_id,
+            task_type: wire.task_type,
+            description: wire.description,
+        }
+    }
+}
+
 impl From<parser::TaskUsage> for Usage {
     fn from(wire: parser::TaskUsage) -> Self {
         Self {
@@ -964,6 +980,35 @@ mod tests {
             AgentEventPayload::SubagentCompleted { status, usage: Some(usage), .. }
                 if status == "completed" && usage.total_tokens == Some(27160)
         )));
+    }
+
+    /// The set is republished whole, so an empty list is meaningful — it says
+    /// the session's async work has drained — and must map rather than be
+    /// treated as nothing-to-report.
+    #[test]
+    fn maps_background_task_sets_including_empty() {
+        let mut mapper = Mapper::default();
+
+        let full = r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"aa47","task_type":"local_agent","description":"Investigate blog"}],"uuid":"u","session_id":"s"}"#;
+        let event = mapper
+            .map(parser::parse_line(full).unwrap())
+            .unwrap()
+            .expect("a task set is an event");
+        assert!(matches!(
+            &event.payload,
+            AgentEventPayload::BackgroundTasksChanged { tasks }
+                if tasks.len() == 1 && tasks[0].task_id == "aa47" && tasks[0].task_type == "local_agent"
+        ));
+
+        let drained = r#"{"type":"system","subtype":"background_tasks_changed","tasks":[],"uuid":"u","session_id":"s"}"#;
+        let event = mapper
+            .map(parser::parse_line(drained).unwrap())
+            .unwrap()
+            .expect("an empty set still maps");
+        assert!(matches!(
+            &event.payload,
+            AgentEventPayload::BackgroundTasksChanged { tasks } if tasks.is_empty()
+        ));
     }
 
     /// An interrupted turn reports the abort twice — as prose in a `user` text

@@ -317,6 +317,20 @@ function SessionRow({
           : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50",
       )}
     >
+      {/* Working pulses, finished-and-unread holds steady; idle earns nothing.
+          Absent rather than invisible: the title reclaims the width, so rows
+          don't all pay two dots of indent for the few that need one. */}
+      {item.status !== "idle" && (
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            item.status === "in_progress"
+              ? "animate-pulse bg-muted-foreground/70"
+              : "bg-primary",
+          )}
+        />
+      )}
+
       <span className="min-w-0 flex-1 truncate text-ui">{item.title}</span>
 
       {/* One slot for both, sized by the buttons and always holding that width —

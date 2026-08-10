@@ -1,7 +1,7 @@
 use crate::events::{AgentEvent, AgentEventPayload, ApprovalPolicy};
 use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::models::{Effort, Model};
-use crate::session::Session;
+use crate::session::{publish_status, Session, StatusTracker};
 use crate::store::{append_session_event, next_seq_by_session_id};
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -83,6 +83,9 @@ pub async fn init(
     let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let stdout_events = events.clone();
 
+    let status: Arc<Mutex<StatusTracker>> = Arc::new(Mutex::new(StatusTracker::default()));
+    let stdout_status = status.clone();
+
     let seq_start: u64 = if is_new_session {
         0
     } else {
@@ -97,7 +100,15 @@ pub async fn init(
     let app = app.clone();
     tokio::spawn(async move {
         let session_id = stdout_session_id;
-        if let Err(error) = read_stdout(stdout, &session_id, stdout_events, stdout_seq, &app).await
+        if let Err(error) = read_stdout(
+            stdout,
+            &session_id,
+            stdout_events,
+            stdout_seq,
+            stdout_status,
+            &app,
+        )
+        .await
         {
             eprintln!("Failed to read Claude stdout: {error}");
         }
@@ -119,6 +130,7 @@ pub async fn init(
         permission_mode,
         events,
         seq,
+        status,
     })
 }
 
@@ -129,6 +141,7 @@ async fn read_stdout(
     session_id: &str,
     events: Arc<Mutex<Vec<AgentEvent>>>,
     stdout_seq: Arc<AtomicU64>,
+    status: Arc<Mutex<StatusTracker>>,
     app: &AppHandle,
 ) -> Result<()> {
     let reader = BufReader::new(stdout);
@@ -161,6 +174,10 @@ async fn read_stdout(
 
         if let Err(err) = app.emit("agent_event", &agent_event) {
             eprintln!("[claude emit err] {err}");
+        }
+
+        if let Some(next) = status.lock().await.on_event(&agent_event.payload) {
+            publish_status(session_id, next, app).await;
         }
 
         // Deltas are emitted for the live view but never retained
