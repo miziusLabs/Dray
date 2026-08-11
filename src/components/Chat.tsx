@@ -231,10 +231,10 @@ export default function Chat({
               ) : turn !== streamingTurn ? (
                 undefined
               ) : streamingThinking ? (
-                // The same component the committed `reasoning` event renders
-                // with, so the preview and its replacement are pixel-identical
-                // and the swap is invisible.
-                <Reasoning text={streamingThinking} encrypted={false} />
+                // The same component the committed `reasoning` event renders with,
+                // in its `streaming` presentation — the multi-line preview keeps
+                // growing live; it collapses to one line once committed.
+                <Reasoning text={streamingThinking} encrypted={false} streaming />
               ) : (
                 <AssistantMessage text={streamingText} streaming />
               )
