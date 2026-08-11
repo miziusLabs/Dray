@@ -248,6 +248,11 @@ async fn read_stdout(
             agent_event.payload,
             AgentEventPayload::Delta(_)
                 | AgentEventPayload::UsageUpdate(_)
+                // Transient by the same rule: it says a request is in flight,
+                // and no request survives the process that made it. Persisting
+                // it would also be most of a busy session's log — it fires once
+                // per turn *and* once per tool result, 89 times in one capture.
+                | AgentEventPayload::ModelRequestStarted
                 | AgentEventPayload::PermissionRequested { .. }
                 | AgentEventPayload::QuestionsAsked { .. }
         ) {

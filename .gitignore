@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 
 docs
+# Staged from vscode-material-icons on every Vite start — see vite.config.ts
+public/file-icons

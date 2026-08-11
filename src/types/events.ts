@@ -30,7 +30,22 @@ raw: JsonValue | null, };
  * Permission request/resolve is deliberately absent: no captured fixture shows
  * their shape, so the variants would be a guess. Add once captured.
  */
-export type AgentEventPayload = { "type": "turn_started" } & SessionInfo | { "type": "turn_completed", status: TurnStatus, stopReason: string | null, finalText: string | null, usage: Usage | null, durationMs: number | null, } | { "type": "settings_changed" } & Settings | { "type": "user_message", text: string, images: Array<ImageRef>, } | { "type": "assistant_text", 
+export type AgentEventPayload = { "type": "turn_started" } & SessionInfo | { "type": "turn_completed", status: TurnStatus, stopReason: string | null, finalText: string | null, usage: Usage | null, durationMs: number | null, } | { "type": "settings_changed" } & Settings | { "type": "user_message", text: string, images: Array<ImageRef>, 
+/**
+ * The working tree as it stood when this prompt was sent, as a git
+ * tree id — the "before" side the changes panel diffs against.
+ *
+ * Taken here rather than derived from the turn's own tool calls
+ * because those miss everything `Bash` does, and because an `Edit`
+ * carries only the fragment it replaced. A snapshot compares content,
+ * so several edits to one file — and any commit made mid-turn —
+ * collapse into the one net diff.
+ *
+ * `None` for a directory that isn't a repo, and for every prompt
+ * logged before this field existed. Both mean the same thing to the
+ * panel: nothing to show.
+ */
+baseline: string | null, } | { "type": "assistant_text", 
 /**
  * `Some` only when this content was also streamed, naming the preview
  * it supersedes. `None` — the common case, covering Claude Code
@@ -146,7 +161,7 @@ label: string,
  * True when the app answered on its own — an unsupported request
  * subtype, or a shutdown clearing what it could not ask about.
  */
-automatic: boolean, } | { "type": "permission_denied", toolName: string, toolUseId: string, message: string, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "context_compaction_started" } | { "type": "context_compacted", 
+automatic: boolean, } | { "type": "permission_denied", toolName: string, toolUseId: string, message: string, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "model_request_started" } | { "type": "context_compaction_started" } | { "type": "context_compacted", 
 /**
  * `manual` or `auto`.
  */
@@ -205,6 +220,40 @@ defaultBase: string | null,
  */
 dirty: number, };
 
+/**
+ * Everything that changed between two snapshots.
+ */
+export type ChangeSet = { base: string, 
+/**
+ * The snapshot taken to answer *this* request. Handed back so a follow-up
+ * read of one file's contents resolves against the same tree the list was
+ * built from — the working tree moves under a running agent, and a file
+ * list and a diff taken a second apart would otherwise disagree.
+ */
+head: string, files: Array<ChangedFile>, added: number, removed: number, };
+
+export type ChangeStatus = "added" | "modified" | "deleted" | "renamed";
+
+/**
+ * How one path differs between two snapshots. `added`/`removed` are git's own
+ * numstat figures, so the row and the diff it opens cannot disagree.
+ */
+export type ChangedFile = { 
+/**
+ * The path as of the *new* side — where a renamed file ended up.
+ */
+path: string, 
+/**
+ * Only a rename sets this: the name the file had in the baseline, which is
+ * also the name its old side has to be read under.
+ */
+oldPath: string | null, status: ChangeStatus, added: number, removed: number, 
+/**
+ * Git reports `-` for both counts here rather than a number. Listed like
+ * any other change, but with no diff to open.
+ */
+binary: boolean, };
+
 export type ContextWindow = { usedTokens: number, maxTokens: number, };
 
 /**
@@ -227,6 +276,25 @@ export type ErrorSource = "harness" | "parser" | "process";
 export type FileChange = "add" | "update" | "delete";
 
 export type FileEdit = { path: string, change: FileChange, unifiedDiff: string | null, };
+
+/**
+ * Both sides of one file's change, as the text a diff viewer compares.
+ */
+export type FileVersions = { 
+/**
+ * `None` for a file the baseline didn't have — the viewer draws an
+ * addition rather than a diff against the empty string.
+ */
+oldText: string | null, 
+/**
+ * `None` for a file the turn deleted.
+ */
+newText: string | null, 
+/**
+ * Set when a side exists but is being withheld, so the panel can name the
+ * reason instead of drawing an empty diff and looking broken.
+ */
+unreadable: Unreadable | null, };
 
 export type Harness = "claude_code" | "codex";
 
@@ -559,6 +627,8 @@ export type ToolType = "shell" | "file_read" | "file_edit" | "search" | "web" | 
  * captured.
  */
 export type TurnStatus = "success" | "error";
+
+export type Unreadable = "binary" | "too_large";
 
 export type Usage = { inputTokens: number | null, outputTokens: number | null, cachedInputTokens: number | null, cacheWriteTokens: number | null, 
 /**

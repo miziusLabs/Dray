@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Cpu } from "lucide-react";
 
 import "./App.css";
 import Chat from "@/components/Chat";
+import ChangesPanel from "@/components/ChangesPanel";
 import ChatInput from "@/components/ChatInput";
+import RightPanel, { PanelToggle, type PanelTab } from "@/components/RightPanel";
 import Sidebar, { DevBadge, SidebarToggle } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import { nextPermissionMode } from "@/components/composer/PermissionSelector";
 import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
-import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useCodeTheme } from "@/hooks/useCodeTheme";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
@@ -19,6 +19,7 @@ import { warmHighlighter } from "@/hooks/useHighlighter";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSessions } from "@/hooks/useSessions";
+import { baselineFor } from "@/lib/changes";
 import { buildTranscript } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 
@@ -67,6 +68,7 @@ function App() {
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [panelTab, setPanelTab] = useLocalStorage<PanelTab>("ade.panelTab", "changes");
   const [selectedSubagentId, setSelectedSubagentId] = useState<string | null>(null);
 
   // Themes and Shiki's engine are shared by every code surface, so they load
@@ -83,14 +85,29 @@ function App() {
     [selectedSession?.events, busy],
   );
 
+  const togglePanel = () => setPanelOpen((prev) => !prev);
+
   const openSubagent = (id: string) => {
     setSelectedSubagentId(id);
+    setPanelTab("subagents");
     setPanelOpen(true);
   };
+
+  const baseline = useMemo(
+    () => baselineFor(selectedSession?.events ?? []),
+    [selectedSession?.events],
+  );
+
+  // What tells the panel to re-read — a cache key, not a count. The event total
+  // moves as a turn's writes land, and `busy` covers the turn ending, where the
+  // final file write and the closing event can arrive in either order.
+  const revision = `${selectedSession?.events.length ?? 0}:${busy}`;
 
   const toggleSidebar = () => setCollapsed((prev) => !prev);
   useHotkey("b", toggleSidebar);
   useHotkey("n", handleNewSession);
+  // ⌘E for the right pane against ⌘B for the left.
+  useHotkey("e", togglePanel);
   // No accelerator: Shift+Tab on its own, matching the CLI's own chord for this.
   useHotkey("Tab", () => setPermissionMode(nextPermissionMode(permissionMode)), {
     meta: false,
@@ -149,27 +166,31 @@ function App() {
 
           <SessionHeader session={selectedSession} className="flex-1" />
 
-          {subagents.length > 0 && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setPanelOpen((prev) => !prev)}
-              title={`${subagents.length} subagent${subagents.length > 1 ? "s" : ""}`}
-            >
-              <Cpu />
-            </Button>
-          )}
+          {selectedSession && <PanelToggle onToggle={togglePanel} open={panelOpen} />}
         </header>
       }
       panel={
-        panelOpen ? (
-          <SubagentPanel
-            runs={subagents}
-            selectedId={selectedSubagentId}
-            resultByCallId={resultByCallId}
-            onSelect={setSelectedSubagentId}
-            onClose={() => setPanelOpen(false)}
-          />
+        panelOpen && selectedSession ? (
+          <RightPanel
+            tab={panelTab}
+            onTabChange={setPanelTab}
+            counts={{ subagents: subagents.length }}
+          >
+            {panelTab === "changes" ? (
+              <ChangesPanel
+                cwd={selectedSession.cwd}
+                baseline={baseline}
+                revision={revision}
+              />
+            ) : (
+              <SubagentPanel
+                runs={subagents}
+                selectedId={selectedSubagentId}
+                resultByCallId={resultByCallId}
+                onSelect={setSelectedSubagentId}
+              />
+            )}
+          </RightPanel>
         ) : null
       }
       footer={

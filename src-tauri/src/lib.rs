@@ -131,6 +131,36 @@ async fn checkout_branch(cwd: &str, branch: &str, stash: bool) -> Result<BranchL
     git::list_branches(cwd).await.map_err(|e| e.to_string())
 }
 
+/// What changed in `cwd` since `baseline` — the tree id carried on a
+/// `user_message`, so "since the last prompt" is the caller picking which one.
+///
+/// Snapshots the working tree to answer, and hands that snapshot's id back on
+/// `head`. Pass it to [`file_change`]: the agent keeps writing while the panel
+/// is open, and a list and a diff taken from two different snapshots would
+/// disagree about what the file says.
+#[tauri::command]
+async fn changes_since(cwd: &str, baseline: &str) -> Result<git::ChangeSet, String> {
+    git::changes_since(cwd, baseline)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Both sides of one file, fetched only when the reader opens that row. The
+/// file list is cheap and the contents are not, so a turn touching thirty files
+/// costs thirty rows and nothing else until something is expanded.
+#[tauri::command]
+async fn file_change(
+    cwd: &str,
+    base: &str,
+    head: &str,
+    path: &str,
+    old_path: Option<&str>,
+) -> Result<git::FileVersions, String> {
+    git::file_versions(cwd, base, head, path, old_path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Returns the entry as written so the sidebar re-renders from the stored value
 /// rather than its own guess at it. `None` for an unknown id.
 #[tauri::command]
@@ -248,6 +278,8 @@ pub fn run() {
             set_last_selected_project,
             list_branches,
             checkout_branch,
+            changes_since,
+            file_change,
             set_session_flags,
             delete_session,
             mark_session_idle,

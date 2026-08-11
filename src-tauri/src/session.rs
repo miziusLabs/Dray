@@ -223,6 +223,18 @@ impl SessionManager {
             // composer waits on. The title written above stands until this lands.
             crate::title::spawn_title_generation(session_id, prompt, &session_cwd, app);
 
+            // Taken before the child exists, so nothing it does can end up
+            // inside its own baseline. A worktree has no directory to snapshot
+            // yet — the CLI creates the tree after launch — so that case
+            // resolves the fork point the tree will start from instead. Slightly
+            // approximate: the CLI fetches `origin/<default>` first, so an
+            // upstream commit landing in between would read as this turn's work.
+            let baseline = if worktree_name.is_some() {
+                git::base_ref_tree(cwd).await
+            } else {
+                git::snapshot_tree(&session_cwd).await
+            };
+
             let mut session = Session::init(
                 session_id,
                 harness,
@@ -235,7 +247,7 @@ impl SessionManager {
                 app,
             )
             .await?;
-            session.send_msg(prompt, app).await?;
+            session.send_msg(prompt, baseline, app).await?;
             // The prompt event is synthesized by `send_msg`, so read the log
             // back rather than returning empty — otherwise the frontend's first
             // render drops the user's own message.
@@ -268,6 +280,16 @@ impl SessionManager {
             }
         }
 
+        // The caller's `cwd` is a hint for a new session only. From here on the
+        // recorded one wins: with a project picker the two can disagree, and
+        // resuming in the wrong directory is both silent and destructive. It is
+        // also where the baseline gets snapshotted, so a stale value would
+        // diff the wrong tree.
+        let session_cwd = match get_session_index_item(session_id).await? {
+            Some(item) => item.cwd,
+            None => cwd.to_string(),
+        };
+
         if let Some(s) = sessions_guard.get_mut(session_id) {
             // Before the send, so the index reflects intent even if writing to
             // the child fails — the prompt event is persisted ahead of stdin too.
@@ -279,19 +301,17 @@ impl SessionManager {
                 s.set_permission_mode(permission_mode).await?;
             }
 
-            s.send_msg(prompt, app).await?;
+            // Last thing before the prompt goes down the pipe: the child is idle
+            // but alive, so the narrower the gap the less of the user's own
+            // editing lands on the turn's side of the diff.
+            let baseline = git::snapshot_tree(&session_cwd).await;
+            s.send_msg(prompt, baseline, app).await?;
             return Ok(None);
         }
 
         touch_session_index_item(session_id, model, effort, permission_mode).await?;
 
-        // The caller's `cwd` is a hint for a new session only. On resume the
-        // recorded one wins: with a project picker the two can disagree, and
-        // resuming in the wrong directory is both silent and destructive.
-        let resume_cwd = match get_session_index_item(session_id).await? {
-            Some(item) => item.cwd,
-            None => cwd.to_string(),
-        };
+        let baseline = git::snapshot_tree(&session_cwd).await;
 
         // The worktree already exists, so no `-w` — passing it again would try
         // to recreate the tree.
@@ -301,13 +321,13 @@ impl SessionManager {
             &model_spec,
             effort,
             permission_mode,
-            &resume_cwd,
+            &session_cwd,
             None,
             is_new_session,
             app,
         )
         .await?;
-        session.send_msg(prompt, app).await?;
+        session.send_msg(prompt, baseline, app).await?;
         sessions_guard.insert(session_id.to_string(), session);
         Ok(None)
     }
@@ -450,12 +470,23 @@ impl Session {
 
     /// Builds and saves the user's own prompt event, then writes it to the
     /// child's stdin — the CLI never echoes it back.
-    pub async fn send_msg(&mut self, prompt: &str, app: &AppHandle) -> Result<()> {
+    ///
+    /// `baseline` is the caller's working-tree snapshot, taken before this
+    /// prompt reaches the child. It is passed in rather than taken here because
+    /// only the manager knows which directory to snapshot: a worktree session's
+    /// tree does not exist until the CLI creates it.
+    pub async fn send_msg(
+        &mut self,
+        prompt: &str,
+        baseline: Option<String>,
+        app: &AppHandle,
+    ) -> Result<()> {
         let seq = self.seq.fetch_add(1, Relaxed);
 
         let payload = AgentEventPayload::UserMessage {
             text: prompt.to_string(),
             images: Vec::new(),
+            baseline,
         };
         let agent_event = AgentEvent {
             id: Uuid::now_v7().to_string(),

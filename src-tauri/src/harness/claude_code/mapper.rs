@@ -359,6 +359,9 @@ impl Mapper {
             SystemEvent::Status { status, .. } if status.as_deref() == Some("compacting") => {
                 Ok(Some(AgentEventPayload::ContextCompactionStarted))
             }
+            SystemEvent::Status { status, .. } if status.as_deref() == Some("requesting") => {
+                Ok(Some(AgentEventPayload::ModelRequestStarted))
+            }
             SystemEvent::CompactBoundary {
                 compact_metadata, ..
             } => {
@@ -778,6 +781,10 @@ fn user_message(text: String) -> AgentEventPayload {
     AgentEventPayload::UserMessage {
         text,
         images: vec![],
+        // No baseline: only a prompt the app itself sent has a snapshot behind
+        // it, taken at the moment it was sent. A user line arriving from the
+        // CLI is one this app never issued, so there is no "before" to name.
+        baseline: None,
     }
 }
 
@@ -1862,11 +1869,37 @@ mod tests {
         assert!(map_model_usage(&Value::Null).is_empty());
     }
 
-    /// `requesting` opens every turn on the same channel that reports
-    /// `compacting`, so the gate has to be the value and not the subtype.
+    /// `status` is a general channel carrying values that drive unrelated UI, so
+    /// the gate has to be the value and not the subtype. These pin both mapped
+    /// values apart, and the unmapped case below keeps the gate honest.
     #[test]
-    fn ignores_status_lines_that_are_not_a_compaction() {
-        let line = r#"{"type":"system","subtype":"status","status":"requesting","uuid":"u","session_id":"s"}"#;
+    fn maps_each_status_value_to_its_own_event() {
+        let mapped = |status: &str| {
+            let line = format!(
+                r#"{{"type":"system","subtype":"status","status":"{status}","uuid":"u","session_id":"s"}}"#
+            );
+            Mapper::default()
+                .map(parser::parse_line(&line).unwrap())
+                .unwrap()
+                .map(|event| event.payload)
+        };
+
+        assert!(matches!(
+            mapped("requesting"),
+            Some(AgentEventPayload::ModelRequestStarted)
+        ));
+        assert!(matches!(
+            mapped("compacting"),
+            Some(AgentEventPayload::ContextCompactionStarted)
+        ));
+    }
+
+    /// The null status rides between a compaction's two events, carrying
+    /// `compact_result` rather than a state — the boundary is the same signal
+    /// with numbers attached, so nothing is mapped from it.
+    #[test]
+    fn ignores_a_status_line_that_drives_nothing() {
+        let line = r#"{"type":"system","subtype":"status","status":null,"compact_result":"success","uuid":"u","session_id":"s"}"#;
 
         let event = Mapper::default().map(parser::parse_line(line).unwrap()).unwrap();
         assert!(event.is_none());

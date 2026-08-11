@@ -103,6 +103,20 @@ pub enum AgentEventPayload {
         text: String,
         #[serde(default)]
         images: Vec<ImageRef>,
+        /// The working tree as it stood when this prompt was sent, as a git
+        /// tree id — the "before" side the changes panel diffs against.
+        ///
+        /// Taken here rather than derived from the turn's own tool calls
+        /// because those miss everything `Bash` does, and because an `Edit`
+        /// carries only the fragment it replaced. A snapshot compares content,
+        /// so several edits to one file — and any commit made mid-turn —
+        /// collapse into the one net diff.
+        ///
+        /// `None` for a directory that isn't a repo, and for every prompt
+        /// logged before this field existed. Both mean the same thing to the
+        /// panel: nothing to show.
+        #[serde(default)]
+        baseline: Option<String>,
     },
     AssistantText {
         /// `Some` only when this content was also streamed, naming the preview
@@ -320,6 +334,15 @@ pub enum AgentEventPayload {
         exit_code: Option<i32>,
         outcome: Option<String>,
     },
+    /// The harness has sent a request to the model and is waiting on its first
+    /// token. Drives the working indicator and nothing else.
+    ///
+    /// Fires at the top of a turn *and* after every tool result, which is what
+    /// makes it worth carrying: the gap after a tool call is where the
+    /// transcript otherwise sits blank, and this marks its start within 30ms.
+    /// Measured from here to the first `content_block_start`: ~1s for a text
+    /// block, a 3s median (1.7–7.5s) for a thinking one.
+    ModelRequestStarted,
     /// A compaction is under way. Drives a live indicator and nothing else —
     /// the counts only exist once it finishes.
     ContextCompactionStarted,
@@ -759,7 +782,10 @@ mod tests {
             serde_json::from_str(r#"{"type":"user_message","text":"hi"}"#).unwrap();
         assert!(matches!(
             v,
-            AgentEventPayload::UserMessage { ref text, ref images } if text == "hi" && images.is_empty()
+            // `baseline` defaults too: every prompt logged before the changes
+            // panel existed has no snapshot behind it, and must not fail the line.
+            AgentEventPayload::UserMessage { ref text, ref images, ref baseline }
+                if text == "hi" && images.is_empty() && baseline.is_none()
         ));
 
         let v: AgentEventPayload = serde_json::from_str(

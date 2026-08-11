@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { relativeTime } from "@/lib/format";
+import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import type { SessionIndexItem, SessionStatus } from "@/types/events";
 
@@ -48,11 +49,6 @@ type SidebarProps = {
   showArchived: boolean;
   onToggleArchived: () => void;
 };
-
-// Rendered rather than detected per-keystroke: the hotkey itself accepts either
-// modifier, so this only decides which symbol the tooltip shows.
-const IS_MAC =
-  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 /// Sidebar toggle. Lives outside `Sidebar` because a collapsed sidebar renders
 /// nothing at all — the button has to survive its own pane disappearing, so the

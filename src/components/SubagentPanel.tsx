@@ -1,7 +1,6 @@
-import { Cpu, X } from "lucide-react";
+import { Cpu } from "lucide-react";
 
 import EventRow from "@/components/chat/EventRow";
-import { Button } from "@/components/ui/button";
 import type { SubagentRun } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 import type { ToolResult } from "@/types/events";
@@ -11,59 +10,43 @@ type SubagentPanelProps = {
   selectedId: string | null;
   resultByCallId: Map<string, ToolResult>;
   onSelect: (id: string) => void;
-  onClose: () => void;
 };
 
 /// Every subagent in the session, listed, with the selected one's events beside
-/// it. Opened either from the header or by clicking a subagent row in the chat —
-/// both land here, the second with that run already selected.
+/// it. A tab of [RightPanel](./RightPanel.tsx), which owns the frame — this is
+/// the body only. Reached either from that tab or by clicking a subagent row in
+/// the chat, the second with that run already selected.
 export default function SubagentPanel({
   runs,
   selectedId,
   resultByCallId,
   onSelect,
-  onClose,
 }: SubagentPanelProps) {
   const selected = runs.find((run) => run.id === selectedId) ?? runs[0] ?? null;
 
-  return (
-    <aside className="flex w-[26rem] shrink-0 flex-col border-l border-border bg-sidebar">
-      <div className="h-(--titlebar-h) shrink-0" data-tauri-drag-region />
+  if (runs.length === 0) {
+    return (
+      <p className="px-3 py-6 text-ui text-muted-foreground">No subagents in this session.</p>
+    );
+  }
 
-      <div className="flex items-center justify-between px-3 pb-2">
-        <span className="text-ui font-medium text-sidebar-foreground/60">
-          Subagents{runs.length ? ` (${runs.length})` : ""}
-        </span>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} title="Close panel">
-          <X />
-        </Button>
+  return (
+    <>
+      <div className="flex max-h-48 shrink-0 flex-col gap-px overflow-y-auto border-b border-border p-2">
+        {runs.map((run) => (
+          <RunRow
+            key={run.id}
+            run={run}
+            active={run.id === selected?.id}
+            onSelect={onSelect}
+          />
+        ))}
       </div>
 
-      {runs.length === 0 ? (
-        <p className="px-3 py-6 text-ui text-muted-foreground">
-          No subagents in this session.
-        </p>
-      ) : (
-        <>
-          <div className="flex max-h-48 shrink-0 flex-col gap-px overflow-y-auto border-b border-border px-2 pb-2">
-            {runs.map((run) => (
-              <RunRow
-                key={run.id}
-                run={run}
-                active={run.id === selected?.id}
-                onSelect={onSelect}
-              />
-            ))}
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            {selected ? (
-              <SubagentDetail run={selected} resultByCallId={resultByCallId} />
-            ) : null}
-          </div>
-        </>
-      )}
-    </aside>
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {selected ? <SubagentDetail run={selected} resultByCallId={resultByCallId} /> : null}
+      </div>
+    </>
   );
 }
 

@@ -40,7 +40,10 @@ export default function PanelLeftIcon({
         clipPath={`url(#${clipId})`}
       />
       <rect x="3" y="5" width="18" height="14" rx="2.5" />
-      <path d="M9.5 5v14" />
+      {/* No divider stroke between the column and the rest: the filled block is
+          already the edge, and at `dim` the fill drops to 30% while a stroke
+          would stay at full weight — leaving a hard line marking a pane that
+          isn't there. */}
     </svg>
   );
 }
