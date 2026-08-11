@@ -6,7 +6,7 @@ import CompactingIndicator from "@/components/chat/CompactingIndicator";
 import PermissionRequest from "@/components/chat/PermissionRequest";
 import QuestionRequest from "@/components/chat/QuestionRequest";
 import Reasoning from "@/components/chat/Reasoning";
-import ThinkingIndicator from "@/components/chat/ThinkingIndicator";
+import WorkingIndicator from "@/components/chat/WorkingIndicator";
 import TurnBlock from "@/components/chat/TurnBlock";
 import type { StreamingBlock } from "@/hooks/useSessions";
 import { toolArgument } from "@/lib/tools";
@@ -29,7 +29,7 @@ type ChatProps = {
   busy?: boolean;
   /// Outstanding async subagents. Rendered after the turns rather than inside
   /// one: the tasks outlive the turn that spawned them, so no single block owns
-  /// them — unlike the thinking indicator, which must sit where its turn's
+  /// them — unlike the working indicator, which must sit where its turn's
   /// text will land.
   backgroundTaskCount?: number;
   /// Whether a compaction is running. Sits beside the task indicator for the
@@ -227,7 +227,7 @@ export default function Chat({
             // between turns: the preview belongs to this turn, not after it.
             footer={
               turn === waitingTurn ? (
-                <ThinkingIndicator />
+                <WorkingIndicator />
               ) : turn !== streamingTurn ? (
                 undefined
               ) : streamingThinking ? (

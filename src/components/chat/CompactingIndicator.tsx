@@ -8,7 +8,7 @@ import { ThinkingOrb } from "thinking-orbs";
 export default function CompactingIndicator() {
   return (
     <div className="flex items-center gap-2" aria-live="polite">
-      {/* Same 20px inline design as ThinkingIndicator, `shaping` so it reads as
+      {/* Same 20px inline design as WorkingIndicator, `shaping` so it reads as
           a third distinct activity next to `working` and `weaving`. Theme
           pinned for the same reason as there: the orb's `auto` expects
           `data-theme="dark|light"` and this app stamps a palette name. */}

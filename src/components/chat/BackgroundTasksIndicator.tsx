@@ -7,7 +7,7 @@ import { ThinkingOrb } from "thinking-orbs";
 export default function BackgroundTasksIndicator({ count }: { count: number }) {
   return (
     <div className="flex items-center gap-2" aria-live="polite">
-      {/* Same 20px inline design as ThinkingIndicator, `weaving` so the two
+      {/* Same 20px inline design as WorkingIndicator, `weaving` so the two
           read as different activities at a glance. Theme pinned for the same
           reason as there: the orb's `auto` expects `data-theme="dark|light"`
           and this app stamps a palette name instead. */}
