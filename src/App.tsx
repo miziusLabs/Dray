@@ -28,6 +28,7 @@ function App() {
     selectedSession,
     streamingContentBlock,
     sessionIndexItems,
+    statusBySession,
     showArchived,
     setShowArchived,
     models,
@@ -112,6 +113,7 @@ function App() {
       sidebar={
         <Sidebar
           items={sessionIndexItems}
+          statusBySession={statusBySession}
           selectedSessionId={selectedSessionId}
           collapsed={collapsed}
           onToggleCollapsed={toggleSidebar}

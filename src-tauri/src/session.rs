@@ -48,6 +48,10 @@ use tokio::{
 pub struct SessionStatusEvent {
     pub session_id: String,
     pub status: SessionStatus,
+    /// The entry's `modified` as the status write left it — completion bumps it,
+    /// and the sidebar orders by it, so a session finishing has to move to the
+    /// top without a refetch. `None` only when the id is no longer indexed.
+    pub modified: Option<String>,
 }
 
 /// Drives [`SessionStatus`] from the mapped event stream plus the user's own
@@ -121,13 +125,21 @@ impl StatusTracker {
 /// propagated: status is derived state, and losing one update must not take
 /// down the stdout loop that noticed it.
 pub async fn publish_status(session_id: &str, status: SessionStatus, app: &AppHandle) {
-    if let Err(e) = set_session_status(session_id, status).await {
-        eprintln!("[status write err] {e}");
-    }
+    // Read back off the write rather than recomputed here: which statuses bump
+    // `modified` is `set_session_status`'s rule, and stating it twice is how the
+    // sidebar and the disk drift apart.
+    let modified = match set_session_status(session_id, status).await {
+        Ok(item) => item.map(|i| i.modified),
+        Err(e) => {
+            eprintln!("[status write err] {e}");
+            None
+        }
+    };
 
     let event = SessionStatusEvent {
         session_id: session_id.to_string(),
         status,
+        modified,
     };
     if let Err(e) = app.emit("session_status", &event) {
         eprintln!("[status emit err] {e}");

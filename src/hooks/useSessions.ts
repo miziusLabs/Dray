@@ -48,9 +48,15 @@ export function useSessions() {
     const [useWorktree, setUseWorktreeState] = useState(() => prefs.useWorktree);
     // Per-session, not global: sessions run concurrently and all of their events
     // arrive on the same channel, so a single value would clear on another's
-    // turn. The backend drives this via `session_status`; the index items carry
-    // the same field for the sidebar, but this map also covers sessions the
-    // current archived filter excludes from that list.
+    // turn. The backend drives this via `session_status`, and this map is the
+    // only live copy — the composer and the sidebar both read it, falling back
+    // to the index item's field, which is the value as of the last list fetch.
+    //
+    // Mirroring each change back into the index items instead looked equivalent
+    // and wasn't: a new session's status is published while its `send_msg` is
+    // still in flight, so the map write has no row to land on yet, and the
+    // snapshot pushed a moment later carries the `idle` it was indexed with. The
+    // sidebar's dot never appeared for the session that most needed it.
     const [statusBySession, setStatusBySession] = useState<Record<string, SessionStatus>>({});
     const [error, setError] = useState<string | null>(null);
 
@@ -590,9 +596,6 @@ selectedSessionIdRef.current = selectedSessionId;
 // already on screen, and the user clicking a finished one in the sidebar.
 const markSessionRead = (sessionId: string) => {
   setStatusBySession((prev) => ({ ...prev, [sessionId]: "idle" }));
-  setSessionIndexItems((prev) =>
-    prev.map((i) => (i.sessionId === sessionId ? { ...i, status: "idle" } : i)),
-  );
   // Cleared locally first — the click must feel instant. Losing the write
   // costs one stale unread dot after a restart, so a failure isn't surfaced.
   void invoke("mark_session_idle", { sessionId }).catch(() => {});
@@ -600,7 +603,17 @@ const markSessionRead = (sessionId: string) => {
 
 useEffect(() => {
   const listenerPromise = listen<SessionStatusEvent>("session_status", (event) => {
-    const { sessionId, status } = event.payload;
+    const { sessionId, status, modified } = event.payload;
+
+    // Only completion moves this, and the sidebar sorts by it — so a session
+    // finishing in the background rises to the top the moment it does, rather
+    // than sitting wherever its last send left it until the next refetch.
+    // Applied before the read branch below, which returns.
+    if (modified) {
+      setSessionIndexItems((prev) =>
+        prev.map((i) => (i.sessionId === sessionId ? { ...i, modified } : i)),
+      );
+    }
 
     // A session finishing on screen is read the moment it finishes.
     if (status === "completed" && sessionId === selectedSessionIdRef.current) {
@@ -609,9 +622,6 @@ useEffect(() => {
     }
 
     setStatusBySession((prev) => ({ ...prev, [sessionId]: status }));
-    setSessionIndexItems((prev) =>
-      prev.map((i) => (i.sessionId === sessionId ? { ...i, status } : i)),
-    );
   });
 
   return () => {
@@ -716,6 +726,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
 
 }

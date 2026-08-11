@@ -9,6 +9,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
 
 import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import { Button } from "@/components/ui/button";
@@ -27,10 +28,13 @@ import {
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { SessionIndexItem } from "@/types/events";
+import type { SessionIndexItem, SessionStatus } from "@/types/events";
 
 type SidebarProps = {
   items: SessionIndexItem[];
+  // The live status of every session the app has heard about this run. Wins over
+  // the item's own field, which is only as fresh as the last list fetch.
+  statusBySession: Record<string, SessionStatus>;
   selectedSessionId: string | null;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -106,6 +110,7 @@ export function DevBadge({ className }: { className?: string }) {
 
 export default function Sidebar({
   items,
+  statusBySession,
   selectedSessionId,
   collapsed,
   onToggleCollapsed,
@@ -211,6 +216,7 @@ export default function Sidebar({
             <SessionRow
               key={item.sessionId}
               item={item}
+              status={statusBySession[item.sessionId] ?? item.status}
               active={item.sessionId === selectedSessionId}
               onSelect={onSelect}
               onSetFlags={onSetFlags}
@@ -379,12 +385,14 @@ function RowMenu({
 
 function SessionRow({
   item,
+  status,
   active,
   onSelect,
   onSetFlags,
   onDelete,
 }: {
   item: SessionIndexItem;
+  status: SessionStatus;
   active: boolean;
   onSelect: (sessionId: string) => Promise<void>;
   onSetFlags: (
@@ -413,7 +421,11 @@ function SessionRow({
           // moment these controls landed. `min-h` keeps the height when they're
           // the only thing not rendered — an empty row still matches a populated
           // one.
-          "group relative flex min-h-7 w-full cursor-pointer items-center gap-2 rounded-md pl-2 pr-0.5 transition-colors",
+          // No left padding and no `gap`: the unread rail's own 8px slot is the
+          // indent that padding used to provide, so the title sits exactly where
+          // it always did and the rail can still touch the row's edge. The one
+          // gap that remains — title to hover controls — is `pl-2` on that slot.
+          "group relative flex min-h-7 w-full cursor-pointer items-center rounded-md pl-0 pr-0.5 transition-colors",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
           // `data-state` is the trigger's, set on this element by
           // `ContextMenuTrigger asChild` — an open menu holds the row lit, since
@@ -424,19 +436,23 @@ function SessionRow({
             : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50 data-[state=open]:bg-sidebar-accent/50",
         )}
       >
-        {/* Working pulses, finished-and-unread holds steady; idle earns nothing.
-            Absent rather than invisible: the title reclaims the width, so rows
-            don't all pay two dots of indent for the few that need one. */}
-        {item.status !== "idle" && (
-          <span
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              item.status === "in_progress"
-                ? "animate-pulse bg-muted-foreground/70"
-                : "bg-primary",
-            )}
-          />
-        )}
+        {/* Finished and unread. Working is shown on the right instead, in place
+            of the timestamp — this rail is the unread mark alone, so it keeps
+            the left edge it can be scanned down.
+
+            The slot is always here and the rail inside it is what comes and
+            goes: a mark that reflows the title would shift the text of a row
+            just because its agent finished. A fixed height rather than the row's
+            own, so the rail reads the same length whatever the row grows to. */}
+        <span className="flex w-2 shrink-0 items-center self-stretch">
+          {status === "completed" && (
+            <span
+              role="img"
+              aria-label="Unread"
+              className="h-3 w-0.5 rounded-[1px] bg-emerald-500"
+            />
+          )}
+        </span>
 
         <span className="min-w-0 flex-1 truncate text-ui">{item.title}</span>
 
@@ -447,13 +463,29 @@ function SessionRow({
             read at once; `visibility` would flip instantly while the button's
             inherited `transition-all` still crossfades, which is what read as an
             overlap. */}
-        <div className="relative flex shrink-0 items-center justify-end self-stretch">
+        <div className="relative flex shrink-0 items-center justify-end self-stretch pl-2">
           {/* `pointer-events-none` unconditionally: it's never a target, and a
               faded-but-present element still hit-tests — stacked on `right-0` it
               would otherwise swallow the cursor over the last button, which reads
               as that one button being dead while its neighbour works. */}
-          <span className="pointer-events-none absolute right-0 text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0">
-            {relativeTime(item.modified)}
+          <span className="pointer-events-none absolute right-0 flex items-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0">
+            {/* The orb takes the timestamp's place rather than a slot of its
+                own: a row that's working right now is the one row whose "last
+                activity" reads as stale, and one indicator per row is what keeps
+                the right edge quiet. 20 is the inline-with-text preset, and
+                `theme` is pinned for the same reason as everywhere else — the
+                orb's `auto` looks for `data-theme="dark|light"` and this app
+                stamps a palette name there. */}
+            {status === "in_progress" ? (
+              <ThinkingOrb
+                state="listening"
+                size={20}
+                theme="dark"
+                aria-label="Working"
+              />
+            ) : (
+              relativeTime(item.modified)
+            )}
           </span>
 
           {/* `opacity-0` rather than `hidden`: shadcn's button base sets

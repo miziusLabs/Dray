@@ -488,7 +488,13 @@ export type SessionStatus = "idle" | "in_progress" | "completed";
  * and composer update without a refetch. Like `SessionTitleEvent`, this is not
  * an `AgentEvent`: it's derived state, and must never reach the `.jsonl` log.
  */
-export type SessionStatusEvent = { sessionId: string, status: SessionStatus, };
+export type SessionStatusEvent = { sessionId: string, status: SessionStatus, 
+/**
+ * The entry's `modified` as the status write left it — completion bumps it,
+ * and the sidebar orders by it, so a session finishing has to move to the
+ * top without a refetch. `None` only when the id is no longer indexed.
+ */
+modified: string | null, };
 
 /**
  * Emitted as `session_title` once a generated title lands, so the sidebar row
