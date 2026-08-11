@@ -8,6 +8,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 
@@ -504,7 +505,9 @@ function SessionRow({
                 onSetFlags(item.sessionId, { archived: !item.archived })
               }
             >
-              <Check />
+              {/* Settle reads as "check this off"; unsettle isn't a second
+                  checkmark, it's undoing the first one. */}
+              {item.archived ? <Undo2 /> : <Check />}
             </RowAction>
           </div>
         </div>

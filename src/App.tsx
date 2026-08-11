@@ -44,6 +44,7 @@ function App() {
     busy,
     backgroundTasks,
     compacting,
+    working,
     contextUsage,
     error,
     setError,
@@ -136,7 +137,18 @@ function App() {
           onToggleCollapsed={toggleSidebar}
           onSelect={handleSelectSessionIndexItem}
           onNewSession={handleNewSession}
-          onSetFlags={setSessionFlags}
+          onSetFlags={async (sessionId, flags) => {
+            await setSessionFlags(sessionId, flags);
+            // Settling the open session leaves nothing to look at but the
+            // unsettle bar, so it goes back to the empty composer instead.
+            if (flags.archived === true && sessionId === selectedSessionId) {
+              handleNewSession();
+            } else if (flags.archived === false && showArchived) {
+              // Unsettling only happens from the settled list, and the row
+              // just left it — follow it back to where it landed.
+              setShowArchived(false);
+            }
+          }}
           onDelete={deleteSession}
           showArchived={showArchived}
           onToggleArchived={() => setShowArchived((v) => !v)}
@@ -246,6 +258,7 @@ function App() {
         busy={busy}
         backgroundTaskCount={backgroundTasks.length}
         compacting={compacting}
+        working={working}
       />
     </AppShell>
     </TooltipProvider>
