@@ -1894,6 +1894,58 @@ mod tests {
         ));
     }
 
+    /// The indicator this drives sits in the gap *after* a tool call, so the
+    /// event has to land there — not only at the top of a turn. Pinned against a
+    /// real capture rather than argued: every request in the fixture is
+    /// announced, and all but the first follow a tool result.
+    #[test]
+    fn announces_a_model_request_after_every_tool_result() {
+        let fixture = include_str!("fixtures/file_write.jsonl");
+        let mut mapper = Mapper::default();
+
+        let mut requests = 0;
+        let mut results = 0;
+        let mut announced_results = 0;
+        // Whether a tool result is still waiting for its request. Not "was the
+        // previous event a result": a rate-limit notice lands in between on one
+        // of these, and the indicator only needs the request to beat the next
+        // thing that draws.
+        let mut open_result = false;
+
+        for line in fixture.lines().filter(|line| !line.trim().is_empty()) {
+            let Ok(Some(event)) = mapper.map(parser::parse_line(line).unwrap()) else {
+                continue;
+            };
+
+            match event.payload {
+                AgentEventPayload::ModelRequestStarted => {
+                    requests += 1;
+                    if open_result {
+                        announced_results += 1;
+                        open_result = false;
+                    }
+                }
+                AgentEventPayload::ToolCallCompleted { .. } => {
+                    results += 1;
+                    open_result = true;
+                }
+                // Anything that draws closes the window: a request arriving
+                // after this would be marking a gap the reader never saw.
+                AgentEventPayload::AssistantText { .. }
+                | AgentEventPayload::Reasoning { .. }
+                | AgentEventPayload::ToolCallStarted { .. } => open_result = false,
+                _ => {}
+            }
+        }
+
+        assert_eq!(requests, 4, "every `requesting` line is announced");
+        assert_eq!(results, 3, "the capture's three tool calls all return");
+        assert_eq!(
+            announced_results, results,
+            "every tool result is followed by a request before anything draws"
+        );
+    }
+
     /// The null status rides between a compaction's two events, carrying
     /// `compact_result` rather than a state — the boundary is the same signal
     /// with numbers attached, so nothing is mapped from it.

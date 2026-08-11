@@ -9,9 +9,9 @@ import Reasoning from "@/components/chat/Reasoning";
 import WorkingIndicator from "@/components/chat/WorkingIndicator";
 import StreamingToolCall from "@/components/chat/StreamingToolCall";
 import TurnBlock from "@/components/chat/TurnBlock";
-import type { StreamingBlock } from "@/hooks/useSessions";
+import type { StreamingBlock, Working } from "@/hooks/useSessions";
 import { toolArgument } from "@/lib/tools";
-import { buildTranscript, rendersRow, type PendingAsk } from "@/lib/transcript";
+import { buildTranscript, type PendingAsk } from "@/lib/transcript";
 import type { SessionSnapshot } from "@/types/events";
 
 type ChatProps = {
@@ -28,6 +28,9 @@ type ChatProps = {
   /// Whether this session has a turn in flight, so the transcript can show the
   /// agent is still working.
   busy?: boolean;
+  /// The current blank-screen wait, or null when something is rendering. Decides
+  /// whether the working indicator shows, and carries the token count it draws.
+  working?: Working | null;
   /// Outstanding async subagents. Rendered after the turns rather than inside
   /// one: the tasks outlive the turn that spawned them, so no single block owns
   /// them — unlike the working indicator, which must sit where its turn's
@@ -86,6 +89,7 @@ export default function Chat({
   onRespondPermission,
   onAnswerQuestions,
   busy = false,
+  working = null,
   backgroundTaskCount = 0,
   compacting = false,
 }: ChatProps) {
@@ -135,9 +139,12 @@ export default function Chat({
   // by the same check from the other side — until the echo lands the previous
   // turn is still closed, so there is no open turn to attach to.
   //
-  // A turn stops waiting once it draws something. Not `work.length`, which
-  // counts harness plumbing the transcript renders nothing for — `turn_started`
-  // above all, which lands before any real output and hid the indicator early.
+  // Whether the turn is waiting comes from `working` — the harness says so
+  // directly, announcing a model request within 30ms of every tool result and
+  // again at the top of each turn. The old rule was "this turn has drawn no row
+  // yet", which could only ever describe the *first* wait in a turn: after that
+  // a row existed, so every later gap went unmarked. An agentic turn is mostly
+  // later gaps, and a thinking block draws nothing for its whole duration.
   const lastTurn = turns.at(-1);
   //
   // A compaction suppresses it outright. The turn is genuinely open and drawing
@@ -154,12 +161,12 @@ export default function Chat({
   // into a lingering card's window and undo the quiet it buys.
   const waitingTurn =
     busy &&
+    working &&
     !compacting &&
     cards.length === 0 &&
     lastTurn &&
     !lastTurn.completed &&
-    !streamingAny &&
-    !lastTurn.work.some(rendersRow)
+    !streamingAny
       ? lastTurn
       : null;
 
@@ -242,7 +249,7 @@ export default function Chat({
             // between turns: the preview belongs to this turn, not after it.
             footer={
               turn === waitingTurn ? (
-                <WorkingIndicator />
+                <WorkingIndicator tokens={working?.tokens ?? 0} />
               ) : turn !== streamingTurn ? (
                 undefined
               ) : streamingThinking ? (

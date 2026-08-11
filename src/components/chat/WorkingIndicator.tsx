@@ -1,17 +1,27 @@
 import { useState } from "react";
 import { ThinkingOrb } from "thinking-orbs";
 
-const LABELS = ["Working", "Cooking", "Brewing"];
+import { compactTokens } from "@/lib/format";
 
-/// The gap-filler between the user's prompt landing and the turn's first
-/// output. Both parts leave together the moment anything streams in — the
-/// transcript's own content takes over as the sign that work is happening.
-///
-/// The label is deliberately not "Thinking": the harness has a real thinking
-/// event that streams into `Reasoning`, and this covers the wait before any
-/// output at all, which is usually not that.
-export default function WorkingIndicator() {
+/// "Thinking" is one of these rather than a label the harness switches on. It is
+/// accurate often enough, and a word that changes under the reader — Working
+/// becoming Thinking a second later — draws more attention to itself than the
+/// distinction is worth. Nobody is waiting to be told which kind of wait this is.
+const LABELS = ["Working", "Cooking", "Brewing", "Thinking"];
+
+/// The gap-filler for every stretch where the agent is busy and the transcript
+/// has nothing to show — the wait before a turn's first output, and the wait
+/// after each tool result while the model composes its next move.
+export default function WorkingIndicator({
+  tokens = 0,
+}: {
+  /// Live reasoning-token estimate. Hidden at zero — every wait starts there,
+  /// and "0 tokens" reads as stalled rather than as starting.
+  tokens?: number;
+}) {
   // Picked once per mount, so it's one word per wait rather than one per render.
+  // The indicator unmounts as soon as content takes over, so each wait still
+  // draws its own word.
   const [label] = useState(() => LABELS[Math.floor(Math.random() * LABELS.length)]);
 
   return (
@@ -22,7 +32,16 @@ export default function WorkingIndicator() {
           app stamps a palette name (`neutral`) there instead. */}
       <ThinkingOrb state="listening" size={20} theme="dark" aria-hidden />
 
-      <span className="shimmer-text text-chat">{label}...</span>
+      <span className="shimmer-text text-chat">{label}</span>
+
+      {/* Dimmer than the label and deliberately unshimmered: the count is the
+          one part of this row that is really moving, so it doesn't need the
+          animation to say so, and pairing the two just made the row noisy. */}
+      {tokens > 0 && (
+        <span className="text-chat text-muted-foreground/60 tabular-nums">
+          {compactTokens(tokens)} tokens
+        </span>
+      )}
     </div>
   );
 }

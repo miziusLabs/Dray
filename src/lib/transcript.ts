@@ -102,7 +102,11 @@ const RENDERS = new Set([
 
 /// Whether an item draws a row. A group always does — it is built from tool
 /// calls, which always draw.
-export function rendersRow(item: WorkItem): boolean {
+///
+/// Module-private: the working indicator used to gate on this to mean "nothing
+/// has happened in this turn yet", which only ever described a turn's *first*
+/// wait. It reads `model_request_started` instead now.
+function rendersRow(item: WorkItem): boolean {
   return isToolGroup(item) || RENDERS.has(item.payload.type);
 }
 

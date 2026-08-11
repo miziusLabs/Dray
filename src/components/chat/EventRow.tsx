@@ -176,6 +176,9 @@ export default function EventRow({
     case "subagent_completed":
     case "background_tasks_changed":
     case "delta":
+    // Drives the working indicator, not a row. It marks the start of a wait, and
+    // a wait is exactly the thing with nothing to show.
+    case "model_request_started":
     // Drives the live indicator, not a row — the compaction it opens draws its
     // own line when it closes.
     case "context_compaction_started":

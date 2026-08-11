@@ -10,6 +10,21 @@ import { AgentEvent, ApprovalPolicy, BackgroundTask, BranchList, Effort, Model, 
 const DEFAULT_MODEL: ModelId = "haiku";
 const DEFAULT_EFFORT: Effort = "high";
 
+/// A stretch where the agent is busy and the transcript has nothing to show —
+/// a request in flight, or a thinking block, which Claude Code streams as an
+/// *empty* string with only a token estimate and so renders nothing at all from
+/// open to commit.
+///
+/// The two are not told apart. The indicator's word is picked at random and
+/// "Thinking" is one of the options, so knowing which kind of wait this is would
+/// change nothing on screen.
+export type Working = {
+  /// Live estimate off `usage_update.reasoningTokens`, which ticks a few times a
+  /// second while a thinking block is open. Zero on every other wait, and until
+  /// the first update lands.
+  tokens: number;
+};
+
 export type StreamingBlock = {
     index: number,
     type: "text" | "thinking" | "tool_use" | null
@@ -67,6 +82,11 @@ export function useSessions() {
     // snapshot pushed a moment later carries the `idle` it was indexed with. The
     // sidebar's dot never appeared for the session that most needed it.
     const [statusBySession, setStatusBySession] = useState<Record<string, SessionStatus>>({});
+    // sessionId → the current blank-screen wait, or absent when something is
+    // actually rendering. Not derived from the event list: `model_request_started`
+    // and the thinking deltas that drive it are transient and unpersisted, so
+    // this is the only place the state lives.
+    const [workingBySession, setWorkingBySession] = useState<Record<string, Working | null>>({});
     const [error, setError] = useState<string | null>(null);
 
 // What actually gets sent for the current model: its remembered pick, else its
@@ -218,6 +238,10 @@ const handleSendMsg = async (
   // Optimistic: the backend publishes the same transition once the prompt
   // reaches the child, but the composer must read busy the moment Enter lands.
   setStatusBySession((prev) => ({ ...prev, [sessionId]: "in_progress" }));
+  // Optimistic for the same reason, and it covers a window the CLI cannot: a
+  // new session has to spawn a process before it can announce anything, so the
+  // first `model_request_started` is a cold start away.
+  setWorkingBySession((prev) => ({ ...prev, [sessionId]: { tokens: 0 } }));
 
   try {
     const snapshot = await invoke<SessionSnapshot | null>("send_msg", {
@@ -261,6 +285,7 @@ const handleSendMsg = async (
     // A rejected invoke means the turn never started, so nothing will arrive to
     // clear the status — release it here rather than leaving the composer stuck.
     setStatusBySession((prev) => ({ ...prev, [sessionId]: "idle" }));
+    setWorkingBySession((prev) => ({ ...prev, [sessionId]: null }));
     setError(String(e));
   }
 };
@@ -433,6 +458,7 @@ const deleteSession = async (sessionId: string) => {
   setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId));
   setStreamingContentBlock(({ [sessionId]: _, ...rest }) => rest);
   setStatusBySession(({ [sessionId]: _, ...rest }) => rest);
+  setWorkingBySession(({ [sessionId]: _, ...rest }) => rest);
 
   if (selectedSessionId === sessionId) {
     handleNewSession();
@@ -548,6 +574,40 @@ useEffect(() => {
               });
             }
 
+            // The CLI announces a model request within 30ms of every tool
+            // result, and again at the top of each turn — so this marks the
+            // start of every blank stretch, which is what the old "nothing has
+            // rendered yet" rule could only approximate.
+            if (agentEvent.payload.type === "model_request_started") {
+              setWorkingBySession((prev) => ({
+                ...prev,
+                [agentEvent.sessionId]: { tokens: 0 },
+              }));
+            }
+
+            // A thinking block reports its size on `usage_update` and nowhere
+            // else. Only a non-null reading counts: the same payload carries
+            // every other usage field, so a turn-level update would otherwise
+            // reset the counter to zero mid-thought.
+            if (agentEvent.payload.type === "usage_update") {
+              const { reasoningTokens } = agentEvent.payload;
+              if (reasoningTokens !== null) {
+                setWorkingBySession((prev) => {
+                  const cur = prev[agentEvent.sessionId];
+                  if (!cur) return prev;
+                  return {
+                    ...prev,
+                    [agentEvent.sessionId]: { ...cur, tokens: reasoningTokens },
+                  };
+                });
+              }
+            }
+
+            // The turn is over whether or not a block ever opened.
+            if (agentEvent.payload.type === "turn_completed") {
+              setWorkingBySession((prev) => ({ ...prev, [agentEvent.sessionId]: null }));
+            }
+
             // Busy is no longer inferred from `turn_completed` here: a result
             // can land while a background subagent is still running, so the
             // backend's status machine owns the call and reports it on the
@@ -561,6 +621,18 @@ useEffect(() => {
             const sessionId = agentEvent.sessionId;
 
             if (payload.delta == "block_start") {
+                // Which kind opens decides whether the wait is over. Text and a
+                // tool call both start drawing immediately, so the indicator
+                // steps aside; a thinking block draws nothing at all, so the
+                // wait continues under a name it can finally be given. The
+                // counter restarts here — `usage_update` reports the block's own
+                // size, not a running session total.
+                setWorkingBySession((prev) =>
+                  payload.blockType.type === "thinking"
+                    ? { ...prev, [sessionId]: { tokens: 0 } }
+                    : { ...prev, [sessionId]: null },
+                );
+
                 // The block announces its kind up front — this is the only
                 // frame that knows thinking from text, since thinking deltas
                 // arrive as plain text_delta afterwards.
@@ -649,6 +721,14 @@ useEffect(() => {
       );
     }
 
+    // Whatever ended the turn — a result, an interrupt, a dead child — the
+    // agent is no longer waiting on anything. The backend's status machine is
+    // the one signal that covers every one of those exits, so the wait is
+    // cleared from here rather than from each of them.
+    if (status !== "in_progress") {
+      setWorkingBySession((prev) => ({ ...prev, [sessionId]: null }));
+    }
+
     // A session finishing on screen is read the moment it finishes.
     if (status === "completed" && sessionId === selectedSessionIdRef.current) {
       markSessionRead(sessionId);
@@ -692,6 +772,13 @@ const selectedStatus: SessionStatus = selectedSessionId
     ?? "idle"
   : "idle";
 const busy = selectedStatus === "in_progress";
+
+// Gated on `busy` for the same reason the background-task set is: this is live
+// state, and a session that ended while it was unmounted has no event left to
+// arrive and clear it.
+const working: Working | null = busy && selectedSessionId
+  ? workingBySession[selectedSessionId] ?? null
+  : null;
 
 // The set is republished whole on every change, so the last one in the log *is*
 // the current set — but only while the session is live. A stale non-empty set
@@ -760,6 +847,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
 
 }
