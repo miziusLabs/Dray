@@ -20,6 +20,7 @@ import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSessions } from "@/hooks/useSessions";
 import { baselineFor } from "@/lib/changes";
+import { playCelebration } from "@/lib/sound";
 import { buildTranscript } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 
@@ -139,14 +140,19 @@ function App() {
           onNewSession={handleNewSession}
           onSetFlags={async (sessionId, flags) => {
             await setSessionFlags(sessionId, flags);
+            if (flags.archived === true) {
+              playCelebration();
+            }
             // Settling the open session leaves nothing to look at but the
             // unsettle bar, so it goes back to the empty composer instead.
             if (flags.archived === true && sessionId === selectedSessionId) {
               handleNewSession();
-            } else if (flags.archived === false && showArchived) {
+            } else if (flags.archived === false) {
               // Unsettling only happens from the settled list, and the row
-              // just left it — follow it back to where it landed.
-              setShowArchived(false);
+              // just left it — follow it back to where it landed, onto the
+              // row itself.
+              if (showArchived) setShowArchived(false);
+              void handleSelectSessionIndexItem(sessionId);
             }
           }}
           onDelete={deleteSession}
