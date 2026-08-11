@@ -49,6 +49,11 @@ pub struct Mapper {
     /// that map — a session whose subagents ran a second model has two entries,
     /// and only the main thread's window describes the gauge.
     model: Option<String>,
+    /// How full the context was at the most recent main-thread `assistant`
+    /// message. The `result` line cannot answer this — see [`occupancy`] — so
+    /// the reading is taken per message and handed to `turn_completed` when the
+    /// turn closes.
+    last_occupancy: Option<u64>,
     /// Events the app synthesizes itself (the user's own prompt) must be
     /// numbered through this same counter, or `seq` develops gaps.
     seq: Arc<AtomicU64>,
@@ -77,6 +82,7 @@ impl Mapper {
             current_msg_id: None,
             block_indices: HashMap::new(),
             model: None,
+            last_occupancy: None,
             seq,
             subagent_seq: HashMap::new(),
             pending_permissions,
@@ -118,6 +124,15 @@ impl Mapper {
                 subagent_type,
                 ..
             } => {
+                // Only the main thread's. A subagent runs its own context, so
+                // its messages report a smaller occupancy that says nothing
+                // about the window this session's gauge measures.
+                if parent_tool_use_id.is_none() {
+                    if let Some(usage) = &message.usage {
+                        self.last_occupancy = Some(occupancy(usage));
+                    }
+                }
+
                 let payload = self.handle_assistant_msg(message, parent_tool_use_id.as_deref())?;
                 let subagent = subagent(parent_tool_use_id, subagent_type);
                 Ok(payload.map(|p| self.build(session_id, subagent, None, p)))
@@ -346,12 +361,21 @@ impl Mapper {
             }
             SystemEvent::CompactBoundary {
                 compact_metadata, ..
-            } => Ok(Some(AgentEventPayload::ContextCompacted {
-                trigger: compact_metadata.trigger,
-                pre_tokens: compact_metadata.pre_tokens,
-                post_tokens: compact_metadata.post_tokens,
-                duration_ms: compact_metadata.duration_ms,
-            })),
+            } => {
+                // The last message's reading described the context this
+                // compaction just discarded. The `result` closing the
+                // compaction would otherwise carry it forward and land *after*
+                // the boundary, overwriting the only honest post-compaction
+                // figure — `post_tokens`, which the boundary itself reports.
+                self.last_occupancy = None;
+
+                Ok(Some(AgentEventPayload::ContextCompacted {
+                    trigger: compact_metadata.trigger,
+                    pre_tokens: compact_metadata.pre_tokens,
+                    post_tokens: compact_metadata.post_tokens,
+                    duration_ms: compact_metadata.duration_ms,
+                }))
+            }
             _ => Ok(None),
         }
     }
@@ -660,6 +684,13 @@ impl Mapper {
     /// The accounting on a `result`, which both variants carry identically.
     /// `modelUsage` is walked once here and feeds two things: the record a usage
     /// page will read back, and the window the composer's gauge measures against.
+    ///
+    /// Occupancy comes from the turn's last message rather than from this line —
+    /// see [`occupancy`]. Zero, or no reading at all, leaves the window unset:
+    /// the `result` closing a compaction runs no inference and arrives *after*
+    /// the boundary, so reporting its emptiness would blank a gauge the
+    /// compaction had just set. Dropping it here keeps every consumer a plain
+    /// "latest wins".
     fn map_result_usage(
         &self,
         usage: &parser::Usage,
@@ -667,7 +698,14 @@ impl Mapper {
         model_usage: &Value,
     ) -> Usage {
         let per_model = map_model_usage(model_usage);
-        let window = context_window(&per_model, self.model.as_deref());
+        let window = match (self.last_occupancy, context_window(&per_model, self.model.as_deref()))
+        {
+            (Some(used_tokens), Some(max_tokens)) if used_tokens > 0 => Some(ContextWindow {
+                used_tokens,
+                max_tokens,
+            }),
+            _ => None,
+        };
 
         map_usage(usage, Some(total_cost_usd), per_model, window)
     }
@@ -783,6 +821,26 @@ impl From<parser::TaskUsage> for Usage {
     }
 }
 
+/// How full the context was for one request: the four counts summed.
+///
+/// They are disjoint slices of a single prompt — fresh input, what was written
+/// to cache, what was read back from it, and the reply — so for **one message**
+/// their sum is what the next request starts from.
+///
+/// It must be one message. `result.usage` carries the same four fields summed
+/// over every main-thread message in the turn, and an agentic turn re-reads the
+/// whole context once per tool call — so that sum is the context multiplied by
+/// the number of steps. A ten-step turn on a 40k context reports 400k. The
+/// error hides completely on single-message turns, where the sum *is* the last
+/// message, which is why `compaction.jsonl` agreed with its own `pre_tokens` to
+/// within two tokens and the bug shipped anyway.
+fn occupancy(wire: &parser::Usage) -> u64 {
+    wire.input_tokens
+        + wire.cache_creation_input_tokens
+        + wire.cache_read_input_tokens
+        + wire.output_tokens
+}
+
 /// The `result` line's `modelUsage` map, one [`ModelUsage`] per entry.
 ///
 /// Read field by field out of the raw `Value` rather than deserialized into a
@@ -836,17 +894,8 @@ fn map_usage(
     wire: &parser::Usage,
     cost_usd: Option<f64>,
     per_model: Vec<ModelUsage>,
-    window: Option<u64>,
+    context_window: Option<ContextWindow>,
 ) -> Usage {
-    // The four counts are disjoint slices of one prompt — fresh input, what was
-    // written to cache, what was read back from it, and the reply — so their sum
-    // is what the next turn starts from. Checked against a compaction's own
-    // accounting: 31870 here against its `pre_tokens` of 31872.
-    let used = wire.input_tokens
-        + wire.cache_creation_input_tokens
-        + wire.cache_read_input_tokens
-        + wire.output_tokens;
-
     Usage {
         input_tokens: Some(wire.input_tokens),
         output_tokens: Some(wire.output_tokens),
@@ -855,18 +904,7 @@ fn map_usage(
         reasoning_tokens: None,
         total_tokens: Some(wire.input_tokens + wire.output_tokens),
         cost_usd,
-        // Zero used means the turn ran no inference of its own — the `result`
-        // closing a compaction is the case, and it arrives *after* the boundary
-        // — and zero is not an occupancy reading. Dropping it here leaves every
-        // consumer a plain "latest wins" instead of making each special-case
-        // the same line.
-        context_window: match (used, window) {
-            (0, _) | (_, None) => None,
-            (used_tokens, Some(max_tokens)) => Some(ContextWindow {
-                used_tokens,
-                max_tokens,
-            }),
-        },
+        context_window,
         rate_limit: None,
         model: None,
         per_model,
@@ -1494,22 +1532,79 @@ mod tests {
             }
         }
 
-        // The second is what the compaction then reported as `pre_tokens`
-        // (31872), reached by summing the four disjoint counts.
+        // The second is the compaction's own `pre_tokens` (31872) less the tail
+        // of the final message's output, which the last `assistant` event
+        // predates. Tens of tokens on a 31k context — the gauge is a
+        // proportion, and being 34 light is invisible where being a multiple
+        // out is not.
+        //
+        // The third is `None`: the `result` closing a compaction ran no
+        // inference, and the boundary before it already published `post_tokens`.
         assert_eq!(
             windows,
             vec![
                 Some(ContextWindow {
-                    used_tokens: 31307,
+                    used_tokens: 31273,
                     max_tokens: 200_000
                 }),
                 Some(ContextWindow {
-                    used_tokens: 31870,
+                    used_tokens: 31836,
                     max_tokens: 200_000
                 }),
                 None,
             ]
         );
+    }
+
+    /// The regression that shipped: `result.usage` sums its four counts over
+    /// every main-thread message in the turn, so an agentic turn reports the
+    /// context once per step. This turn's `result` claims 401103 against a real
+    /// occupancy of 41102 — a tenfold overshoot that pins the gauge at 100% on a
+    /// 200k window and reads as 795k on the 1M one where it was caught.
+    ///
+    /// A single-message turn hides it completely, which is why the compaction
+    /// fixture agreed with `pre_tokens` and the bug shipped anyway.
+    #[test]
+    fn occupancy_is_one_message_not_the_turns_sum() {
+        let fixture = include_str!("fixtures/multi_turn.jsonl");
+        let mut mapper = Mapper::default();
+        let mut first: Option<ContextWindow> = None;
+
+        for line in fixture.lines().filter(|line| !line.trim().is_empty()) {
+            let Ok(Some(event)) = mapper.map(parser::parse_line(line).unwrap()) else {
+                continue;
+            };
+
+            if let AgentEventPayload::TurnCompleted {
+                usage: Some(usage), ..
+            } = event.payload
+            {
+                first = usage.context_window;
+                break;
+            }
+        }
+
+        assert_eq!(first.map(|w| w.used_tokens), Some(41102));
+
+        // What the old formula produced, read off that same line so the two
+        // numbers can never drift apart in this test.
+        let line = fixture
+            .lines()
+            .find(|line| line.contains(r#""type":"result""#))
+            .unwrap();
+        let usage = &serde_json::from_str::<Value>(line).unwrap()["usage"];
+        let summed: u64 = [
+            "input_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "output_tokens",
+        ]
+        .iter()
+        .map(|field| usage[field].as_u64().unwrap())
+        .sum();
+
+        assert_eq!(summed, 401_103);
+        assert!(summed > 9 * 41_102, "the overshoot is a multiple, not a drift");
     }
 
     /// A window keyed by a model this session never ran is not this session's

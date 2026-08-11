@@ -43,9 +43,10 @@ impl Usage {
 /// monotonic across turns, not a per-turn figure.
 ///
 /// That is the whole reason it is carried and persisted. [`Usage`]'s own counts
-/// describe a turn's *last message* rather than the turn (which is what makes
-/// them a context reading), so nothing else in the log can say what a turn
-/// actually burned. Here it is the difference between consecutive readings.
+/// are the harness's per-turn sum over every main-thread message, which double
+/// counts a context re-read once per tool call and so describes neither the turn
+/// nor the context. Here a turn's real consumption is the difference between
+/// consecutive readings.
 ///
 /// Every field is optional and the harness's own map is left untyped upstream:
 /// this rides `turn_completed`, and a `result` line that fails to parse strands
