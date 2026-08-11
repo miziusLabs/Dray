@@ -144,6 +144,17 @@ async fn set_session_flags(
         .map_err(|e| e.to_string())
 }
 
+/// Removes a session for good: its child, its index entry, and its log. `false`
+/// means the index never held the id, which the sidebar treats the same as a
+/// success — either way the row it was asked to remove is gone.
+#[tauri::command]
+async fn delete_session(
+    session_id: &str,
+    manager: State<'_, SessionManager>,
+) -> Result<bool, String> {
+    manager.delete(session_id).await.map_err(|e| e.to_string())
+}
+
 /// Stops the in-flight turn without killing the session — the CLI aborts its
 /// tools and streaming, ends the turn, and stays alive for the next prompt.
 #[tauri::command]
@@ -238,6 +249,7 @@ pub fn run() {
             list_branches,
             checkout_branch,
             set_session_flags,
+            delete_session,
             mark_session_idle,
             interrupt_session,
             respond_permission,

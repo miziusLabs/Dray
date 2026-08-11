@@ -61,6 +61,7 @@ function App() {
     handleSelectSessionIndexItem,
     handleNewSession,
     setSessionFlags,
+    deleteSession,
   } = useSessions();
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
@@ -117,6 +118,7 @@ function App() {
           onSelect={handleSelectSessionIndexItem}
           onNewSession={handleNewSession}
           onSetFlags={setSessionFlags}
+          onDelete={deleteSession}
           showArchived={showArchived}
           onToggleArchived={() => setShowArchived((v) => !v)}
         />

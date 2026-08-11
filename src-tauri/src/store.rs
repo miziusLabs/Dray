@@ -349,6 +349,38 @@ pub async fn set_session_flags(
     Ok(Some(updated))
 }
 
+/// Drops one session from the index and deletes its `.jsonl` log. Returns
+/// whether the index held it — a `false` still means the log was removed if one
+/// was there, so an orphaned log can't outlive the entry that named it.
+///
+/// Index first: a log with no entry is invisible, an entry with no log reads
+/// back as a session with no events. Only one of those is a lie the UI shows.
+pub async fn delete_session(session_id: &str) -> Result<bool> {
+    let existed = {
+        let _guard = INDEX_LOCK.lock().await;
+
+        let mut sessions = list_session_index_items().await?;
+        let before = sessions.len();
+        sessions.retain(|i| i.session_id != session_id);
+
+        if sessions.len() == before {
+            false
+        } else {
+            write_session_index(&sessions).await?;
+            true
+        }
+    };
+
+    let path = get_session_path(session_id).await?;
+    match fs::remove_file(&path).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e).context("failed to delete session log"),
+    }
+
+    Ok(existed)
+}
+
 /// Sets one entry's status. Returns the entry as written, or `None` if the id
 /// is unknown.
 ///

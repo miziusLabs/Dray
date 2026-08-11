@@ -399,6 +399,31 @@ const setSessionFlags = async (
   }
 };
 
+// Removes the session everywhere it's held, backend first: the row must not
+// disappear before the disk agrees, or a failed delete leaves the sidebar
+// missing a session that is still there on the next launch.
+//
+// Deleting the open one falls back to the empty composer rather than to a
+// neighbour — the next session is not a guess worth making, and `handleNewSession`
+// is the one path that also restores the user's own defaults.
+const deleteSession = async (sessionId: string) => {
+  try {
+    await invoke<boolean>("delete_session", { sessionId });
+  } catch (e) {
+    setError(String(e));
+    return;
+  }
+
+  setSessionIndexItems((prev) => prev.filter((i) => i.sessionId !== sessionId));
+  setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId));
+  setStreamingContentBlock(({ [sessionId]: _, ...rest }) => rest);
+  setStatusBySession(({ [sessionId]: _, ...rest }) => rest);
+
+  if (selectedSessionId === sessionId) {
+    handleNewSession();
+  }
+};
+
 // Refetched on every toggle rather than filtered from one cached list: the two
 // views are disjoint, so holding both would mean tracking which of them a flag
 // write belongs to.
@@ -691,6 +716,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
 
 }

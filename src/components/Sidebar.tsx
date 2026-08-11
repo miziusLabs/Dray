@@ -1,8 +1,23 @@
-import { useMemo } from "react";
-import { Check, CheckCheck, Inbox, Pin, Plus, Search } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  Check,
+  CheckCheck,
+  GitBranchPlus,
+  Inbox,
+  Pin,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
 
 import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import {
   Tooltip,
@@ -25,6 +40,7 @@ type SidebarProps = {
     sessionId: string,
     flags: { archived?: boolean; pinned?: boolean },
   ) => Promise<void>;
+  onDelete: (sessionId: string) => Promise<void>;
   showArchived: boolean;
   onToggleArchived: () => void;
 };
@@ -96,6 +112,7 @@ export default function Sidebar({
   onSelect,
   onNewSession,
   onSetFlags,
+  onDelete,
   showArchived,
   onToggleArchived,
 }: SidebarProps) {
@@ -197,6 +214,7 @@ export default function Sidebar({
               active={item.sessionId === selectedSessionId}
               onSelect={onSelect}
               onSetFlags={onSetFlags}
+              onDelete={onDelete}
             />
           ))
         )}
@@ -278,11 +296,93 @@ function RowAction({
   );
 }
 
+/// The row's right-click menu. Delete confirms in place — a second surface for
+/// two words costs more than it protects, and the menu is already open under the
+/// cursor. Both steps live in one `Content` so the menu holds its position
+/// across the swap; reanchoring mid-decision would move the target being aimed
+/// at.
+///
+/// `confirming` resets on open rather than on close. The content unmounts either
+/// way, but the state lives out here, so without it a cancelled delete would
+/// reopen already armed.
+///
+/// A context menu can't be opened programmatically, so `ContextMenu` takes no
+/// `open` — the trigger's own `data-state` is what the row styles off, and there
+/// is no second copy of the flag to fall out of step with it.
+function RowMenu({
+  onDelete,
+  children,
+}: {
+  onDelete: () => void;
+  children: React.ReactNode;
+}) {
+  const [confirming, setConfirming] = useState(false);
+
+  return (
+    <ContextMenu onOpenChange={(open) => open && setConfirming(false)}>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+
+      {/* Portaled, so a click in here never reaches the row's select handler. */}
+      <ContextMenuContent className="w-56">
+        {confirming ? (
+          <>
+            {/* No title in the copy: the menu opens on the row, which stays on
+                screen beside it and already names the session. */}
+            <p className="px-1.5 py-1 text-ui text-muted-foreground">
+              Are you sure?
+            </p>
+
+            {/* Items rather than buttons, so selecting either closes the menu on
+                its own — nothing here can reopen it, and a stranded confirm step
+                is the one state with no way out but Escape. */}
+            <div className="mt-1 flex gap-1">
+              <ContextMenuItem className="flex-1 justify-center text-ui">
+                Cancel
+              </ContextMenuItem>
+              <ContextMenuItem
+                variant="destructive"
+                onSelect={onDelete}
+                className="flex-1 justify-center bg-destructive/10 text-ui"
+              >
+                Yes, Delete
+              </ContextMenuItem>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Inert until forking exists. Disabled rather than absent, so the
+                menu's shape doesn't change when it lands. */}
+            <ContextMenuItem disabled className="text-ui">
+              <GitBranchPlus />
+              Fork
+            </ContextMenuItem>
+
+            {/* `preventDefault` holds the menu open — an item select closes it by
+                default, which would take the confirm step down with it. */}
+            <ContextMenuItem
+              variant="destructive"
+              className="text-ui"
+              onSelect={(e) => {
+                e.preventDefault();
+                setConfirming(true);
+              }}
+            >
+              <Trash2 />
+              Delete
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 function SessionRow({
   item,
   active,
   onSelect,
   onSetFlags,
+  onDelete,
 }: {
   item: SessionIndexItem;
   active: boolean;
@@ -291,85 +391,96 @@ function SessionRow({
     sessionId: string,
     flags: { archived?: boolean; pinned?: boolean },
   ) => Promise<void>;
+  onDelete: (sessionId: string) => Promise<void>;
 }) {
   return (
-    // A button can't nest a button, so the row is a div with a click handler and
-    // the pin/settle controls are the only real buttons inside it.
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => void onSelect(item.sessionId)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          void onSelect(item.sessionId);
-        }
-      }}
-      className={cn(
-        // No vertical padding: the 24px hover buttons are the tallest thing in
-        // the row, so they'd add to any padding here and make the row grow the
-        // moment these controls landed. `min-h` keeps the height when they're the
-        // only thing not rendered — an empty row still matches a populated one.
-        "group relative flex min-h-7 w-full cursor-pointer items-center gap-2 rounded-md pl-2 pr-0.5 transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-        active
-          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-          : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50",
-      )}
-    >
-      {/* Working pulses, finished-and-unread holds steady; idle earns nothing.
-          Absent rather than invisible: the title reclaims the width, so rows
-          don't all pay two dots of indent for the few that need one. */}
-      {item.status !== "idle" && (
-        <span
-          className={cn(
-            "size-1.5 shrink-0 rounded-full",
-            item.status === "in_progress"
-              ? "animate-pulse bg-muted-foreground/70"
-              : "bg-primary",
-          )}
-        />
-      )}
+    <RowMenu onDelete={() => void onDelete(item.sessionId)}>
+      {/* A button can't nest a button, so the row is a div with a click handler
+          and the pin/settle controls are the only real buttons inside it. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => void onSelect(item.sessionId)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            void onSelect(item.sessionId);
+          }
+        }}
+        className={cn(
+          // No vertical padding: the 24px hover buttons are the tallest thing in
+          // the row, so they'd add to any padding here and make the row grow the
+          // moment these controls landed. `min-h` keeps the height when they're
+          // the only thing not rendered — an empty row still matches a populated
+          // one.
+          "group relative flex min-h-7 w-full cursor-pointer items-center gap-2 rounded-md pl-2 pr-0.5 transition-colors",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+          // `data-state` is the trigger's, set on this element by
+          // `ContextMenuTrigger asChild` — an open menu holds the row lit, since
+          // the cursor is over the menu rather than the row it belongs to. In the
+          // inactive branch only: the selected row's fill is already stronger.
+          active
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50 data-[state=open]:bg-sidebar-accent/50",
+        )}
+      >
+        {/* Working pulses, finished-and-unread holds steady; idle earns nothing.
+            Absent rather than invisible: the title reclaims the width, so rows
+            don't all pay two dots of indent for the few that need one. */}
+        {item.status !== "idle" && (
+          <span
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              item.status === "in_progress"
+                ? "animate-pulse bg-muted-foreground/70"
+                : "bg-primary",
+            )}
+          />
+        )}
 
-      <span className="min-w-0 flex-1 truncate text-ui">{item.title}</span>
+        <span className="min-w-0 flex-1 truncate text-ui">{item.title}</span>
 
-      {/* One slot for both, sized by the buttons and always holding that width —
-          so a long title truncates against it either way and nothing reflows on
-          hover. The two children stack via `absolute` on the date and crossfade
-          on `opacity` over the same duration, so they never both read at once;
-          `visibility` would flip instantly while the button's inherited
-          `transition-all` still crossfades, which is what read as an overlap. */}
-      <div className="relative flex shrink-0 items-center justify-end self-stretch">
-        {/* `pointer-events-none` unconditionally: it's never a target, and a
-            faded-but-present element still hit-tests — stacked on `right-0` it
-            would otherwise swallow the cursor over the last button, which reads
-            as that one button being dead while its neighbour works. */}
-        <span className="pointer-events-none absolute right-0 text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0">
-          {relativeTime(item.modified)}
-        </span>
+        {/* One slot for both, sized by the buttons and always holding that width
+            — so a long title truncates against it either way and nothing reflows
+            on hover. The two children stack via `absolute` on the date and
+            crossfade on `opacity` over the same duration, so they never both
+            read at once; `visibility` would flip instantly while the button's
+            inherited `transition-all` still crossfades, which is what read as an
+            overlap. */}
+        <div className="relative flex shrink-0 items-center justify-end self-stretch">
+          {/* `pointer-events-none` unconditionally: it's never a target, and a
+              faded-but-present element still hit-tests — stacked on `right-0` it
+              would otherwise swallow the cursor over the last button, which reads
+              as that one button being dead while its neighbour works. */}
+          <span className="pointer-events-none absolute right-0 text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0">
+            {relativeTime(item.modified)}
+          </span>
 
-        {/* `opacity-0` rather than `hidden`: shadcn's button base sets
-            `inline-flex`, and Tailwind emits that after `hidden` at equal
-            specificity, so a `display` utility here silently loses.
-            `pointer-events-none` keeps the invisible buttons unclickable. */}
-        <div className="pointer-events-none relative flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100">
-          <RowAction
-            label={item.pinned ? "Unpin" : "Pin"}
-            active={item.pinned}
-            onClick={() => onSetFlags(item.sessionId, { pinned: !item.pinned })}
-          >
-            <Pin />
-          </RowAction>
+          {/* `opacity-0` rather than `hidden`: shadcn's button base sets
+              `inline-flex`, and Tailwind emits that after `hidden` at equal
+              specificity, so a `display` utility here silently loses.
+              `pointer-events-none` keeps the invisible buttons unclickable. */}
+          <div className="pointer-events-none relative flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-data-[state=open]:pointer-events-auto group-data-[state=open]:opacity-100">
+            <RowAction
+              label={item.pinned ? "Unpin" : "Pin"}
+              active={item.pinned}
+              onClick={() => onSetFlags(item.sessionId, { pinned: !item.pinned })}
+            >
+              <Pin />
+            </RowAction>
 
-          <RowAction
-            label={item.archived ? "Unsettle" : "Settle"}
-            active={item.archived}
-            onClick={() => onSetFlags(item.sessionId, { archived: !item.archived })}
-          >
-            <Check />
-          </RowAction>
+            <RowAction
+              label={item.archived ? "Unsettle" : "Settle"}
+              active={item.archived}
+              onClick={() =>
+                onSetFlags(item.sessionId, { archived: !item.archived })
+              }
+            >
+              <Check />
+            </RowAction>
+          </div>
         </div>
       </div>
-    </div>
+    </RowMenu>
   );
 }

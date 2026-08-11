@@ -10,7 +10,7 @@ use crate::{
     },
     models::{find_model, resolve_effort, Effort, Model, ModelId},
     store::{
-        append_session_event, append_session_index_item, get_session_index_item,
+        append_session_event, append_session_index_item, delete_session, get_session_index_item,
         list_session_events, resolve_worktree_name, set_session_status,
         touch_session_index_item, worktree_path, SessionIndexItem, SessionSnapshot,
         SessionStatus,
@@ -341,6 +341,20 @@ impl SessionManager {
             bail!("no running session {session_id}");
         };
         session.answer_questions(request_id, answers, app).await
+    }
+
+    /// Deletes a session: kills its child if one is running, then drops the
+    /// index entry and the log. Returns whether the index held it.
+    ///
+    /// The child goes first and its lock is released before the disk work, so a
+    /// dying process can't append one last event to a file we just removed.
+    pub async fn delete(&self, session_id: &str) -> Result<bool> {
+        let running = self.sessions.lock().await.remove(session_id);
+        if let Some(session) = running {
+            session.kill().await?;
+        }
+
+        delete_session(session_id).await
     }
 
     /// Clears a finished session's unread mark: `Completed` → `Idle`, anything
