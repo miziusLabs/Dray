@@ -187,7 +187,7 @@ export default function Sidebar({
       <div className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 pl-2 pr-0">
         {sorted.length === 0 ? (
           <p className="px-2 py-6 text-ui text-muted-foreground">
-            {showArchived ? "Nothing settled yet." : "No sessions yet. Start one below."}
+            {showArchived ? "Nothing settled yet." : "No tasks yet."}
           </p>
         ) : (
           sorted.map((item) => (
