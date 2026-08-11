@@ -13,7 +13,16 @@ const DEFAULT_EFFORT: Effort = "high";
 export type StreamingBlock = {
     index: number,
     type: "text" | "thinking" | "tool_use" | null
+    /// Accumulated deltas. Prose for a text or thinking block; for a `tool_use`
+    /// one it is the raw `input_json_delta` stream, which is a prefix of a JSON
+    /// object rather than anything renderable — see [streamingCall](../lib/streaming.ts).
     text: string,
+    /// Both set only on a `tool_use` block, from the `block_start` that opens it.
+    /// The name is what the preview row renders before any argument has arrived;
+    /// `callId` is the tool_use id, which the committed `tool_call_started`
+    /// repeats as its `callId` and is matched on to retire this preview.
+    name: string | null,
+    callId: string | null,
 }
 
 export function useSessions() {
@@ -524,6 +533,21 @@ useEffect(() => {
               });
             }
 
+            // `tool_call_started` carries no `BlockRef` — the mapper builds it
+            // from the committed `assistant` message rather than from the stream
+            // — so the preview is retired on the tool_use id the two do share.
+            // Here rather than on `block_stop` for the same reason as above: the
+            // stop lands ~20ms later, and waiting for it draws both rows for a
+            // frame with the preview shoved down by its own replacement.
+            if (agentEvent.payload.type === "tool_call_started") {
+              const { callId } = agentEvent.payload;
+              setStreamingContentBlock((prev) => {
+                const cur = prev[agentEvent.sessionId];
+                if (!cur || cur.callId !== callId) return prev;
+                return { ...prev, [agentEvent.sessionId]: null };
+              });
+            }
+
             // Busy is no longer inferred from `turn_completed` here: a result
             // can land while a background subagent is still running, so the
             // backend's status machine owns the call and reports it on the
@@ -542,7 +566,17 @@ useEffect(() => {
                 // arrive as plain text_delta afterwards.
                 setStreamingContentBlock((prev) => ({
                   ...prev,
-                  [sessionId]: { index: payload.block.index, text: "", type: payload.blockType.type },
+                  [sessionId]: {
+                    index: payload.block.index,
+                    text: "",
+                    type: payload.blockType.type,
+                    // Carried rather than dropped: on a large `Write` this is the
+                    // only thing identifying the call for the ~40s its arguments
+                    // take to stream, and the row drawn from it is what stands in
+                    // for the committed event that arrives at the end.
+                    name: payload.blockType.type === "tool_use" ? payload.blockType.name : null,
+                    callId: payload.blockType.type === "tool_use" ? payload.blockType.id : null,
+                  },
                 }));
             } else if (payload.delta == "text_delta") {
                 setStreamingContentBlock((prev) => {

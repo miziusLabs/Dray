@@ -7,6 +7,7 @@ import PermissionRequest from "@/components/chat/PermissionRequest";
 import QuestionRequest from "@/components/chat/QuestionRequest";
 import Reasoning from "@/components/chat/Reasoning";
 import WorkingIndicator from "@/components/chat/WorkingIndicator";
+import StreamingToolCall from "@/components/chat/StreamingToolCall";
 import TurnBlock from "@/components/chat/TurnBlock";
 import type { StreamingBlock } from "@/hooks/useSessions";
 import { toolArgument } from "@/lib/tools";
@@ -107,7 +108,21 @@ export default function Chat({
   const streamingText = streamingBlock?.type === "text" ? streamingBlock.text : "";
   const streamingThinking =
     streamingBlock?.type === "thinking" ? streamingBlock.text : "";
-  const streamingAny = streamingText || streamingThinking;
+
+  // A tool call the model is still composing. Unlike the two above this is
+  // non-empty from the first frame — the block announces its tool before any
+  // argument arrives, and having only the name is exactly the case the preview
+  // exists to cover.
+  const streamingTool =
+    streamingBlock?.type === "tool_use" && streamingBlock.name
+      ? { name: streamingBlock.name, partialJson: streamingBlock.text }
+      : null;
+
+  // Kept a string rather than a boolean: the scroll-pin effect below takes this
+  // as a dependency, and prose re-pinning per delta depends on the value
+  // changing as it grows. The tool preview is one fixed-height row, so a
+  // constant is right for it — it only has to differ from "".
+  const streamingAny = streamingText || streamingThinking || (streamingTool ? "tool" : "");
 
   // The turn the indicator belongs to, or null when nothing is waiting on
   // output.
@@ -235,6 +250,11 @@ export default function Chat({
                 // in its `streaming` presentation — the multi-line preview keeps
                 // growing live; it collapses to one line once committed.
                 <Reasoning text={streamingThinking} encrypted={false} streaming />
+              ) : streamingTool ? (
+                // Must come before the text arm: a tool block leaves
+                // `streamingText` empty, so falling through would render an
+                // empty message where the row belongs.
+                <StreamingToolCall {...streamingTool} />
               ) : (
                 <AssistantMessage text={streamingText} streaming />
               )

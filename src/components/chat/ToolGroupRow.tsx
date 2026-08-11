@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 
 import EventRow from "@/components/chat/EventRow";
+import { countChanges, editSides } from "@/lib/diff";
 import { groupLabel, groupVerb } from "@/lib/tools";
 import type { ToolGroup } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,44 @@ export default function ToolGroupRow({
       event.payload.type === "tool_call_started" &&
       resultByCallId.get(event.payload.callId)?.isError,
   );
+
+  // The run's total `+N -M`, summed from the same per-call counts the rows
+  // underneath show, so the header can never disagree with what expanding it
+  // reveals. Without this a run of edits collapses to "Edited 1 file · 4 calls"
+  // — the count says something happened four times and nothing says how much
+  // changed, which is the one number the reader wanted from a collapsed diff.
+  //
+  // Summing per-call fragment diffs is deliberate. An `Edit` diffs its replaced
+  // region rather than the file, so these are region counts and adding them
+  // gives the run's total churn — not what `git --stat` would report against the
+  // file's original, which no call in the group carries.
+  //
+  // Keyed on the call count rather than on `calls`: a committed call's input is
+  // immutable, so a run can only ever grow, and re-parsing every diff in the
+  // group on each of a streaming turn's renders is the cost this avoids.
+  const changes = useMemo(() => {
+    let added = 0;
+    let removed = 0;
+    let any = false;
+
+    for (const event of group.calls) {
+      const { payload } = event;
+      // `rawInput` means the call never parsed as JSON, so there is nothing to
+      // diff — it is dropped from the sum rather than counted as zero.
+      if (payload.type !== "tool_call_started") continue;
+      if (payload.toolType !== "file_edit" || payload.rawInput) continue;
+
+      const sides = editSides(payload.input);
+      if (!sides) continue;
+
+      const count = countChanges(sides);
+      added += count.added;
+      removed += count.removed;
+      any = true;
+    }
+
+    return any ? { added, removed } : null;
+  }, [group.key, group.calls.length]);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -68,6 +107,17 @@ export default function ToolGroupRow({
             gap is visible, and without it a 3-row group can say "1 file". */}
         {group.calls.length > group.targets && (
           <span className="shrink-0">{group.calls.length} calls</span>
+        )}
+
+        {/* Same slot and same styling as the single row's, so a run that grows
+            past `GROUP_MIN` doesn't move its own counter when the group forms
+            around it. */}
+        {changes && (changes.added > 0 || changes.removed > 0) && (
+          <span className="shrink-0 font-mono tabular-nums">
+            {changes.added > 0 && <span className="text-emerald-400">+{changes.added}</span>}
+            {changes.added > 0 && changes.removed > 0 && " "}
+            {changes.removed > 0 && <span className="text-destructive">-{changes.removed}</span>}
+          </span>
         )}
 
         <ChevronRight

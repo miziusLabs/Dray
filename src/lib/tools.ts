@@ -116,6 +116,21 @@ export function groupLabel(name: string, count: number, pending: boolean): strin
   return `${groupVerb(name, pending)} ${count} ${noun}`;
 }
 
+/// The label a streaming call reads under before its arguments have arrived —
+/// "Writing a file", "Running a command". The tool name lands at
+/// `content_block_start`, its target up to a second and a half later on a large
+/// call, so this covers the window where the tool is known and nothing else is.
+///
+/// Uses the group verb, since the same reason Bash reads better conjugated in a
+/// group applies here: there is no command beside it yet to make "Bash" a label.
+/// A tool with no entry gets its own name, which is still better than a blank
+/// row.
+export function streamingLabel(name: string): string {
+  const noun = TOOL_VERBS[name]?.[2];
+  if (!noun) return groupVerb(name, true);
+  return `${groupVerb(name, true)} ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`;
+}
+
 /// Absolute paths dominate the row otherwise; the last two segments are enough
 /// to recognize a file and still fit beside the tool name.
 export function shortenPath(path: string): string {
