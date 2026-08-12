@@ -51,6 +51,17 @@ export function changeRange(events: AgentEvent[]): ChangeRange {
   return { baseline: null, head: null };
 }
 
+/// Whether the last completed turn left the tree different from what it found.
+///
+/// Free and exact, so it needs no git call and no file list: both sides are
+/// content-addressed tree ids, so ids that differ *are* a changed tree. A turn
+/// that edited a file and put it back reads as unchanged, which is also what
+/// the panel would show. A null head is a turn still running, where nothing is
+/// settled yet.
+export function turnChangedTree({ baseline, head }: ChangeRange): boolean {
+  return !!baseline && !!head && baseline !== head;
+}
+
 /// Splits a path into the part that gets dimmed and the part that doesn't. The
 /// basename is what the reader scans for, so it stays at full contrast while
 /// the directories recede.

@@ -20,7 +20,7 @@ import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSessions } from "@/hooks/useSessions";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
-import { changeRange } from "@/lib/changes";
+import { changeRange, turnChangedTree } from "@/lib/changes";
 import { playCelebration } from "@/lib/sound";
 import { buildTranscript } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
@@ -108,6 +108,19 @@ function App() {
     () => changeRange(selectedSession?.events ?? []),
     [selectedSession?.events],
   );
+
+  // Read off the two tree ids rather than off the panel's file list: the panel
+  // pauses its reads while hidden, which is exactly when the indicator has to
+  // be right.
+  const lastTurnChanged = turnChangedTree({ baseline, head });
+
+  // The toggle's own click lands on what its glyph promised — a git icon that
+  // opened the subagents tab would be a lie. ⌘E stays a plain toggle: it shows
+  // nothing, so it promises nothing.
+  const handleTogglePanel = () => {
+    if (!panelOpen && lastTurnChanged) setPanelTab("changes");
+    togglePanel();
+  };
 
   // What tells the panel to re-read — a cache key, not a count. The event total
   // moves as a turn's writes land, and `busy` covers the turn ending, where the
@@ -221,7 +234,13 @@ function App() {
 
           <SessionHeader session={selectedSession} className="flex-1" />
 
-          {selectedSession && <PanelToggle onToggle={togglePanel} open={panelOpen} />}
+          {selectedSession && (
+            <PanelToggle
+              onToggle={handleTogglePanel}
+              open={panelOpen}
+              changes={lastTurnChanged}
+            />
+          )}
         </header>
       }
       panel={

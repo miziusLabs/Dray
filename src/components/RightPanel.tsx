@@ -1,3 +1,5 @@
+import { GitCompare } from "lucide-react";
+
 import PanelRightIcon from "@/components/icons/PanelRightIcon";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
@@ -9,24 +11,54 @@ import { cn } from "@/lib/utils";
 /// `App` so the toggle and the thing it toggles stay in one file, and outside
 /// [RightPanel] itself because the pane doesn't exist before a session does —
 /// the button has to outlive it. Mirrors `SidebarToggle` on the far side.
-export function PanelToggle({ onToggle, open }: { onToggle: () => void; open: boolean }) {
+export function PanelToggle({
+  onToggle,
+  open,
+  changes = false,
+}: {
+  onToggle: () => void;
+  open: boolean;
+  /// The last turn left the tree changed. Swaps the glyph for a git one while
+  /// the pane is closed, so one button both says there is something to see and
+  /// is the way to it — which is the whole of the quick-access rail that was
+  /// otherwise going to sit beside it. Nothing to say once the pane is open:
+  /// the changes are on screen, and the toggle goes back to being a toggle.
+  changes?: boolean;
+}) {
+  const indicating = changes && !open;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         {/* Held back at rest — it's chrome, not content — and brought to full
-            strength under the cursor. */}
+            strength under the cursor. The indicator is content, so it skips
+            the fade rather than announcing itself at 80%. */}
         <Button
           variant="ghost"
           size="icon-sm"
           onClick={onToggle}
-          aria-label="Toggle panel"
-          className="opacity-80 transition-opacity hover:opacity-100"
+          aria-label={indicating ? "Show changes" : "Toggle panel"}
+          className={cn(
+            "transition-opacity",
+            indicating ? "opacity-100" : "opacity-80 hover:opacity-100",
+          )}
         >
-          <PanelRightIcon className="size-4.5" dim={!open} />
+          {indicating ? (
+            // Smaller than the panel glyph so it reads the same size: this one
+            // runs corner to corner of its 24 box while the panel icon is 14
+            // units tall in the same box, so matching the numbers makes it the
+            // visibly larger of the two. Stroke 1.5 to match the hand-drawn
+            // chrome around it; lucide draws at 2. The colour is on the glyph
+            // rather than the button because `ghost` sets `hover:text-
+            // foreground`, which would grey it out under the cursor.
+            <GitCompare className="size-4 text-accent-command" strokeWidth={1.5} />
+          ) : (
+            <PanelRightIcon className="size-4.5" dim={!open} />
+          )}
         </Button>
       </TooltipTrigger>
       <TooltipContent side="left">
-        Toggle Panel
+        {indicating ? "Last turn's changes" : "Toggle Panel"}
         <KbdGroup>
           <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
           <Kbd>E</Kbd>

@@ -27,9 +27,11 @@ type ChangesPanelProps = {
 
 /// What the agent changed since the last prompt, file by file.
 ///
-/// Only the first row opens by default; the rest are a click away. The fetch
-/// stays per-file: a collapsed row costs nothing, and a large turn fills in
-/// progressively instead of blocking on one enormous read.
+/// Every row starts collapsed. The list is the answer to "what did this turn
+/// touch", and opening one file by position puts an arbitrary diff above that
+/// list and pushes the rest of it off screen. The fetch stays per-file: a
+/// collapsed row costs nothing, and a large turn fills in progressively
+/// instead of blocking on one enormous read.
 export default function ChangesPanel({
   cwd,
   baseline,
@@ -77,14 +79,13 @@ export default function ChangesPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {changes.files.map((file, index) => (
+        {changes.files.map((file) => (
           <FileRow
             key={file.path}
             cwd={cwd}
             base={changes.base}
             head={changes.head}
             file={file}
-            defaultOpen={index === 0}
           />
         ))}
       </div>
@@ -124,19 +125,15 @@ const FileRow = memo(function FileRow({
   base,
   head,
   file,
-  defaultOpen,
 }: {
   cwd: string;
   base: string;
   head: string;
   file: ChangedFile;
-  /// Only the list's first row opens by itself: one diff answers "what
-  /// happened" at a glance, while all of them open is a wall the reader
-  /// scrolls rather than scans. Initial state only — the reader's own
-  /// opens and closes stick across refreshes, since rows key by path.
-  defaultOpen: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  // The reader's own opens and closes stick across refreshes, since rows key
+  // by path.
+  const [open, setOpen] = useState(false);
   // A binary file is listed — it did change — but there is nothing to open.
   const expandable = !file.binary;
   const { versions, error } = useFileVersions(cwd, base, head, file, open && expandable);
