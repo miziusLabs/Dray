@@ -235,8 +235,9 @@ export default function Sidebar({
         {/* Sits in the list as its last row, so it scrolls away once there are
             enough sessions to push it off — by then the shortcut has been read.
             Pinning it to the sidebar's bottom edge would keep it on screen
-            forever, which is a permanent line of chrome for a one-time hint. */}
-        {sorted.length > 0 && <ShortcutHint selected={selectedSessionId !== null} />}
+            forever, which is a permanent line of chrome for a one-time hint.
+            Hidden with only one row: there's nothing to jump or switch to. */}
+        {sorted.length > 1 && <ShortcutHint selected={selectedSessionId !== null} />}
       </div>
     </aside>
   );
