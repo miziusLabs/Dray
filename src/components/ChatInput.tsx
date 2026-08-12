@@ -328,6 +328,10 @@ export default function ChatInput({
               activeIndex={active}
               onPick={pick}
               onHover={setActiveIndex}
+              // The empty state puts the toolbar above the input and leaves the
+              // window empty below it, so the list opens the other way round —
+              // upward it would cover the controls it sits next to.
+              placement={isNewTask ? "below" : "above"}
             />
           )}
 

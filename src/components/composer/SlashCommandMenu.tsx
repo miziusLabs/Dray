@@ -22,6 +22,7 @@ export default function SlashCommandMenu({
   activeIndex,
   onPick,
   onHover,
+  placement = "above",
 }: {
   groups: CommandGroup[];
   activeIndex: number;
@@ -30,6 +31,12 @@ export default function SlashCommandMenu({
   /// Two independently lit rows would leave Enter and the click landing on
   /// different commands, which is the one thing this list must never do.
   onHover: (index: number) => void;
+  /// Which side of the composer to open on. Above by default, where the
+  /// transcript is the only thing covered; below on a new task, where the
+  /// toolbar sits above the input and the empty half of the window is
+  /// underneath it. The hint row swaps ends to match, so the list always stays
+  /// the half nearer the input.
+  placement?: "above" | "below";
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -89,102 +96,128 @@ export default function SlashCommandMenu({
   // Runs across the whole list rather than restarting per group, so it lines up
   // with the flat index the composer navigates by.
   let row = -1;
+  const below = placement === "below";
+
+  /* Outside the box: nothing about a list that never holds focus says it is
+     navigable, but the hint is chrome about the list rather than part of it.
+     Escape is left out — it's the one key everyone already tries.
+
+     `bg-background` rather than transparent, because the row floats over the
+     transcript and without a fill the text sat on whatever happened to be
+     scrolled behind it. Body's own colour, so it reads as a gap in the page
+     rather than as another surface. The padding is the row's own — the fill has
+     to cover the text, not just sit under the box. */
+  const hint = (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-lg bg-background px-1.5 py-1 text-ui text-muted-foreground/50",
+        below ? "mt-1.5" : "mb-1.5",
+      )}
+    >
+      <KbdGroup>
+        <Kbd>↑</Kbd>
+        <Kbd>↓</Kbd>
+        <span className="ml-0.5">navigate</span>
+      </KbdGroup>
+      <KbdGroup>
+        <Kbd>
+          <CornerDownLeft strokeWidth={2} />
+        </Kbd>
+        <span className="ml-0.5">select</span>
+      </KbdGroup>
+    </div>
+  );
 
   return (
-    // Anchored to the card above it and lifted clear, so the list grows upward
-    // into empty space rather than pushing the composer around as it filters.
-    <div className="absolute bottom-full left-0 z-50 mb-1.5 w-full">
-      {/* Above the box and unstyled: nothing about a list that never holds
-          focus says it is navigable, but the hint is chrome about the list
-          rather than part of it. Escape is left out — it's the one key everyone
-          already tries. */}
-      {/* `bg-background` rather than transparent: the row floats over the
-          transcript, and without a fill the text sat on whatever happened to be
-          scrolled behind it. Body's own colour, so it reads as a gap in the
-          page rather than as another surface. The padding is the row's own —
-          the fill has to cover the text, not just sit under the box. */}
-      <div className="mb-1.5 flex items-center gap-3 rounded-lg bg-background px-1.5 py-1 text-ui text-muted-foreground/50">
-        <KbdGroup>
-          <Kbd>↑</Kbd>
-          <Kbd>↓</Kbd>
-          <span className="ml-0.5">navigate</span>
-        </KbdGroup>
-        <KbdGroup>
-          <Kbd>
-            <CornerDownLeft strokeWidth={2} />
-          </Kbd>
-          <span className="ml-0.5">select</span>
-        </KbdGroup>
+    // Anchored to the card and lifted clear on whichever side it opens, so the
+    // list grows into empty space rather than pushing the composer around as it
+    // filters.
+    <div
+      className={cn(
+        "absolute left-0 z-50 w-full",
+        below ? "top-full mt-1.5" : "bottom-full mb-1.5",
+      )}
+    >
+      {!below && hint}
+
+      {/* The frame and the scroller are separate elements on purpose. With the
+          radius on the scrolling box itself, the scrollbar is laid out in that
+          box's own corner and spills past the curve — visibly clipped by it at
+          the top and bottom ends. Rounding an `overflow-hidden` parent instead
+          clips the scrollbar to the curve, so it stops short of the corners the
+          way the rows do. */}
+      <div className="overflow-hidden rounded-xl border border-[oklch(1_0_0/8%)] bg-popover text-popover-foreground shadow-md">
+        <div
+          ref={listRef}
+          role="listbox"
+          aria-label="Slash commands"
+          // Seven rows: 7 × the row's own `h-8` (2rem), plus the 0.5rem of
+          // `py-2` at each end. Written out rather than computed, so it costs
+          // nothing at render — but it does mean this number, `h-8`, and `py-2`
+          // have to move together.
+          className="max-h-[15rem] overflow-y-auto overscroll-contain px-1 py-2"
+        >
+          {groups.map((group, g) => (
+            <div
+              key={group.label ?? `group-${g}`}
+              className={cn(
+                g > 0 && "mt-2",
+                // Only a labelled section is closed off by a rule, which today
+                // means recents and nothing else. The unlabelled groups are
+                // separated by their gap alone.
+                g > 0 && groups[g - 1].label !== null && "border-t border-dotted border-border/40 pt-2",
+              )}
+            >
+              {group.label && (
+                <div className="px-2 pb-0.5 text-ui text-muted-foreground/50">{group.label}</div>
+              )}
+
+              {group.commands.map((command) => {
+                row += 1;
+                const index = row;
+
+                return (
+                  <button
+                    key={command.name}
+                    ref={index === activeIndex ? activeRef : undefined}
+                    type="button"
+                    role="option"
+                    aria-selected={index === activeIndex}
+                    // The textarea must keep focus — losing it on mousedown would
+                    // close the menu before the click ever lands.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseMove={(e) => handleMove(e, index)}
+                    onClick={() => onPick(command)}
+                    className={cn(
+                      "flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-ui",
+                      index === activeIndex
+                        ? "bg-accent text-accent-foreground"
+                        : "text-foreground",
+                    )}
+                  >
+                    <span className="shrink-0 font-medium">/{command.name}</span>
+
+                    {command.argumentHint && (
+                      <span className="shrink-0 text-muted-foreground/60">
+                        {command.argumentHint}
+                      </span>
+                    )}
+
+                    {/* Descriptions run to a paragraph on skill-backed commands,
+                        so this is one line that gives way to the name rather than
+                        wrapping the row to three. */}
+                    {command.description && (
+                      <span className="truncate text-muted-foreground">{command.description}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div
-        ref={listRef}
-        role="listbox"
-        aria-label="Slash commands"
-        // Seven rows: 7 × the row's own `h-8` (2rem), plus the 0.5rem of `py-2`
-        // at each end. Written out rather than computed, so it costs nothing at
-        // render — but it does mean this number, `h-8`, and `py-2` have to move
-        // together.
-        className="max-h-[15rem] overflow-y-auto overscroll-contain rounded-xl border border-[oklch(1_0_0/8%)] bg-popover px-1 py-2 text-popover-foreground shadow-md"
-      >
-        {groups.map((group, g) => (
-          <div
-            key={group.label ?? `group-${g}`}
-            className={cn(
-              g > 0 && "mt-2",
-              // Only a labelled section is closed off by a rule, which today
-              // means recents and nothing else. The unlabelled groups are
-              // separated by their gap alone.
-              g > 0 && groups[g - 1].label !== null && "border-t border-dotted border-border/40 pt-2",
-            )}
-          >
-            {group.label && (
-              <div className="px-2 pb-0.5 text-ui text-muted-foreground/50">{group.label}</div>
-            )}
-
-            {group.commands.map((command) => {
-              row += 1;
-              const index = row;
-
-              return (
-                <button
-                  key={command.name}
-                  ref={index === activeIndex ? activeRef : undefined}
-                  type="button"
-                  role="option"
-                  aria-selected={index === activeIndex}
-                  // The textarea must keep focus — losing it on mousedown would
-                  // close the menu before the click ever lands.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onMouseMove={(e) => handleMove(e, index)}
-                  onClick={() => onPick(command)}
-                  className={cn(
-                    "flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-ui",
-                    index === activeIndex
-                      ? "bg-accent text-accent-foreground"
-                      : "text-foreground",
-                  )}
-                >
-                  <span className="shrink-0 font-medium">/{command.name}</span>
-
-                  {command.argumentHint && (
-                    <span className="shrink-0 text-muted-foreground/60">
-                      {command.argumentHint}
-                    </span>
-                  )}
-
-                  {/* Descriptions run to a paragraph on skill-backed commands,
-                      so this is one line that gives way to the name rather than
-                      wrapping the row to three. */}
-                  {command.description && (
-                    <span className="truncate text-muted-foreground">{command.description}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+      {below && hint}
     </div>
   );
 }
