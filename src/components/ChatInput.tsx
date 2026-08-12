@@ -351,7 +351,7 @@ export default function ChatInput({
                   const mirror = mirrorRef.current;
                   if (mirror) mirror.scrollTop = e.currentTarget.scrollTop;
                 }}
-                placeholder={isNewTask ? "Describe a task..." : "Send follow-up"}
+                placeholder={isNewTask ? "Describe a task. @files. /skills and commands." : "Send follow-up"}
                 onChange={(e) => {
                   setMessage(e.currentTarget.value);
                   setCaret(e.currentTarget.selectionStart);
