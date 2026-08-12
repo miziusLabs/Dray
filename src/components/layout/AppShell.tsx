@@ -7,10 +7,10 @@ type AppShellProps = {
   /// Right-hand inspector, when open. Sits outside the chat column so the
   /// composer stays scoped to the conversation rather than spanning both.
   panel?: ReactNode;
-  /// Centers the composer and drops the transcript pane. The empty state has no
-  /// transcript to anchor the composer against, so pinning it to the bottom
-  /// leaves the one usable control as far from the eye as the window allows.
-  /// `children` is not rendered in this state.
+  /// Holds the composer in the upper middle of the window and drops the
+  /// transcript pane. The empty state has no transcript to anchor the composer
+  /// against, so pinning it to the bottom leaves the one usable control as far
+  /// from the eye as the window allows. `children` is not rendered in this state.
   centered?: boolean;
   children: ReactNode;
 };
@@ -35,10 +35,19 @@ export default function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         {header}
         {centered ? (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center">
+          // Held below the top rather than centered. Centering moves the whole
+          // block every time the textarea grows a line, so the wordmark and the
+          // toolbar drift upwards as you type; a fixed offset keeps everything
+          // above the input still and lets the box grow downwards alone. The
+          // offset is a proportion of the window rather than a fixed inset, which
+          // would read as top-aligned on a tall window and off-centre on a short
+          // one. `overflow-y-auto` only ever engages on a window too short to
+          // hold the composer at its full height — the box caps itself well
+          // before that at the default size.
+          <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto">
             {/* `children` is deliberately dropped: there is no transcript to
                 show, and the composer is the whole state. */}
-            <div className="w-full shrink-0">{footer}</div>
+            <div className="w-full shrink-0 pt-[13vh]">{footer}</div>
           </div>
         ) : (
           <>
