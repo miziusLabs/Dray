@@ -348,28 +348,43 @@ fn is_tree_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// The files that changed between `base` and the working tree as it stands now.
+/// The files that changed between `base` and `head` — or, when `head` is
+/// `None`, the working tree as it stands now.
+///
+/// A caller passes a frozen `head` for a finished turn: the diff of two fixed
+/// trees is immutable, so the answer can be cached forever and — the real point
+/// — stops moving when the turn does, instead of absorbing whatever later
+/// touches the same checkout.
 ///
 /// Renames are detected (`-M`) rather than reported as a delete plus an add,
 /// since the panel names a file per row and two rows for one move reads as
 /// twice the work.
-pub async fn changes_since(cwd: &str, base: &str) -> Result<ChangeSet> {
+pub async fn changes_since(cwd: &str, base: &str, head: Option<&str>) -> Result<ChangeSet> {
     if !is_tree_id(base) {
         bail!("invalid baseline id");
     }
 
-    let head = snapshot_tree(cwd)
-        .await
-        .context("could not snapshot the working tree")?;
+    let head = match head {
+        Some(h) => {
+            if !is_tree_id(h) {
+                bail!("invalid head id");
+            }
+            h.to_string()
+        }
+        None => snapshot_tree(cwd)
+            .await
+            .context("could not snapshot the working tree")?,
+    };
 
     let files = match diff_trees(cwd, base, &head).await {
         Ok(files) => files,
         Err(e) => {
-            // A baseline is persisted forever but its tree object is not: the
-            // blobs and trees a snapshot writes are unreachable, so a `git gc`
-            // past the prune window collects them. Checked only on the failure
-            // path, so the ordinary read pays nothing for it.
-            if !object_exists(cwd, base).await {
+            // A snapshot is persisted forever but its tree object is not: the
+            // blobs and trees it writes are unreachable, so a `git gc` past the
+            // prune window collects them. Either side can be the casualty — a
+            // frozen head is as collectable as the baseline. Checked only on
+            // the failure path, so the ordinary read pays nothing for it.
+            if !object_exists(cwd, base).await || !object_exists(cwd, &head).await {
                 bail!("this turn's snapshot is no longer in the repository — git has since collected it");
             }
             return Err(e);
@@ -904,7 +919,7 @@ mod tests {
         let dirty = git(at, &["status", "--porcelain"]).await.unwrap();
         assert!(dirty.contains("keep.txt"), "the edit was committed away");
 
-        let changes = changes_since(at, &base).await.unwrap();
+        let changes = changes_since(at, &base, None).await.unwrap();
         assert!(
             changes.files.is_empty(),
             "pre-existing dirt leaked into the diff: {:?}",
@@ -931,7 +946,7 @@ mod tests {
         fs::remove_file(dir.join("gone.txt")).await.unwrap();
         fs::write(dir.join("new.txt"), "brand new\n").await.unwrap();
 
-        let changes = changes_since(at, &base).await.unwrap();
+        let changes = changes_since(at, &base, None).await.unwrap();
 
         let mut names: Vec<_> = changes.files.iter().map(|f| f.path.as_str()).collect();
         names.sort_unstable();
@@ -971,6 +986,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_frozen_head_excludes_what_lands_after_the_turn() {
+        let dir = scratch_repo().await;
+        let at = dir.to_str().unwrap();
+        let base = snapshot_tree(at).await.unwrap();
+
+        // The turn's own work, then the snapshot its `turn_completed` carries.
+        fs::write(dir.join("keep.txt"), "a\nb\nc\nthis turn\n")
+            .await
+            .unwrap();
+        let head = snapshot_tree(at).await.unwrap();
+
+        // What arrives later — another session, the user's editor. The whole
+        // point of freezing the head is that none of this shows.
+        fs::write(dir.join("keep.txt"), "a\nb\nc\nthis turn\nsomeone else\n")
+            .await
+            .unwrap();
+        fs::write(dir.join("other-session.txt"), "not ours\n")
+            .await
+            .unwrap();
+
+        let changes = changes_since(at, &base, Some(&head)).await.unwrap();
+        assert_eq!(changes.head, head, "the frozen id is the one handed back");
+        let names: Vec<_> = changes.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(names, vec!["keep.txt"]);
+        assert_eq!((changes.added, changes.removed), (1, 0));
+
+        let versions = file_versions(at, &base, &head, "keep.txt", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            versions.new_text.as_deref(),
+            Some("a\nb\nc\nthis turn\n"),
+            "contents come from the frozen tree, not the moved-on working tree"
+        );
+
+        assert!(
+            changes_since(at, &base, Some("--not-a-tree")).await.is_err(),
+            "a non-hex head must be rejected before it reaches argv"
+        );
+
+        fs::remove_dir_all(&dir).await.ok();
+    }
+
+    #[tokio::test]
     async fn a_commit_mid_turn_still_reads_as_the_net_change() {
         let dir = scratch_repo().await;
         let at = dir.to_str().unwrap();
@@ -982,7 +1041,7 @@ mod tests {
         run(at, &["add", "-A"]).await.unwrap();
         run(at, &["commit", "-qm", "agent work"]).await.unwrap();
 
-        let changes = changes_since(at, &base).await.unwrap();
+        let changes = changes_since(at, &base, None).await.unwrap();
         assert_eq!(changes.files.len(), 1);
         assert_eq!(changes.files[0].path, "keep.txt");
         assert_eq!(changes.files[0].status, ChangeStatus::Modified);
@@ -1003,7 +1062,7 @@ mod tests {
             .await
             .unwrap();
 
-        let changes = changes_since(at, &base).await.unwrap();
+        let changes = changes_since(at, &base, None).await.unwrap();
         let bin = changes.files.iter().find(|f| f.path == "bin.dat").unwrap();
         assert!(bin.binary, "git reports `-` counts, which must set the flag");
 
@@ -1053,7 +1112,7 @@ mod tests {
             .await
             .unwrap();
 
-        let changes = changes_since(at, &base).await.unwrap();
+        let changes = changes_since(at, &base, None).await.unwrap();
         assert_eq!(
             changes.files.iter().map(|f| &f.path).collect::<Vec<_>>(),
             vec!["keep.txt"],
@@ -1133,7 +1192,7 @@ mod tests {
         let after = format!("{before}plus one\n");
         fs::write(dir.join("moved.txt"), &after).await.unwrap();
 
-        let changes = changes_since(at, &base).await.unwrap();
+        let changes = changes_since(at, &base, None).await.unwrap();
         let file = changes
             .files
             .iter()
@@ -1202,7 +1261,7 @@ mod tests {
             .await
             .unwrap();
 
-        let changes = changes_since(at, &base).await.unwrap();
+        let changes = changes_since(at, &base, None).await.unwrap();
         assert!(changes.files.iter().any(|f| f.path == base));
 
         fs::remove_dir_all(&dir).await.ok();

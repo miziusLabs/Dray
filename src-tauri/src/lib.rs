@@ -169,13 +169,20 @@ async fn checkout_branch(cwd: &str, branch: &str, stash: bool) -> Result<BranchL
 /// What changed in `cwd` since `baseline` — the tree id carried on a
 /// `user_message`, so "since the last prompt" is the caller picking which one.
 ///
-/// Snapshots the working tree to answer, and hands that snapshot's id back on
-/// `head`. Pass it to [`file_change`]: the agent keeps writing while the panel
-/// is open, and a list and a diff taken from two different snapshots would
-/// disagree about what the file says.
+/// `head` is the frozen snapshot from the turn's own `turn_completed`, passed
+/// for a finished turn so the diff describes the turn rather than everything
+/// that has touched the checkout since. Absent — a live turn, or one that
+/// never closed — the working tree is snapshotted to answer, and that
+/// snapshot's id comes back on `head`. Pass it to [`file_change`] either way:
+/// the agent keeps writing while the panel is open, and a list and a diff
+/// taken from two different snapshots would disagree about what the file says.
 #[tauri::command]
-async fn changes_since(cwd: &str, baseline: &str) -> Result<git::ChangeSet, String> {
-    git::changes_since(cwd, baseline)
+async fn changes_since(
+    cwd: &str,
+    baseline: &str,
+    head: Option<&str>,
+) -> Result<git::ChangeSet, String> {
+    git::changes_since(cwd, baseline, head)
         .await
         .map_err(|e| e.to_string())
 }

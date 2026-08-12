@@ -15,6 +15,9 @@ type ChangesPanelProps = {
   cwd: string;
   /// The tree id to diff against, or null when the session recorded none.
   baseline: string | null;
+  /// The turn's closing snapshot — the frozen "after" side. Null while the
+  /// turn runs, which diffs against the working tree as it stands now.
+  head: string | null;
   /// Changes whenever the agent may have written something.
   revision: string;
   /// False while the panel is closed or another tab is showing. The component
@@ -24,11 +27,17 @@ type ChangesPanelProps = {
 
 /// What the agent changed since the last prompt, file by file.
 ///
-/// Rows open by default, so a turn's work reads top to bottom without clicking.
-/// The fetch stays per-file anyway: a collapsed row costs nothing, and a large
-/// turn fills in progressively instead of blocking on one enormous read.
-export default function ChangesPanel({ cwd, baseline, revision, active }: ChangesPanelProps) {
-  const { changes, error, loading, refresh } = useChanges(cwd, baseline, revision, active);
+/// Only the first row opens by default; the rest are a click away. The fetch
+/// stays per-file: a collapsed row costs nothing, and a large turn fills in
+/// progressively instead of blocking on one enormous read.
+export default function ChangesPanel({
+  cwd,
+  baseline,
+  head,
+  revision,
+  active,
+}: ChangesPanelProps) {
+  const { changes, error, loading, refresh } = useChanges(cwd, baseline, head, revision, active);
 
   // A directory that isn't a repo records no snapshot, so there is no "before"
   // to diff — said plainly rather than dressed up as an empty change list.
@@ -68,13 +77,14 @@ export default function ChangesPanel({ cwd, baseline, revision, active }: Change
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {changes.files.map((file) => (
+        {changes.files.map((file, index) => (
           <FileRow
             key={file.path}
             cwd={cwd}
             base={changes.base}
             head={changes.head}
             file={file}
+            defaultOpen={index === 0}
           />
         ))}
       </div>
@@ -114,13 +124,19 @@ const FileRow = memo(function FileRow({
   base,
   head,
   file,
+  defaultOpen,
 }: {
   cwd: string;
   base: string;
   head: string;
   file: ChangedFile;
+  /// Only the list's first row opens by itself: one diff answers "what
+  /// happened" at a glance, while all of them open is a wall the reader
+  /// scrolls rather than scans. Initial state only — the reader's own
+  /// opens and closes stick across refreshes, since rows key by path.
+  defaultOpen: boolean;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   // A binary file is listed — it did change — but there is nothing to open.
   const expandable = !file.binary;
   const { versions, error } = useFileVersions(cwd, base, head, file, open && expandable);

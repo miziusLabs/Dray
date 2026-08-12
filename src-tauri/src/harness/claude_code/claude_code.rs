@@ -29,6 +29,10 @@ pub async fn init(
     effort: Option<Effort>,
     permission_mode: ApprovalPolicy,
     cwd: &str,
+    // Where the session's tree lives — differs from `cwd` on a worktree
+    // creation, where the child spawns at the project root but the turn's
+    // closing snapshot must describe the worktree the CLI moves into.
+    session_cwd: &str,
     worktree_name: Option<&str>,
     is_new_session: bool,
     app: &AppHandle,
@@ -110,6 +114,7 @@ pub async fn init(
     let stdout_seq = seq.clone();
 
     let stdout_session_id = session_id.to_string();
+    let stdout_cwd = session_cwd.to_string();
 
     let app = app.clone();
     tokio::spawn(async move {
@@ -117,6 +122,7 @@ pub async fn init(
         if let Err(error) = read_stdout(
             stdout,
             &session_id,
+            &stdout_cwd,
             stdout_events,
             stdout_seq,
             stdout_status,
@@ -156,6 +162,7 @@ pub async fn init(
 async fn read_stdout(
     stdout: ChildStdout,
     session_id: &str,
+    session_cwd: &str,
     events: Arc<Mutex<Vec<AgentEvent>>>,
     stdout_seq: Arc<AtomicU64>,
     status: Arc<Mutex<StatusTracker>>,
@@ -210,7 +217,7 @@ async fn read_stdout(
             record_failure(session_id, "unknown_subtype", "unmodeled system subtype", &line).await;
         }
 
-        let agent_event = match mapper.map(claude_event) {
+        let mut agent_event = match mapper.map(claude_event) {
             Ok(Some(ev)) => ev,
             Ok(None) => continue,
             Err(err) => {
@@ -218,6 +225,16 @@ async fn read_stdout(
                 continue;
             }
         };
+
+        // Filled here rather than in the mapper because only the session layer
+        // knows the cwd. Freezing the tree id onto the closing event is what
+        // stops an idle session's diff from absorbing everything that later
+        // touches the same checkout. ~20ms once per turn; a background
+        // subagent's writes land after this, but its report-back turn closes
+        // with its own, fresher snapshot.
+        if let AgentEventPayload::TurnCompleted { ref mut head, .. } = agent_event.payload {
+            *head = crate::git::snapshot_tree(session_cwd).await;
+        }
 
         if let Err(err) = app.emit("agent_event", &agent_event) {
             eprintln!("[claude emit err] {err}");

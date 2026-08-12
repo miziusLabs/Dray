@@ -30,7 +30,21 @@ raw: JsonValue | null, };
  * Permission request/resolve is deliberately absent: no captured fixture shows
  * their shape, so the variants would be a guess. Add once captured.
  */
-export type AgentEventPayload = { "type": "turn_started" } & SessionInfo | { "type": "turn_completed", status: TurnStatus, stopReason: string | null, finalText: string | null, usage: Usage | null, durationMs: number | null, } | { "type": "settings_changed" } & Settings | { "type": "user_message", text: string, images: Array<ImageRef>, 
+export type AgentEventPayload = { "type": "turn_started" } & SessionInfo | { "type": "turn_completed", status: TurnStatus, stopReason: string | null, finalText: string | null, usage: Usage | null, durationMs: number | null, 
+/**
+ * The working tree as this turn finished, as a git tree id — the
+ * "after" side the changes panel diffs against once the turn is over.
+ *
+ * Without it the panel's head is always *now*, so an idle session
+ * keeps absorbing whatever later touches the same checkout — another
+ * session's turns, the user's editor — and describes them as this
+ * turn's work. Freezing the head here bounds the diff to the turn.
+ *
+ * Filled by the session layer, not the mapper: only it knows the
+ * session's cwd. `None` for a non-repo and for turns logged before
+ * the field existed, which the panel reads as "diff against now".
+ */
+head: string | null, } | { "type": "settings_changed" } & Settings | { "type": "user_message", text: string, images: Array<ImageRef>, 
 /**
  * The working tree as it stood when this prompt was sent, as a git
  * tree id — the "before" side the changes panel diffs against.

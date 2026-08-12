@@ -661,6 +661,7 @@ impl Mapper {
                     final_text: Some(result),
                     usage: Some(self.map_result_usage(&usage, total_cost_usd, &model_usage)),
                     duration_ms: Some(duration_ms),
+                    head: None,
                 })
             }
 
@@ -680,6 +681,7 @@ impl Mapper {
                 final_text: None,
                 usage: Some(self.map_result_usage(&usage, total_cost_usd, &model_usage)),
                 duration_ms: Some(duration_ms),
+                head: None,
             }),
         }
     }

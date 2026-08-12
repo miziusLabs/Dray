@@ -20,7 +20,7 @@ import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSessions } from "@/hooks/useSessions";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
-import { baselineFor } from "@/lib/changes";
+import { changeRange } from "@/lib/changes";
 import { playCelebration } from "@/lib/sound";
 import { buildTranscript } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
@@ -104,8 +104,8 @@ function App() {
   const composerCwd = selectedSession?.cwd ?? projectPath;
   const slashCommands = useSlashCommands(composerCwd);
 
-  const baseline = useMemo(
-    () => baselineFor(selectedSession?.events ?? []),
+  const { baseline, head } = useMemo(
+    () => changeRange(selectedSession?.events ?? []),
     [selectedSession?.events],
   );
 
@@ -240,6 +240,7 @@ function App() {
               <ChangesPanel
                 cwd={selectedSession.cwd}
                 baseline={baseline}
+                head={head}
                 revision={revision}
                 active={panelOpen && panelTab === "changes"}
               />

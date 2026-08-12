@@ -242,6 +242,7 @@ impl SessionManager {
                 effort,
                 permission_mode,
                 cwd,
+                &session_cwd,
                 worktree_name.as_deref(),
                 is_new_session,
                 app,
@@ -321,6 +322,7 @@ impl SessionManager {
             &model_spec,
             effort,
             permission_mode,
+            &session_cwd,
             &session_cwd,
             None,
             is_new_session,
@@ -447,6 +449,9 @@ impl Session {
         effort: Option<Effort>,
         permission_mode: ApprovalPolicy,
         cwd: &str,
+        // The session's own tree, for the turn-end snapshot. Differs from `cwd`
+        // on a worktree creation, where the child spawns at the project root.
+        session_cwd: &str,
         worktree_name: Option<&str>,
         is_new_session: bool,
         app: &AppHandle,
@@ -458,6 +463,7 @@ impl Session {
                 effort,
                 permission_mode,
                 cwd,
+                session_cwd,
                 worktree_name,
                 is_new_session,
                 app,
@@ -778,6 +784,7 @@ mod tests {
             final_text: None,
             usage: None,
             duration_ms: None,
+            head: None,
         });
         assert_eq!(tracker.mark_seen(), Some(SessionStatus::Idle));
         assert_eq!(tracker.mark_seen(), None, "already read");

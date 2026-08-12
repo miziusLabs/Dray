@@ -1,6 +1,6 @@
 import { cpSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { defineConfig, type Plugin } from "vite";
+import { configDefaults, defineConfig, type Plugin } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -44,6 +44,13 @@ export default defineConfig(async () => ({
 
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+  },
+
+  test: {
+    // `.claude/worktrees` holds live agent worktrees — full checkouts of this
+    // repo. Their test files resolve `@` against *this* tree's src, so a stale
+    // copy fails against code it was never written for.
+    exclude: [...configDefaults.exclude, "**/.claude/**"],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
