@@ -71,6 +71,13 @@ function App() {
   } = useSessions();
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
+  // The sidebar's scope, not the composer's: `projectPath` decides where a new
+  // session runs, and switching what you're *looking at* must not quietly move
+  // where the next prompt would land.
+  const [projectFilter, setProjectFilter] = useLocalStorage<string | null>(
+    "ade.projectFilter",
+    null,
+  );
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useLocalStorage<PanelTab>("ade.panelTab", "changes");
   const [selectedSubagentId, setSelectedSubagentId] = useState<string | null>(null);
@@ -128,9 +135,20 @@ function App() {
   // final file write and the closing event can arrive in either order.
   const revision = `${selectedSession?.events.length ?? 0}:${busy}`;
 
+  // Filtered here rather than inside the sidebar, so the list and the ⌘⌥↑/↓ walk
+  // read one array. `projectPath` on the item is the repo root, so a worktree
+  // session stays under the project it forked from.
+  const visibleSessions = useMemo(
+    () =>
+      projectFilter
+        ? sessionIndexItems.filter((i) => i.projectPath === projectFilter)
+        : sessionIndexItems,
+    [sessionIndexItems, projectFilter],
+  );
+
   // Same order the sidebar draws, so the walk matches the list even when the
   // sidebar is collapsed and there is nothing on screen to follow.
-  const ordered = useMemo(() => sortSessions(sessionIndexItems), [sessionIndexItems]);
+  const ordered = useMemo(() => sortSessions(visibleSessions), [visibleSessions]);
 
   // Wraps downward only. Falling off the bottom returns to the newest session,
   // which is where a walk through the whole list wants to end up; the top holds
@@ -183,7 +201,10 @@ function App() {
       centered={!selectedSession}
       sidebar={
         <Sidebar
-          items={sessionIndexItems}
+          items={visibleSessions}
+          projects={projects}
+          projectFilter={projectFilter}
+          onProjectFilterChange={setProjectFilter}
           statusBySession={statusBySession}
           selectedSessionId={selectedSessionId}
           collapsed={collapsed}
