@@ -1,11 +1,25 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, CornerDownLeft, Square, X } from "lucide-react";
 
+import SlashCommandMenu from "@/components/composer/SlashCommandMenu";
 import { Button } from "@/components/ui/button";
+import { useRecentCommands } from "@/hooks/useRecentCommands";
+import {
+  applyCommand,
+  filterCommands,
+  groupCommands,
+  parseSlashCommand,
+  slashQuery,
+} from "@/lib/slash";
 import { cn } from "@/lib/utils";
+import type { SlashCommand } from "@/types/events";
 
 type ChatInputProps = {
   onSend: (message: string) => void;
+  /// What the `/` picker offers. Empty until the backend's probe lands, and
+  /// empty forever if it failed — the picker simply never opens, and a command
+  /// typed by hand still works, since the CLI parses the text either way.
+  commands?: SlashCommand[];
   /// Interrupts the running turn. Only reachable while `busy` — the same
   /// button is Send otherwise.
   onStop?: () => void;
@@ -42,6 +56,13 @@ const MAX_ROWS = 10;
 // scroll it back.
 const NEW_TASK_MAX_ROWS = 20;
 
+// Everything that decides where a glyph lands. The textarea and the overlay that
+// colours a command inside it must agree on all of it exactly, or the two copies
+// of the text drift apart and show as ghosting — so they share one constant
+// rather than two matching class lists. The horizontal padding varies by state
+// and is applied at both call sites alongside this.
+const TEXT_BOX = "py-1 text-composer";
+
 // `String.raw` because the glyphs are drawn with backslashes; an ordinary
 // template literal would eat them as escapes.
 const WORDMARK = String.raw` ___    ____    ____  __ __
@@ -54,6 +75,7 @@ const WORDMARK = String.raw` ___    ____    ____  __ __
 
 export default function ChatInput({
   onSend,
+  commands = [],
   onStop,
   toolbar,
   busy = false,
@@ -68,6 +90,70 @@ export default function ChatInput({
   const [resizeTick, setResizeTick] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
+
+  // Where the caret is, tracked so the picker can tell a command being typed
+  // from a slash that has already been left behind.
+  const [caret, setCaret] = useState(0);
+  // Escape shuts the picker without clearing what was typed. Cleared again as
+  // soon as the caret leaves the command, so the next `/` reopens it.
+  const [dismissed, setDismissed] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  // Set by a pick, applied once React has painted the new value — a controlled
+  // textarea otherwise puts the caret at the end, which is wrong whenever the
+  // completed command has arguments after it.
+  const pendingCaretRef = useRef<number | null>(null);
+
+  const [recent, recordCommand] = useRecentCommands();
+
+  // Whether what's typed leads with a command, which is the only thing the
+  // colouring overlay below is mounted for.
+  const typedCommand = parseSlashCommand(message);
+
+  // Two modes, and the difference is deliberate. With nothing typed this is
+  // browsing, so the list is grouped — what you just used, then what shipped
+  // with the harness, then what was installed. Once there is a query it is
+  // searching, and headers would hide matches behind section chrome, so the
+  // ranked list is drawn flat.
+  const query = slashQuery(message, caret);
+  const groups = useMemo(() => {
+    if (query === null) return [];
+    if (query === "") return groupCommands(commands, recent);
+
+    const matches = filterCommands(commands, query);
+    return matches.length ? [{ label: null, commands: matches }] : [];
+  }, [commands, query, recent]);
+
+  // Flattened in render order, so arrowing through the list and drawing it
+  // can't disagree about which row an index names.
+  const matches = useMemo(() => groups.flatMap((group) => group.commands), [groups]);
+  const menuOpen = query !== null && !dismissed && matches.length > 0;
+  // Clamped rather than trusted: the commands arrive asynchronously, so a list
+  // that shrinks under an already-moved selection would otherwise index past
+  // its end — and `matches[i]` being undefined only shows up as a crash on the
+  // keystroke that picks it.
+  const active = Math.min(activeIndex, Math.max(matches.length - 1, 0));
+
+  useEffect(() => {
+    setActiveIndex(0);
+    if (query === null) setDismissed(false);
+  }, [query]);
+
+  const pick = (command: SlashCommand) => {
+    const next = applyCommand(message, command.name);
+    pendingCaretRef.current = next.caret;
+    setMessage(next.text);
+    textareaRef.current?.focus();
+  };
+
+  useLayoutEffect(() => {
+    const pending = pendingCaretRef.current;
+    if (pending === null) return;
+    pendingCaretRef.current = null;
+
+    textareaRef.current?.setSelectionRange(pending, pending);
+    setCaret(pending);
+  }, [message]);
 
   // Grow to fit, then scroll. Height must be cleared before scrollHeight is read
   // or it reports the current height and the box can never shrink back down.
@@ -122,6 +208,12 @@ export default function ChatInput({
   const submit = () => {
     const trimmed = message.trim();
     if (!trimmed || busy) return;
+
+    // Recorded on send rather than on pick: choosing a command from the list
+    // and then deleting it is not using it. Taken from the text, so a command
+    // typed by hand counts the same as one picked.
+    const command = parseSlashCommand(trimmed);
+    if (command) recordCommand(command.name);
 
     onSend(trimmed);
     setMessage("");
@@ -219,46 +311,125 @@ export default function ChatInput({
 
         {/* The ring lives on the card so the whole composer reads as one control.
             --input bakes in its own alpha, which makes Tailwind's /40-style opacity
-            modifiers silently no-op, so both states set an explicit color. */}
+            modifiers silently no-op, so both states set an explicit color.
+            `relative` anchors the command picker, which opens upward out of the
+            card rather than displacing anything as it filters. */}
         <div
           ref={cardRef}
           className={cn(
-            "rounded-2xl transition-colors",
+            "relative rounded-2xl transition-colors",
             !isNewTask &&
               "border border-[oklch(1_0_0/6%)] bg-card focus-within:border-[oklch(1_0_0/8%)]",
           )}
         >
+          {menuOpen && (
+            <SlashCommandMenu
+              groups={groups}
+              activeIndex={active}
+              onPick={pick}
+              onHover={setActiveIndex}
+            />
+          )}
+
           {/* Both buttons sit on the last line. At one line that reads as
               centered anyway, because the textarea's vertical padding below is
               tuned to match the buttons' own height — no `self-center` needed,
               and nothing drifts as the box grows. */}
           <div className={cn("flex items-end gap-1 py-3", isNewTask ? "px-0" : "px-3")}>
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              autoFocus
-              value={message}
-              placeholder={isNewTask ? "Describe a task..." : "Send follow-up"}
-              onChange={(e) => setMessage(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                // Shift+Enter is the only way to get a newline; plain Enter sends.
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  submit();
-                }
-              }}
-              // `min-w-0` is load-bearing: without it one long unbroken token
-              // sets this flex item's floor and pushes the buttons off the row.
-              // `py-1` puts one line at 28px — the buttons' own height — so the
-              // first row looks centered against them without being.
-              className={cn(
-                "block min-w-0 flex-1 resize-none overflow-y-auto bg-transparent py-1 text-composer text-foreground placeholder:text-muted-foreground focus:outline-none",
-                // At `px-0` the card contributes no inset, so the textarea drops
-                // its own too and the text sits on the form edge — the line the
-                // toolbar and hint align to.
-                isNewTask ? "px-0" : "px-1",
+            <div className="relative min-w-0 flex-1">
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                autoFocus
+                value={message}
+                // Kept in step with the overlay below, which cannot scroll itself.
+                onScroll={(e) => {
+                  const mirror = mirrorRef.current;
+                  if (mirror) mirror.scrollTop = e.currentTarget.scrollTop;
+                }}
+                placeholder={isNewTask ? "Describe a task..." : "Send follow-up"}
+                onChange={(e) => {
+                  setMessage(e.currentTarget.value);
+                  setCaret(e.currentTarget.selectionStart);
+                }}
+                // Fires for arrow keys, clicks, and drags alike, so the picker
+                // follows the caret however it moved rather than only on typing.
+                onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+                onKeyDown={(e) => {
+                  // The picker owns these keys while it is open, and only then —
+                  // Enter completes the highlighted command instead of sending,
+                  // which is the one place the composer's usual rule gives way.
+                  if (menuOpen && !e.nativeEvent.isComposing) {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setActiveIndex((active + 1) % matches.length);
+                      return;
+                    }
+                    if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setActiveIndex((active - 1 + matches.length) % matches.length);
+                      return;
+                    }
+                    if (e.key === "Enter" || e.key === "Tab") {
+                      e.preventDefault();
+                      pick(matches[active]);
+                      return;
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setDismissed(true);
+                      return;
+                    }
+                  }
+
+                  // Shift+Enter is the only way to get a newline; plain Enter sends.
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    submit();
+                  }
+                }}
+                // `py-1` puts one line at 28px — the buttons' own height — so the
+                // first row looks centered against them without being. `min-w-0`
+                // moved to the wrapper, where it still stops one long unbroken
+                // token setting the flex item's floor and pushing the buttons off
+                // the row.
+                className={cn(
+                  "block w-full resize-none overflow-y-auto bg-transparent placeholder:text-muted-foreground focus:outline-none",
+                  TEXT_BOX,
+                  isNewTask ? "px-0" : "px-1",
+                  // Hands the glyphs to the overlay only while there is a command
+                  // to colour. Every other moment the textarea draws its own text
+                  // as before, so the usual case keeps no dependency on the
+                  // overlay rendering correctly.
+                  typedCommand ? "text-transparent caret-foreground" : "text-foreground",
+                )}
+              />
+
+              {/* Draws the text the textarea is hiding, so the command can take a
+                  colour — a textarea has no way to style part of its value.
+                  Painted *over* the textarea rather than under it, so a selection
+                  band sits behind these glyphs instead of covering them; the
+                  caret still shows, since it falls between them.
+
+                  Mounted only alongside `text-transparent` above, and fed from the
+                  same `message`, so the two cannot disagree about what is on
+                  screen. `TEXT_BOX` and the padding are shared with the textarea
+                  for the same reason — any drift shows up as doubled text. */}
+              {typedCommand && (
+                <div
+                  ref={mirrorRef}
+                  aria-hidden
+                  className={cn(
+                    "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-foreground",
+                    TEXT_BOX,
+                    isNewTask ? "px-0" : "px-1",
+                  )}
+                >
+                  <span className="text-accent-command">/{typedCommand.name}</span>
+                  {message.slice(typedCommand.name.length + 1)}
+                </div>
               )}
-            />
+            </div>
 
             {/* One button, two jobs. Busy makes it a Stop: `type="button"` so
                 pressing it can't also submit whatever is typed, and it stays

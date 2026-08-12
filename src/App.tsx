@@ -19,6 +19,7 @@ import { warmHighlighter } from "@/hooks/useHighlighter";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSessions } from "@/hooks/useSessions";
+import { useSlashCommands } from "@/hooks/useSlashCommands";
 import { baselineFor } from "@/lib/changes";
 import { playCelebration } from "@/lib/sound";
 import { buildTranscript } from "@/lib/transcript";
@@ -94,6 +95,11 @@ function App() {
     setPanelTab("subagents");
     setPanelOpen(true);
   };
+
+  // An open session's own directory, since project- and local-scoped commands
+  // differ per repo and a session can be running somewhere the picker isn't
+  // pointed — a worktree, or a project switched away from since.
+  const slashCommands = useSlashCommands(selectedSession?.cwd ?? projectPath);
 
   const baseline = useMemo(
     () => baselineFor(selectedSession?.events ?? []),
@@ -249,6 +255,7 @@ function App() {
       footer={
         <ChatInput
           onSend={handleSendMsg}
+          commands={slashCommands}
           onStop={handleInterrupt}
           busy={busy}
           sessionId={selectedSessionId}

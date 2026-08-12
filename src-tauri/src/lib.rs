@@ -1,6 +1,7 @@
 use crate::{
     events::ApprovalPolicy,
     git::BranchList,
+    harness::claude_code::commands::SlashCommand,
     models::{Effort, Model, ModelId},
     projects::Project,
     session::{Harness, SessionManager},
@@ -66,6 +67,15 @@ async fn send_msg(
 #[tauri::command]
 fn list_models() -> Vec<Model> {
     models::claude_models()
+}
+
+/// The slash commands available in a directory. Cached per directory in the
+/// backend, so the composer may call this whenever the project changes.
+#[tauri::command]
+async fn list_slash_commands(cwd: &str) -> Result<Vec<SlashCommand>, String> {
+    harness::claude_code::commands::list_commands(cwd)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -269,6 +279,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             send_msg,
             list_models,
+            list_slash_commands,
             list_sessions_by_project,
             list_session_index_items,
             get_session_by_id,

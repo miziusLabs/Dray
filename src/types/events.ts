@@ -584,6 +584,21 @@ export type Settings = { model: string | null,
 approvalPolicy: PermissionMode | null, sandbox: string | null, writableRoots: Array<string>, networkAccess: boolean | null, fastMode: string | null, };
 
 /**
+ * One command the user may type. `name` carries no leading slash — the picker
+ * adds it — and may be namespaced by its plugin (`railway:deploy`).
+ */
+export type SlashCommand = { name: string, description: string, 
+/**
+ * What the command does with the rest of the line — `<model>`, `[name]`.
+ * Empty for most; the CLI sends `""` rather than omitting it.
+ */
+argumentHint: string, 
+/**
+ * Other names that reach the same command. Absent on most.
+ */
+aliases: Array<string>, };
+
+/**
  * A running subagent, whose events interleave with the main conversation's on
  * one stdout stream.
  *
