@@ -27,7 +27,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
-import { relativeTime } from "@/lib/format";
+import { isToday, relativeTime } from "@/lib/format";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import type { SessionIndexItem, SessionStatus } from "@/types/events";
@@ -220,6 +220,11 @@ export default function Sidebar({
               item={item}
               status={statusBySession[item.sessionId] ?? item.status}
               active={item.sessionId === selectedSessionId}
+              // The settled list is a history, and the question asked of it is
+              // "what did I finish today" — so everything older is held back
+              // rather than filtered out. Only there: the active list is a
+              // worklist, where an older row is still open work.
+              faded={showArchived && !isToday(item.modified)}
               onSelect={onSelect}
               onSetFlags={onSetFlags}
               onDelete={onDelete}
@@ -417,6 +422,7 @@ function SessionRow({
   item,
   status,
   active,
+  faded = false,
   onSelect,
   onSetFlags,
   onDelete,
@@ -424,6 +430,7 @@ function SessionRow({
   item: SessionIndexItem;
   status: SessionStatus;
   active: boolean;
+  faded?: boolean;
   onSelect: (sessionId: string) => Promise<void>;
   onSetFlags: (
     sessionId: string,
@@ -463,7 +470,19 @@ function SessionRow({
           // indent that padding used to provide, so the title sits exactly where
           // it always did and the rail can still touch the row's edge. The one
           // gap that remains — title to hover controls — is `pl-2` on that slot.
-          "group relative flex min-h-7 w-full cursor-pointer items-center rounded-md pl-0 pr-0.5 transition-colors",
+          "group relative flex min-h-7 w-full cursor-pointer items-center rounded-md pl-0 pr-0.5",
+          // Opacity is in the transition list for the faded rows below. It has
+          // to ride the same declaration: `transition-colors` and
+          // `transition-opacity` both set `transition-property`, so `cn` would
+          // merge one away and the row would lose its hover fill animation.
+          "transition-[color,background-color,opacity]",
+          // Held back rather than hidden, and brought back to full strength the
+          // moment the row is reached for — the fade sorts the list at a glance
+          // and must not make an old row harder to read once it's the one being
+          // used.
+          faded &&
+            !active &&
+            "opacity-50 hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
           // `data-state` is the trigger's, set on this element by
           // `ContextMenuTrigger asChild` — an open menu holds the row lit, since

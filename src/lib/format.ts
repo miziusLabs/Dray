@@ -12,6 +12,15 @@ export function relativeTime(iso: string): string {
   return new Date(then).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/// Whether a timestamp falls on the local calendar day. Calendar days, not a
+/// 24-hour window: something touched at 11pm last night is yesterday's work by
+/// 1am, which is the reading the sidebar wants.
+export function isToday(iso: string): boolean {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return false;
+  return daysApart(new Date(), new Date(at)) === 0;
+}
+
 /// A future clock time, qualified by day only when it needs to be.
 ///
 /// A five-hour limit usually resets later today, where a bare time reads
