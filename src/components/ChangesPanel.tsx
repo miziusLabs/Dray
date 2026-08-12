@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { ChevronRight, RefreshCw } from "lucide-react";
 
 import FileIcon from "@/components/FileIcon";
@@ -17,6 +17,9 @@ type ChangesPanelProps = {
   baseline: string | null;
   /// Changes whenever the agent may have written something.
   revision: string;
+  /// False while the panel is closed or another tab is showing. The component
+  /// stays mounted either way; this only pauses re-reads.
+  active: boolean;
 };
 
 /// What the agent changed since the last prompt, file by file.
@@ -24,8 +27,8 @@ type ChangesPanelProps = {
 /// Rows open by default, so a turn's work reads top to bottom without clicking.
 /// The fetch stays per-file anyway: a collapsed row costs nothing, and a large
 /// turn fills in progressively instead of blocking on one enormous read.
-export default function ChangesPanel({ cwd, baseline, revision }: ChangesPanelProps) {
-  const { changes, error, loading, refresh } = useChanges(cwd, baseline, revision);
+export default function ChangesPanel({ cwd, baseline, revision, active }: ChangesPanelProps) {
+  const { changes, error, loading, refresh } = useChanges(cwd, baseline, revision, active);
 
   // A directory that isn't a repo records no snapshot, so there is no "before"
   // to diff — said plainly rather than dressed up as an empty change list.
@@ -102,7 +105,11 @@ function Counts({ added, removed }: { added: number; removed: number }) {
   );
 }
 
-function FileRow({
+/// Memoized because the panel re-renders on every session event — its
+/// `revision` prop moves with the stream — while a row's own props only change
+/// when a fresh read actually finds different trees (`useChanges` keeps the old
+/// object otherwise). Without this every delta re-rendered every diff.
+const FileRow = memo(function FileRow({
   cwd,
   base,
   head,
@@ -161,7 +168,7 @@ function FileRow({
       )}
     </div>
   );
-}
+});
 
 function FileBody({
   versions,

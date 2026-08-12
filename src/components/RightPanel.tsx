@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils";
 
 /// The header button that opens and closes the pane. Lives here rather than in
 /// `App` so the toggle and the thing it toggles stay in one file, and outside
-/// [RightPanel] itself because a closed pane renders nothing — the button has to
-/// survive its own pane disappearing. Mirrors `SidebarToggle` on the far side.
+/// [RightPanel] itself because the pane doesn't exist before a session does —
+/// the button has to outlive it. Mirrors `SidebarToggle` on the far side.
 export function PanelToggle({ onToggle, open }: { onToggle: () => void; open: boolean }) {
   return (
     <Tooltip>
@@ -48,6 +48,10 @@ const LABELS: Record<PanelTab, string> = {
 };
 
 type RightPanelProps = {
+  /// Closed hides the pane rather than unmounting it — its state, caches, and
+  /// rendered diffs survive, so reopening is one class flip instead of a
+  /// remount that refetches and re-highlights everything it just showed.
+  open: boolean;
   tab: PanelTab;
   onTabChange: (tab: PanelTab) => void;
   /// Rendered beside its tab's label. Only shown above zero — a tab reading
@@ -55,6 +59,18 @@ type RightPanelProps = {
   counts?: Partial<Record<PanelTab, number>>;
   children: React.ReactNode;
 };
+
+/// One tab's body, kept mounted while the other tab is showing. Same reasoning
+/// as `open` above: switching tabs used to unmount the changes list, so coming
+/// back re-ran every fetch and every Shiki pass. The wrapper repeats the
+/// aside's flex column so bodies written as direct flex children keep working.
+export function TabBody({ active, children }: { active: boolean; children: React.ReactNode }) {
+  return (
+    <div className={cn("min-h-0 flex-1 flex-col", active ? "flex" : "hidden")}>
+      {children}
+    </div>
+  );
+}
 
 /// The frame every right-hand inspector shares: one border, one row of tabs.
 /// Bodies render inside it and own no chrome of their own, so adding a third
@@ -68,9 +84,22 @@ type RightPanelProps = {
 /// No titlebar spacer either, unlike the main column. This pane reaches the top
 /// of the window and its tab row is what sits there; the traffic lights are on
 /// the far side, so nothing needs clearing.
-export default function RightPanel({ tab, onTabChange, counts, children }: RightPanelProps) {
+export default function RightPanel({
+  open,
+  tab,
+  onTabChange,
+  counts,
+  children,
+}: RightPanelProps) {
   return (
-    <aside className="flex w-[32rem] shrink-0 flex-col border-l border-border bg-sidebar">
+    <aside
+      className={cn(
+        "w-[32rem] shrink-0 flex-col border-l border-border bg-sidebar",
+        // Conditional `flex` rather than `flex` plus `hidden`: both set
+        // `display`, so stacking them leaves the winner to stylesheet order.
+        open ? "flex" : "hidden",
+      )}
+    >
       <div
         className="flex h-(--titlebar-h) shrink-0 items-center gap-0.5 border-b border-border px-2"
         data-tauri-drag-region

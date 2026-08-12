@@ -4,7 +4,7 @@ import "./App.css";
 import Chat from "@/components/Chat";
 import ChangesPanel from "@/components/ChangesPanel";
 import ChatInput from "@/components/ChatInput";
-import RightPanel, { PanelToggle, type PanelTab } from "@/components/RightPanel";
+import RightPanel, { PanelToggle, TabBody, type PanelTab } from "@/components/RightPanel";
 import Sidebar, { DevBadge, SidebarToggle } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
@@ -188,26 +188,33 @@ function App() {
         </header>
       }
       panel={
-        panelOpen && selectedSession ? (
+        // Mounted whenever a session is, open or not — closing or switching
+        // tabs only hides, so reopening shows what was already there instead of
+        // refetching and re-highlighting it. `active` is what stops the hidden
+        // changes tab from snapshotting the working tree in the background.
+        selectedSession ? (
           <RightPanel
+            open={panelOpen}
             tab={panelTab}
             onTabChange={setPanelTab}
             counts={{ subagents: subagents.length }}
           >
-            {panelTab === "changes" ? (
+            <TabBody active={panelTab === "changes"}>
               <ChangesPanel
                 cwd={selectedSession.cwd}
                 baseline={baseline}
                 revision={revision}
+                active={panelOpen && panelTab === "changes"}
               />
-            ) : (
+            </TabBody>
+            <TabBody active={panelTab === "subagents"}>
               <SubagentPanel
                 runs={subagents}
                 selectedId={selectedSubagentId}
                 resultByCallId={resultByCallId}
                 onSelect={setSelectedSubagentId}
               />
-            )}
+            </TabBody>
           </RightPanel>
         ) : null
       }
