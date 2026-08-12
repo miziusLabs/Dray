@@ -4,6 +4,8 @@ type HotkeyOptions = {
   /// Cmd on macOS, Ctrl elsewhere — the platform's own accelerator.
   meta?: boolean;
   shift?: boolean;
+  /// Option on macOS, Alt elsewhere.
+  alt?: boolean;
 };
 
 /// Binds a document-level shortcut. The handler is held in a ref so passing a
@@ -11,7 +13,7 @@ type HotkeyOptions = {
 export function useHotkey(
   key: string,
   handler: () => void,
-  { meta = true, shift = false }: HotkeyOptions = {},
+  { meta = true, shift = false, alt = false }: HotkeyOptions = {},
 ) {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
@@ -24,6 +26,8 @@ export function useHotkey(
       if (meta && !e.metaKey && !e.ctrlKey) return;
       if (!meta && (e.metaKey || e.ctrlKey)) return;
       if (e.shiftKey !== shift) return;
+      // Exact, so ⌘⌥↑ can't also fire the plain ⌘ bindings.
+      if (e.altKey !== alt) return;
 
       // Claim the chord before the webview's default — Cmd+B is bold in a
       // contenteditable and would otherwise fire both.
@@ -33,5 +37,5 @@ export function useHotkey(
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [key, meta, shift]);
+  }, [key, meta, shift, alt]);
 }

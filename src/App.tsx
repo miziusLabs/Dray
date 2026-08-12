@@ -5,7 +5,7 @@ import Chat from "@/components/Chat";
 import ChangesPanel from "@/components/ChangesPanel";
 import ChatInput from "@/components/ChatInput";
 import RightPanel, { PanelToggle, TabBody, type PanelTab } from "@/components/RightPanel";
-import Sidebar, { DevBadge, SidebarToggle } from "@/components/Sidebar";
+import Sidebar, { DevBadge, SidebarToggle, sortSessions } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import { nextPermissionMode } from "@/components/composer/PermissionSelector";
@@ -105,9 +105,37 @@ function App() {
   // final file write and the closing event can arrive in either order.
   const revision = `${selectedSession?.events.length ?? 0}:${busy}`;
 
+  // Same order the sidebar draws, so the walk matches the list even when the
+  // sidebar is collapsed and there is nothing on screen to follow.
+  const ordered = useMemo(() => sortSessions(sessionIndexItems), [sessionIndexItems]);
+
+  // Wraps downward only. Falling off the bottom returns to the newest session,
+  // which is where a walk through the whole list wants to end up; the top holds
+  // instead, since arriving at the oldest session by pressing *up* past the
+  // newest one reads as a mistake rather than as a wrap.
+  const stepSession = (delta: number) => {
+    if (ordered.length === 0) return;
+    const from = ordered.findIndex((i) => i.sessionId === selectedSessionId);
+    // No selection is the empty composer — either direction enters at the top.
+    const next =
+      from === -1
+        ? 0
+        : delta > 0
+          ? (from + 1) % ordered.length
+          : Math.max(from - 1, 0);
+    const item = ordered[next];
+    if (item.sessionId !== selectedSessionId) {
+      void handleSelectSessionIndexItem(item.sessionId);
+    }
+  };
+
   const toggleSidebar = () => setCollapsed((prev) => !prev);
   useHotkey("b", toggleSidebar);
   useHotkey("n", handleNewSession);
+  // ⌘⌥ rather than plain ⌘: the composer is focused most of the time, where
+  // ⌘↑/↓ is the webview's own jump-to-start/end of the input.
+  useHotkey("ArrowUp", () => stepSession(-1), { alt: true });
+  useHotkey("ArrowDown", () => stepSession(1), { alt: true });
   // ⌘E for the right pane against ⌘B for the left.
   useHotkey("e", togglePanel);
   // No accelerator: Shift+Tab on its own, matching the CLI's own chord for this.

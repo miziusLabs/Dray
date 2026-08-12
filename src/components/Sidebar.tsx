@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   CheckCheck,
@@ -50,6 +50,14 @@ type SidebarProps = {
   showArchived: boolean;
   onToggleArchived: () => void;
 };
+
+/// The order the list is drawn in. Exported because the ⌘⌥↑/↓ shortcut steps
+/// through the same sequence, and a second comparator would let the two disagree
+/// about which row is "next" — worse when the sidebar is collapsed and nothing
+/// on screen shows the order being walked.
+export function sortSessions(items: SessionIndexItem[]): SessionIndexItem[] {
+  return [...items].sort((a, b) => Date.parse(b.modified) - Date.parse(a.modified));
+}
 
 /// Sidebar toggle. Lives outside `Sidebar` because a collapsed sidebar renders
 /// nothing at all — the button has to survive its own pane disappearing, so the
@@ -122,10 +130,7 @@ export default function Sidebar({
 
   // Flat and recency-ordered. Project only survives as the filter label above the
   // list, so the same session never appears under two headings.
-  const sorted = useMemo(
-    () => [...items].sort((a, b) => Date.parse(b.modified) - Date.parse(a.modified)),
-    [items],
-  );
+  const sorted = useMemo(() => sortSessions(items), [items]);
 
   // Collapsed is nothing at all, not a rail. The toggle moves to the app header
   // in that state, which is the one row present either way.
@@ -221,8 +226,36 @@ export default function Sidebar({
             />
           ))
         )}
+
+        {/* Sits in the list as its last row, so it scrolls away once there are
+            enough sessions to push it off — by then the shortcut has been read.
+            Pinning it to the sidebar's bottom edge would keep it on screen
+            forever, which is a permanent line of chrome for a one-time hint. */}
+        {sorted.length > 0 && <ShortcutHint selected={selectedSessionId !== null} />}
       </div>
     </aside>
+  );
+}
+
+/// The ⌘⌥↑/↓ hint, laid out on the session rows' own edges so it reads as the
+/// last row rather than as a caption under the list.
+///
+/// With nothing selected both arrows land on the same place — the newest session
+/// — so showing the pair would offer a choice that isn't one. One arrow, and the
+/// verb changes with it: entering the list is a jump, walking it is a switch.
+function ShortcutHint({ selected }: { selected: boolean }) {
+  return (
+    <div className="flex min-h-7 items-center justify-between pr-0.5 pl-2 text-ui text-muted-foreground/60">
+      {selected ? "Switch tasks" : "Jump to task"}
+      {/* Held back from the stock keycap: everywhere else a `Kbd` labels a
+          control the eye is already on, but this one is the row, so the default
+          fill makes a hint the loudest thing in the list. */}
+      <KbdGroup className="[&_kbd]:bg-muted/40 [&_kbd]:text-muted-foreground/60">
+        <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+        <Kbd>{IS_MAC ? "⌥" : "Alt"}</Kbd>
+        <Kbd>{selected ? "↑↓" : "↓"}</Kbd>
+      </KbdGroup>
+    </div>
   );
 }
 
@@ -398,11 +431,19 @@ function SessionRow({
   ) => Promise<void>;
   onDelete: (sessionId: string) => Promise<void>;
 }) {
+  // The keyboard shortcut can walk the selection past the fold, and `nearest`
+  // means a row selected by click — already in view — doesn't scroll at all.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
   return (
     <RowMenu onDelete={() => void onDelete(item.sessionId)}>
       {/* A button can't nest a button, so the row is a div with a click handler
           and the pin/settle controls are the only real buttons inside it. */}
       <div
+        ref={ref}
         role="button"
         tabIndex={0}
         onClick={() => void onSelect(item.sessionId)}
