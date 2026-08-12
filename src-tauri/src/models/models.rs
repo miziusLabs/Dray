@@ -41,6 +41,7 @@ impl Effort {
 pub enum ModelId {
     Opus,
     Sonnet,
+    Fable,
     Haiku,
     #[serde(other)]
     Unknown,
@@ -59,6 +60,7 @@ impl ModelId {
         match self {
             ModelId::Opus => Some("opus"),
             ModelId::Sonnet => Some("sonnet"),
+            ModelId::Fable => Some("fable"),
             ModelId::Haiku => Some("haiku"),
             ModelId::Unknown => None,
         }
@@ -84,6 +86,12 @@ pub fn claude_models() -> Vec<Model> {
     use Effort::*;
 
     vec![
+        Model {
+            id: ModelId::Fable,
+            label: "Fable 5".into(),
+            efforts: vec![Low, Medium, High, Xhigh, Max],
+            default_effort: Some(High),
+        },
         Model {
             id: ModelId::Opus,
             label: "Opus 5".into(),
