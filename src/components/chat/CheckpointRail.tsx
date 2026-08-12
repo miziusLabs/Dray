@@ -79,7 +79,7 @@ export default function CheckpointRail({
                   className={cn(
                     "h-0.5 w-3 rounded-full transition-all duration-200 group-hover:w-5",
                     active
-                      ? "bg-foreground"
+                      ? "bg-foreground/70"
                       : "bg-muted-foreground/40 group-hover:bg-muted-foreground",
                   )}
                 />
