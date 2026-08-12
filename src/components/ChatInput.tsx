@@ -35,6 +35,22 @@ type ChatInputProps = {
 };
 
 const MAX_ROWS = 10;
+// The empty state has no transcript above it to crowd, so the box can take a lot
+// more of the window before it starts scrolling. Capped rather than unbounded
+// because this composer is centered: past the window's height it would overflow
+// off both ends at once, putting the wordmark past the top edge with nothing to
+// scroll it back.
+const NEW_TASK_MAX_ROWS = 20;
+
+// `String.raw` because the glyphs are drawn with backslashes; an ordinary
+// template literal would eat them as escapes.
+const WORDMARK = String.raw` ___    ____    ____  __ __
+|   \  |    \  /    ||  |  |
+|    \ |  D  )|  o  ||  |  |
+|  D  ||    / |     ||  ~  |
+|     ||    \ |  _  ||___, |
+|     ||  .  \|  |  ||     |
+|_____||__|\_||__|__||____/`;
 
 export default function ChatInput({
   onSend,
@@ -77,9 +93,10 @@ export default function ChatInput({
     card.style.height = `${card.offsetHeight}px`;
     el.style.height = "0px";
     // scrollHeight includes padding, so the row cap has to as well.
-    el.style.height = `${Math.min(el.scrollHeight, lineHeight * MAX_ROWS + chrome)}px`;
+    const rows = isNewTask ? NEW_TASK_MAX_ROWS : MAX_ROWS;
+    el.style.height = `${Math.min(el.scrollHeight, lineHeight * rows + chrome)}px`;
     card.style.height = "";
-  }, [message, resizeTick]);
+  }, [message, resizeTick, isNewTask]);
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -150,6 +167,18 @@ export default function ChatInput({
           submit();
         }}
       >
+        {/* Decoration, so it is hidden from assistive tech rather than read out
+            as punctuation. Sits on the form edge like the toolbar and the text
+            below it, and `whitespace-pre` keeps the drawing from reflowing. */}
+        {isNewTask && (
+          <pre
+            aria-hidden
+            className="mb-4 font-mono text-[10px] leading-[1.15] whitespace-pre text-foreground/20 select-none"
+          >
+            {WORDMARK}
+          </pre>
+        )}
+
         {/* Above the toolbar in both states, so the failure reads before the
             controls rather than after them. `whitespace-pre-wrap` because these
             are raw messages from git and the CLI, which carry their own line
