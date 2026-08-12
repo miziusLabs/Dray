@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 
 import CodeView from "@/components/chat/CodeView";
@@ -72,17 +72,6 @@ export default function ToolCall({
   hideLabel = false,
 }: ToolCallProps) {
   const [open, setOpen] = useState(false);
-
-  // A failure is the one case worth showing unprompted — the error text is the
-  // reason the row is interesting at all. Tracked as an effect rather than an
-  // initial state because a live call mounts pending and only fails later.
-  const failedOnce = useRef(false);
-  useEffect(() => {
-    if (result?.isError && !failedOnce.current) {
-      failedOnce.current = true;
-      setOpen(true);
-    }
-  }, [result?.isError]);
 
   const summary = title ?? toolSummary(name, toolType, input);
   const pending = result === undefined;
