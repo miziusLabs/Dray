@@ -4,6 +4,7 @@ import { ArrowUp, CornerDownLeft, Square, X } from "lucide-react";
 import FileMentionMenu from "@/components/composer/FileMentionMenu";
 import SlashCommandMenu from "@/components/composer/SlashCommandMenu";
 import { Button } from "@/components/ui/button";
+import { useDraft } from "@/hooks/useDraft";
 import { useFileSearch } from "@/hooks/useFileSearch";
 import { useRecentCommands } from "@/hooks/useRecentCommands";
 import { SEGMENT_COLOR, highlightSegments, splitMention } from "@/lib/highlight";
@@ -36,7 +37,9 @@ type ChatInputProps = {
   /// layout and measurement and nothing else.
   toolbar?: ReactNode;
   busy?: boolean;
-  /// Refocuses the composer when the user switches sessions.
+  /// Which session's draft is in the box, and what the composer refocuses on
+  /// when the user switches. `null` is the new task's own draft, not the
+  /// absence of one.
   sessionId?: string | null;
   /// No session yet, so the composer stands alone mid-window. Nothing sits
   /// behind it to separate it from: the card drops its fill, border, and
@@ -95,7 +98,7 @@ export default function ChatInput({
   archived = false,
   onUnarchive,
 }: ChatInputProps) {
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useDraft(sessionId);
   const [resizeTick, setResizeTick] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -232,7 +235,18 @@ export default function ChatInput({
   }, [message, resizeTick, isNewTask]);
 
   useEffect(() => {
-    textareaRef.current?.focus();
+    const el = textareaRef.current;
+    if (!el) return;
+
+    el.focus();
+    // The draft that just came back is text this composer has never had a caret
+    // in, so the picker state left over from the session being switched away
+    // from describes nothing here. Landing at the end is also where typing
+    // resumes: a draft is an unfinished sentence.
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
+    setCaret(end);
+    setDismissed(false);
   }, [sessionId]);
 
   // The sizing effect first measures against fallback font metrics, which can
