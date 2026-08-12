@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import BackgroundTasksIndicator from "@/components/chat/BackgroundTasksIndicator";
+import CheckpointRail, { type Checkpoint } from "@/components/chat/CheckpointRail";
 import CompactingIndicator from "@/components/chat/CompactingIndicator";
 import PermissionRequest from "@/components/chat/PermissionRequest";
 import QuestionRequest from "@/components/chat/QuestionRequest";
@@ -55,6 +56,29 @@ type ChatProps = {
 /// happening because it is.
 const CARD_EXIT_MS = 500;
 
+/// How far below the top of the pane a turn has to start before it stops being
+/// the one being read. Matches the content's own top padding, so the turn whose
+/// prompt sits just under the header is the one the rail marks.
+const ACTIVE_LINE_PX = 24;
+
+/// The gap left above a turn jumped to from the rail, so the prompt doesn't sit
+/// flush against the header.
+const JUMP_PAD_PX = 12;
+
+/// Below this the rail is one or two ticks describing what is already on screen,
+/// which is chrome for nothing.
+const RAIL_MIN = 2;
+
+/// The narrowest pane that leaves the rail a gutter to sit in: the transcript
+/// column (`max-w-3xl` plus its `px-4`) and roughly 40px either side.
+///
+/// Measured rather than expressed as a container query, and the difference is
+/// not stylistic. A hidden rail still has mounted triggers, and a tooltip whose
+/// trigger has no box repositions itself to the window's top-left corner instead
+/// of closing — which is exactly what opening the right panel with a preview up
+/// used to do. Unmounting the rail takes its tooltips with it.
+const RAIL_MIN_PANE_PX = 880;
+
 /// The cards to draw: the live set, but one beat behind when it empties.
 function useLingeringCards(pending: PendingAsk[]): PendingAsk[] {
   const [shown, setShown] = useState(pending);
@@ -105,6 +129,32 @@ export default function Chat({
   );
 
   const cards = useLingeringCards(pendingAsks);
+
+  // One tick per prompt. A turn with no prompt — a resumed log truncated
+  // mid-conversation, or the promptless `init` a background subagent's
+  // report-back opens — is not a checkpoint: there is nothing the reader wrote
+  // to preview, and jumping to it lands on work with no question above it.
+  const checkpoints = useMemo<Checkpoint[]>(
+    () =>
+      turns.flatMap((turn) => {
+        const payload = turn.prompt?.payload;
+        if (payload?.type !== "user_message") return [];
+        // An image-only prompt has no text to preview, but it is still a place
+        // in the conversation, so it gets a tick with a stand-in label.
+        const preview =
+          payload.text.trim() ||
+          (payload.images.length > 1 ? `${payload.images.length} images` : "Image");
+        return [{ key: turn.key, preview }];
+      }),
+    [turns],
+  );
+
+  // Whether the pane has room for the rail. Starts closed so a narrow pane never
+  // paints one over the transcript for a frame; the observer below settles it
+  // before paint.
+  const [roomForRail, setRoomForRail] = useState(false);
+  const showRail = roomForRail && checkpoints.length >= RAIL_MIN;
+  const [activeTurn, setActiveTurn] = useState<string | null>(null);
 
   // Told apart by the type `block_start` declared, not by content — thinking
   // deltas are plain text on the wire. Only one block streams at a time, so at
@@ -194,9 +244,91 @@ export default function Chat({
   // counts must still land at the bottom.
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || !followRef.current) return;
-    el.scrollTop = el.scrollHeight;
+    if (el && followRef.current) el.scrollTop = el.scrollHeight;
+    syncActive();
   }, [session?.sessionId, events.length, streamingAny]);
+
+  // Which turn the rail marks. Measured from the DOM rather than tracked as
+  // state per turn: heights move constantly here — Shiki lands async, a turn
+  // collapses, a diff expands — so anything cached from a previous layout is
+  // wrong by the time it is read.
+  //
+  // Throttled to a frame because the pin writes `scrollTop` on every delta, and
+  // each measurement forces layout.
+  const spyFrame = useRef(0);
+  const syncActive = () => {
+    const scroller = scrollRef.current;
+    const content = contentRef.current;
+    if (!scroller || !content || !showRail) return;
+    if (spyFrame.current) return;
+
+    spyFrame.current = requestAnimationFrame(() => {
+      spyFrame.current = 0;
+      const nodes = content.querySelectorAll<HTMLElement>("[data-turn]");
+      if (nodes.length === 0) return;
+
+      const line = scroller.getBoundingClientRect().top + ACTIVE_LINE_PX;
+      // The last turn to start above the line. Scrolled above the first prompt,
+      // that is still the first — the transcript can only be read downwards.
+      let key = nodes[0].dataset.turn ?? null;
+      for (const node of nodes) {
+        if (node.getBoundingClientRect().top > line) break;
+        key = node.dataset.turn ?? key;
+      }
+
+      // At the bottom the final turn often starts below the line and is what
+      // the reader is looking at regardless — a short last turn would otherwise
+      // never be markable.
+      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 8) {
+        key = nodes[nodes.length - 1].dataset.turn ?? key;
+      }
+
+      setActiveTurn(key);
+    });
+  };
+
+  // Scrolls a prompt to the top of the pane and drops the pin — jumping back
+  // through the transcript must not be yanked forward by the next delta. The
+  // scroll's own `onScroll` re-decides the pin from where it lands, so a jump to
+  // the newest turn re-arms it.
+  const jumpToTurn = (key: string) => {
+    const scroller = scrollRef.current;
+    const node = contentRef.current?.querySelector<HTMLElement>(`[data-turn="${key}"]`);
+    if (!scroller || !node) return;
+
+    const top =
+      node.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      scroller.scrollTop -
+      JUMP_PAD_PX;
+
+    followRef.current = false;
+    setActiveTurn(key);
+    scroller.scrollTo({ top: Math.max(top, 0), behavior: "smooth" });
+  };
+
+  useEffect(() => () => cancelAnimationFrame(spyFrame.current), []);
+
+  // The rail overlays the scroller as a sibling rather than sitting inside it,
+  // so a wheel over it reaches nothing on its own and the gutter becomes a dead
+  // strip for the pointer. Forwarded by hand, but only once the rail itself has
+  // no room left — a long session's rail scrolls first.
+  const onRailWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+
+    const rail = e.currentTarget;
+    const room =
+      e.deltaY < 0
+        ? rail.scrollTop > 0
+        : rail.scrollTop + rail.clientHeight < rail.scrollHeight - 1;
+    if (room) return;
+
+    // Line-mode deltas come from a wheel mouse; trackpads report pixels.
+    const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    if (delta < 0) followRef.current = false;
+    scroller.scrollTop += delta;
+  };
 
   // Heights change with no React commit involved — Shiki highlighting lands
   // async and grows the content, and the composer growing shrinks this pane from
@@ -209,6 +341,14 @@ export default function Chat({
     if (!scroller || !content) return;
     const ro = new ResizeObserver(() => {
       if (followRef.current) scroller.scrollTop = scroller.scrollHeight;
+      // A turn that grew or collapsed moves every turn under it, with no scroll
+      // event to notice it by.
+      syncActive();
+      // The same observation carries the pane's width, which is what decides
+      // whether the rail fits — a panel opening or the window resizing both
+      // arrive here. Setting the same boolean twice is a no-op in React, so
+      // this costs nothing on the height changes that dominate.
+      setRoomForRail(scroller.clientWidth >= RAIL_MIN_PANE_PX);
     });
     ro.observe(scroller);
     ro.observe(content);
@@ -227,6 +367,7 @@ export default function Chat({
     const el = scrollRef.current;
     if (!el) return;
     followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    syncActive();
   };
 
   // With no session there is no transcript to draw; AppShell centers the
@@ -234,69 +375,97 @@ export default function Chat({
   if (!session) return null;
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} onWheel={onWheel} className="h-full overflow-y-auto">
-      <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
-        {turns.map((turn) => (
-          <TurnBlock
-            key={turn.key}
-            turn={turn}
-            subagentById={subagentById}
-            resultByCallId={resultByCallId}
-            onOpenSubagent={onOpenSubagent}
-            // Both cover the wait for output, and never at once — `waitingTurn`
-            // requires no streaming text. Inside the block so they sit at the
-            // gap the committed event will occupy, rather than the wider one
-            // between turns: the preview belongs to this turn, not after it.
-            footer={
-              turn === waitingTurn ? (
-                <WorkingIndicator tokens={working?.tokens ?? 0} />
-              ) : turn !== streamingTurn ? (
-                undefined
-              ) : streamingThinking ? (
-                // The same component the committed `reasoning` event renders with,
-                // in its `streaming` presentation — the multi-line preview keeps
-                // growing live; it collapses to one line once committed.
-                <Reasoning text={streamingThinking} encrypted={false} streaming />
-              ) : streamingTool ? (
-                // Must come before the text arm: a tool block leaves
-                // `streamingText` empty, so falling through would render an
-                // empty message where the row belongs.
-                <StreamingToolCall {...streamingTool} />
-              ) : (
-                <AssistantMessage text={streamingText} streaming />
-              )
-            }
-          />
-        ))}
+    // What decides whether the rail fits is the width of *this pane*, which the
+    // sidebar and the right panel both take from. On a 1440px window with both
+    // open the chat column fills the pane and the rail would sit on top of the
+    // text, so it goes; open one of them, or run wider, and the gutter is there.
+    <div className="relative h-full">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        onWheel={onWheel}
+        className="h-full overflow-y-auto"
+      >
+        <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
+          {turns.map((turn) => (
+            // The wrapper is what the rail measures and scrolls to. It carries
+            // no styles of its own — it stands in for the block as the flex item.
+            <div key={turn.key} data-turn={turn.key}>
+              <TurnBlock
+                turn={turn}
+                subagentById={subagentById}
+                resultByCallId={resultByCallId}
+                onOpenSubagent={onOpenSubagent}
+                // Both cover the wait for output, and never at once —
+                // `waitingTurn` requires no streaming text. Inside the block so
+                // they sit at the gap the committed event will occupy, rather
+                // than the wider one between turns: the preview belongs to this
+                // turn, not after it.
+                footer={
+                  turn === waitingTurn ? (
+                    <WorkingIndicator tokens={working?.tokens ?? 0} />
+                  ) : turn !== streamingTurn ? (
+                    undefined
+                  ) : streamingThinking ? (
+                    // The same component the committed `reasoning` event renders
+                    // with, in its `streaming` presentation — the multi-line
+                    // preview keeps growing live; it collapses to one line once
+                    // committed.
+                    <Reasoning text={streamingThinking} encrypted={false} streaming />
+                  ) : streamingTool ? (
+                    // Must come before the text arm: a tool block leaves
+                    // `streamingText` empty, so falling through would render an
+                    // empty message where the row belongs.
+                    <StreamingToolCall {...streamingTool} />
+                  ) : (
+                    <AssistantMessage text={streamingText} streaming />
+                  )
+                }
+              />
+            </div>
+          ))}
 
-        {cards.map((ask) =>
-          ask.type === "questions_asked" ? (
-            <QuestionRequest
-              key={ask.requestId}
-              questions={ask.questions}
-              onAnswer={(answers) => onAnswerQuestions(ask.requestId, answers)}
-            />
-          ) : (
-            <PermissionRequest
-              key={ask.requestId}
-              // The agent writes a description for nearly every call; the tool's
-              // own name is the floor, so the card always has a subject.
-              description={
-                ask.description ?? ask.title ?? ask.displayName ?? ask.toolName
-              }
-              argument={toolArgument(ask.input)}
-              options={ask.options}
-              onRespond={(optionId) => onRespondPermission(ask.requestId, optionId)}
-            />
-          ),
-        )}
+          {cards.map((ask) =>
+            ask.type === "questions_asked" ? (
+              <QuestionRequest
+                key={ask.requestId}
+                questions={ask.questions}
+                onAnswer={(answers) => onAnswerQuestions(ask.requestId, answers)}
+              />
+            ) : (
+              <PermissionRequest
+                key={ask.requestId}
+                // The agent writes a description for nearly every call; the
+                // tool's own name is the floor, so the card always has a subject.
+                description={
+                  ask.description ?? ask.title ?? ask.displayName ?? ask.toolName
+                }
+                argument={toolArgument(ask.input)}
+                options={ask.options}
+                onRespond={(optionId) => onRespondPermission(ask.requestId, optionId)}
+              />
+            ),
+          )}
 
-        {backgroundTaskCount > 0 && (
-          <BackgroundTasksIndicator count={backgroundTaskCount} />
-        )}
+          {backgroundTaskCount > 0 && (
+            <BackgroundTasksIndicator count={backgroundTaskCount} />
+          )}
 
-        {compacting && <CompactingIndicator />}
+          {compacting && <CompactingIndicator />}
+        </div>
       </div>
+
+      {showRail && (
+        <CheckpointRail
+          checkpoints={checkpoints}
+          activeKey={activeTurn}
+          onSelect={jumpToTurn}
+          onWheel={onRailWheel}
+          // Centred vertically and outside the scroller, so it holds still while
+          // the transcript moves under it.
+          className="absolute left-3 top-1/2 -translate-y-1/2"
+        />
+      )}
     </div>
   );
 }
