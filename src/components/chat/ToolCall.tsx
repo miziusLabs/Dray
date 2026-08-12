@@ -60,6 +60,11 @@ type ToolCallProps = {
   /// — repeating "Edited" down all 30 rows is noise, and the path is the only
   /// thing that varies.
   hideLabel?: boolean;
+  /// Starts the row expanded. Initial state only, so the reader's own closes
+  /// stick. For a row the reader reached deliberately — the call a subagent
+  /// panel row opens onto — where making them click a second time to see the
+  /// thing they asked for is the click that says nothing.
+  defaultOpen?: boolean;
 };
 
 export default function ToolCall({
@@ -70,8 +75,9 @@ export default function ToolCall({
   rawInput,
   result,
   hideLabel = false,
+  defaultOpen = false,
 }: ToolCallProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
 
   const summary = title ?? toolSummary(name, toolType, input);
   const pending = result === undefined;

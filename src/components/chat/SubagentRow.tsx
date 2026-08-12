@@ -1,10 +1,16 @@
-import { ChevronRight, Cpu } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
 
 import type { SubagentRun } from "@/lib/transcript";
+import { cn } from "@/lib/utils";
 
 /// The subagent's place in the main conversation: one compact row. It never
 /// expands inline — clicking opens the subagent panel, which is where the run's
 /// events actually live.
+///
+/// The row says what the agent is doing and nothing else. Its tool name is
+/// harness vocabulary ("Task", "local_bash") that names the mechanism rather
+/// than the work, and a step count says something happened without saying what.
 export default function SubagentRow({
   run,
   onOpen,
@@ -12,10 +18,13 @@ export default function SubagentRow({
   run: SubagentRun;
   onOpen: (id: string) => void;
 }) {
-  const label = run.label ?? "Subagent";
   // While running, `status` is rewritten per progress event, so it reads as a
-  // live status line without opening anything.
-  const detail = run.done ? run.description : run.status ?? run.description;
+  // live status line without opening anything. The label is the floor — a run
+  // that reported no description still needs something clickable.
+  const detail =
+    (run.done ? run.description : run.status ?? run.description) ??
+    run.label ??
+    "Subagent";
 
   return (
     <button
@@ -23,21 +32,22 @@ export default function SubagentRow({
       onClick={() => onOpen(run.id)}
       className="group flex w-full items-center gap-2 text-left text-chat"
     >
-      <Cpu className="size-3.5 shrink-0 text-accent-thinking" />
-      <span className="shrink-0 font-medium text-foreground/80">{label}</span>
+      {/* The orb *is* the running state, so it goes when the run ends rather
+          than settling into a resting pose — a still orb next to a finished run
+          reads as something that stalled. Same size and pinned theme as
+          `WorkingIndicator`, which is the other place it appears inline. */}
+      {!run.done && <ThinkingOrb state="listening" size={20} theme="dark" aria-hidden />}
 
-      {detail && (
-        <span className="min-w-0 max-w-fit truncate text-muted-foreground">{detail}</span>
-      )}
+      <span
+        className={cn(
+          "min-w-0 max-w-fit truncate",
+          run.done ? "text-muted-foreground" : "shimmer-text",
+        )}
+      >
+        {detail}
+      </span>
 
       <ChevronRight className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-
-      <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground/70">
-        <span>{run.events.length} steps</span>
-        {!run.done && (
-          <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-        )}
-      </span>
     </button>
   );
 }

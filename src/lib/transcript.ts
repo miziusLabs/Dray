@@ -14,6 +14,11 @@ export type SubagentRun = {
   usage: Usage | null;
   /// The subagent's own work, excluding its lifecycle events.
   events: AgentEvent[];
+  /// The main-thread `tool_call_started` that spawned this run. It is the only
+  /// place a `local_bash` task's command and output live — such a task reports
+  /// no events of its own, so a run built from the envelope alone is empty —
+  /// and for an agent run it carries the prompt and the final report.
+  spawn: AgentEvent | null;
 };
 
 /// A run of consecutive same-tool calls, collapsed behind one row. Built from
@@ -375,9 +380,11 @@ export function buildTranscript(
   const abandoned = new Set<string>();
   const asks: PendingAsk[] = [];
   const answered = new Set<string>();
+  const callById = new Map<string, AgentEvent>();
   for (const event of events) {
     if (event.payload.type === "tool_call_started") {
       open.add(event.payload.callId);
+      callById.set(event.payload.callId, event);
     }
     if (event.payload.type === "tool_call_completed") {
       open.delete(event.payload.callId);
@@ -432,6 +439,7 @@ export function buildTranscript(
         done: false,
         usage: null,
         events: [],
+        spawn: null,
       };
       subagentById.set(ref.id, run);
     }
@@ -458,6 +466,13 @@ export function buildTranscript(
         // header and the live status line instead.
         run.events.push(event);
     }
+  }
+
+  // A second pass, because the spawning call is logged before the `task_started`
+  // that creates the run — the tool_use block lands in the assistant message
+  // first.
+  for (const run of subagentById.values()) {
+    run.spawn = callById.get(run.id) ?? null;
   }
 
   const mainThread = events.filter((event) => !event.subagent);
