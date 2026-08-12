@@ -159,7 +159,7 @@ mod tests {
     /// path that fails only at spawn time.
     #[tokio::test]
     async fn a_missing_binary_resolves_to_none() {
-        assert!(resolve("automedon-definitely-not-a-real-binary").await.is_none());
+        assert!(resolve("dray-definitely-not-a-real-binary").await.is_none());
     }
 
     #[test]

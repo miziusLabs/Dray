@@ -1,10 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "automedon-dev",
+  "productName": "Dray-dev",
   "app": {
     "windows": [
       {
-        "title": "automedon dev",
+        "title": "Dray dev",
         "width": 1200,
         "height": 800,
         "minWidth": 720,

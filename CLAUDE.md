@@ -30,7 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`automedon` is a Tauri 2 desktop app that wraps coding-agent CLIs in a chat UI. It spawns the `claude` binary as a child process, speaks stream-json over its stdin/stdout, parses each output line into a typed Rust enum, and forwards it to a React frontend as a Tauri event.
+`Dray` is a Tauri 2 desktop app that wraps coding-agent CLIs in a chat UI. It spawns the `claude` binary as a child process, speaks stream-json over its stdin/stdout, parses each output line into a typed Rust enum, and forwards it to a React frontend as a Tauri event.
 
 ## Commands
 
@@ -185,7 +185,7 @@ Three exits clear it and all are needed: a `block_start` that is not thinking (t
 
 ## Persistence
 
-Everything lives under `~/.automedon/` ([store.rs](src-tauri/src/store.rs), [projects.rs](src-tauri/src/projects.rs)):
+Everything lives under `~/.dray/` ([store.rs](src-tauri/src/store.rs), [projects.rs](src-tauri/src/projects.rs)) — migrated in place from `~/.automedon/` the first time the renamed app runs, see `get_home_app_dir`:
 
 - **`sessions/<session-id>.jsonl`** — one mapped `AgentEvent` per line, append-only. Single writer per file, so `O_APPEND` alone is enough; no lock. On resume, `next_seq_by_session_id` tail-reads the last line to continue the counter.
 - **`sessions/index.json`** — one `SessionIndexItem` per session, holding both `cwd` (where the agent runs) and `project_path` (the repo root, used as the grouping key so worktree sessions still list under their project). Rewritten whole, so it takes a process-wide lock and lands via write-temp + `rename`.
@@ -203,7 +203,7 @@ The asymmetry is the point: appending to a private file is atomic, rewriting a s
 - `stream_event.event` is fully modeled as `StreamFrame`. Every stream enum carries a `#[serde(other)]` catch-all so one unknown frame type doesn't cost the whole line.
 - Genuinely volatile payloads (`message`, `usage`) stay as `serde_json::Value`.
 - Fields the CLI may omit need `#[serde(default)]`. CamelCase wire fields need an explicit rename — see `permissionMode`, `apiKeySource`, `modelUsage`.
-- **Failures are swallowed, per line, and filed.** `read_stdout` logs and continues rather than propagating — one bad line can't kill the loop — so a schema mismatch presents as a missing UI update, not an error. Every one also lands in `~/.automedon/parse_failures.jsonl` with the raw line: one file for the whole app, because these describe how well *this build* covers the wire format rather than anything about a conversation. `stage` is `parse` (no variant matched), `map` (the mapper errored), `unknown_subtype` (a `#[serde(other)]` arm caught it, so the line survived but we learned nothing from it), or `unsupported_request` (a control request we had to refuse to keep the turn moving — the only stage that changes what the agent does, so treat it as the urgent one). Read it after a testing session — `jq -r '.stage + " " + .detail' ~/.automedon/parse_failures.jsonl | sort | uniq -c` — rather than grepping stderr.
+- **Failures are swallowed, per line, and filed.** `read_stdout` logs and continues rather than propagating — one bad line can't kill the loop — so a schema mismatch presents as a missing UI update, not an error. Every one also lands in `~/.dray/parse_failures.jsonl` with the raw line: one file for the whole app, because these describe how well *this build* covers the wire format rather than anything about a conversation. `stage` is `parse` (no variant matched), `map` (the mapper errored), `unknown_subtype` (a `#[serde(other)]` arm caught it, so the line survived but we learned nothing from it), or `unsupported_request` (a control request we had to refuse to keep the turn moving — the only stage that changes what the agent does, so treat it as the urgent one). Read it after a testing session — `jq -r '.stage + " " + .detail' ~/.dray/parse_failures.jsonl | sort | uniq -c` — rather than grepping stderr.
 - `McpServer` and `ApprovalPolicy`/`PermissionMode` are defined once in `events` and re-exported by the parser. Don't reintroduce per-harness copies.
 
 ## Test fixtures

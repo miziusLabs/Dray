@@ -134,7 +134,7 @@ pub async fn checkout_branch(cwd: &str, branch: &str, stash: bool) -> Result<()>
     if stash {
         // Named so the entry is recognizable in `git stash list` weeks later,
         // next to whatever the user stashed by hand.
-        let msg = format!("automedon: switching to {branch}");
+        let msg = format!("dray: switching to {branch}");
         run(cwd, &["stash", "push", "--include-untracked", "-m", &msg]).await?;
     }
 
@@ -199,7 +199,7 @@ fn parse_branches(raw: &str) -> Vec<String> {
 /// The blobs `add` writes are unreachable and a routine `git gc` collects them;
 /// a session's worth is a few dozen small loose objects.
 pub async fn snapshot_tree(cwd: &str) -> Option<String> {
-    let index = std::env::temp_dir().join(format!("automedon-index-{}", Uuid::now_v7()));
+    let index = std::env::temp_dir().join(format!("dray-index-{}", Uuid::now_v7()));
     let tree = write_snapshot(cwd, &index).await;
     let _ = fs::remove_file(&index).await;
     tree
@@ -866,7 +866,7 @@ mod tests {
     /// `--git-path` resolved against the wrong directory — and none of them
     /// show up in a string fixture.
     async fn scratch_repo() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("automedon-gittest-{}", Uuid::now_v7()));
+        let dir = std::env::temp_dir().join(format!("dray-gittest-{}", Uuid::now_v7()));
         fs::create_dir_all(&dir).await.unwrap();
         let at = dir.to_str().unwrap();
 
@@ -1024,7 +1024,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_directory_that_is_not_a_repo_has_no_baseline() {
-        let dir = std::env::temp_dir().join(format!("automedon-plain-{}", Uuid::now_v7()));
+        let dir = std::env::temp_dir().join(format!("dray-plain-{}", Uuid::now_v7()));
         fs::create_dir_all(&dir).await.unwrap();
 
         // What keeps the panel hidden rather than erroring at the user.

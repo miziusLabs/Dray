@@ -35,7 +35,7 @@ function fileIcons(): Plugin {
   };
 
   stage();
-  return { name: "automedon-file-icons", buildStart: stage };
+  return { name: "dray-file-icons", buildStart: stage };
 }
 
 // https://vite.dev/config/

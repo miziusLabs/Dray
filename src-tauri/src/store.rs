@@ -90,16 +90,25 @@ pub struct SessionIndexByProject {
 
 static INDEX_LOCK: Mutex<()> = Mutex::const_new(());
 
-/// `~/.automedon`, creating it if this is the first run.
+/// `~/.dray`, creating it if this is the first run. If `~/.automedon` exists
+/// from before the app's rename and `~/.dray` doesn't yet, the old directory
+/// is moved into place so a rename never orphans a user's session history.
 pub async fn get_home_app_dir() -> Result<PathBuf> {
-    let path = dirs::home_dir()
-        .context("could not resolve home directory")?
-        .join(".automedon");
+    let home = dirs::home_dir().context("could not resolve home directory")?;
+    let path = home.join(".dray");
+
+    if !fs::try_exists(&path).await.unwrap_or(false) {
+        let legacy = home.join(".automedon");
+        if fs::try_exists(&legacy).await.unwrap_or(false) {
+            fs::rename(&legacy, &path).await?;
+        }
+    }
+
     fs::create_dir_all(&path).await?;
     Ok(path)
 }
 
-/// `~/.automedon/sessions`, creating it if needed.
+/// `~/.dray/sessions`, creating it if needed.
 pub async fn get_sessions_dir() -> Result<PathBuf> {
     let path = get_home_app_dir().await?.join("sessions");
 
