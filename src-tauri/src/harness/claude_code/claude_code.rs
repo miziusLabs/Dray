@@ -20,6 +20,12 @@ pub mod mapper;
 pub mod permissions;
 use permissions::PendingPermissions;
 
+/// Appended to the CLI's own system prompt, never replacing it — `--system-prompt`
+/// would drop the tool docs and environment preamble the harness depends on.
+/// Applied on every spawn, resume included: a system prompt is per-process and
+/// the CLI does not carry one across `--resume`.
+const APPEND_SYSTEM_PROMPT: &str = include_str!("system_prompt.md");
+
 /// Takes a resolved [`Model`] rather than an id: there's no way to build one
 /// outside `models`, so an unknown model can't reach the spawn and this doesn't
 /// re-validate what the caller already checked.
@@ -58,6 +64,8 @@ pub async fn init(
     }
 
     args.extend(["--permission-mode", permission_mode.as_arg()]);
+
+    args.extend(["--append-system-prompt", APPEND_SYSTEM_PROMPT]);
 
     // The literal `stdio` is a special case, not a tool name: the flag otherwise
     // takes an MCP tool, and it is undocumented in `--help`. Without it the CLI
