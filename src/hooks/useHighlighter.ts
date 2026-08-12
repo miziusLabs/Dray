@@ -38,7 +38,7 @@ function canTokenize(lang: string, pair: CodeThemePair): boolean {
 /// back as one flat, uncoloured token rather than erroring. Since a `.md` file
 /// can't declare its fences up front, the languages here are exactly the ones
 /// whose fences render correctly inside one.
-const COMMON_LANGS = [
+export const COMMON_LANGS = [
   "typescript",
   "tsx",
   "javascript",

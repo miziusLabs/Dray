@@ -46,6 +46,12 @@ export default defineConfig(async () => ({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
 
+  // The diff-highlighting worker has a conditional `import("shiki/wasm")` on a
+  // path this app never takes (it uses the JS regex engine). The default iife
+  // worker build can't code-split, so it would inline that ~600KB chunk into
+  // the worker; `es` keeps it a separate file that is never fetched.
+  worker: { format: "es" as const },
+
   test: {
     // `.claude/worktrees` holds live agent worktrees — full checkouts of this
     // repo. Their test files resolve `@` against *this* tree's src, so a stale

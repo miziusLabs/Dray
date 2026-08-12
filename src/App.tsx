@@ -4,6 +4,7 @@ import "./App.css";
 import Chat from "@/components/Chat";
 import ChangesPanel from "@/components/ChangesPanel";
 import ChatInput from "@/components/ChatInput";
+import DiffWorkerPool from "@/components/DiffWorkerPool";
 import RightPanel, { PanelToggle, TabBody, type PanelTab } from "@/components/RightPanel";
 import Sidebar, { DevBadge, SidebarToggle, sortSessions } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
@@ -177,6 +178,7 @@ function App() {
 
   return (
     <TooltipProvider>
+    <DiffWorkerPool pair={codeThemePair}>
     <AppShell
       centered={!selectedSession}
       sidebar={
@@ -333,6 +335,7 @@ function App() {
         working={working}
       />
     </AppShell>
+    </DiffWorkerPool>
     </TooltipProvider>
   );
 }
