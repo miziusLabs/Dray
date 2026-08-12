@@ -135,9 +135,9 @@ describe("groupCommands", () => {
 
   it("orders recents, then harness, then everything installed", () => {
     expect(groupCommands(commands, ["supalytics"])).toEqual([
-      { label: "Recently used", commands: [commands[3]] },
-      { label: null, commands: [commands[0], commands[1]] },
-      { label: null, commands: [commands[2]] },
+      { label: "Recently used", items: [commands[3]] },
+      { label: null, items: [commands[0], commands[1]] },
+      { label: null, items: [commands[2]] },
     ]);
   });
 
@@ -145,7 +145,7 @@ describe("groupCommands", () => {
   /// of the seven visible rows saying the same thing.
   it("promotes rather than duplicates", () => {
     const names = groupCommands(commands, ["compact"]).flatMap((g) =>
-      g.commands.map((c) => c.name),
+      g.items.map((c) => c.name),
     );
 
     expect(names).toEqual(["compact", "model", "railway:deploy", "supalytics"]);
@@ -154,25 +154,25 @@ describe("groupCommands", () => {
 
   it("ranks recents by the stored order, newest first", () => {
     const recent = groupCommands(commands, ["model", "compact"])[0];
-    expect(recent.commands.map((c) => c.name)).toEqual(["model", "compact"]);
+    expect(recent.items.map((c) => c.name)).toEqual(["model", "compact"]);
   });
 
   /// The store outlives the commands it names — a skill gets uninstalled, a
   /// project-scoped command is left behind in another repo.
   it("drops remembered names that no longer exist", () => {
     const groups = groupCommands(commands, ["long-gone", "compact"]);
-    expect(groups[0].commands.map((c) => c.name)).toEqual(["compact"]);
+    expect(groups[0].items.map((c) => c.name)).toEqual(["compact"]);
   });
 
   it("caps recents so they cannot fill the window", () => {
     const many = ["a", "b", "c", "d", "e", "f"].map((n) => command(n));
     const groups = groupCommands(many, ["a", "b", "c", "d", "e", "f"]);
-    expect(groups[0].commands).toHaveLength(4);
+    expect(groups[0].items).toHaveLength(4);
   });
 
   it("drops empty groups rather than drawing an empty heading", () => {
     expect(groupCommands([command("compact", "Free up context")], [])).toEqual([
-      { label: null, commands: [command("compact", "Free up context")] },
+      { label: null, items: [command("compact", "Free up context")] },
     ]);
   });
 });

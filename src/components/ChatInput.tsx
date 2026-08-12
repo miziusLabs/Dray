@@ -1,9 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, CornerDownLeft, Square, X } from "lucide-react";
 
+import FileMentionMenu from "@/components/composer/FileMentionMenu";
 import SlashCommandMenu from "@/components/composer/SlashCommandMenu";
 import { Button } from "@/components/ui/button";
+import { useFileSearch } from "@/hooks/useFileSearch";
 import { useRecentCommands } from "@/hooks/useRecentCommands";
+import { SEGMENT_COLOR, highlightSegments, splitMention } from "@/lib/highlight";
+import { applyMention, mentionSpan } from "@/lib/mention";
 import {
   applyCommand,
   filterCommands,
@@ -12,7 +16,7 @@ import {
   slashQuery,
 } from "@/lib/slash";
 import { cn } from "@/lib/utils";
-import type { SlashCommand } from "@/types/events";
+import type { FileMatch, SlashCommand } from "@/types/events";
 
 type ChatInputProps = {
   onSend: (message: string) => void;
@@ -20,6 +24,10 @@ type ChatInputProps = {
   /// empty forever if it failed — the picker simply never opens, and a command
   /// typed by hand still works, since the CLI parses the text either way.
   commands?: SlashCommand[];
+  /// Where the `@` picker searches for files. The session's own directory, so a
+  /// worktree session mentions paths inside its tree — the CLI resolves `@path`
+  /// against the directory it was spawned in, and those are the same one.
+  cwd?: string | null;
   /// Interrupts the running turn. Only reachable while `busy` — the same
   /// button is Send otherwise.
   onStop?: () => void;
@@ -76,6 +84,7 @@ const WORDMARK = String.raw` ___    ____    ____  __ __
 export default function ChatInput({
   onSend,
   commands = [],
+  cwd = null,
   onStop,
   toolbar,
   busy = false,
@@ -106,9 +115,10 @@ export default function ChatInput({
 
   const [recent, recordCommand] = useRecentCommands();
 
-  // Whether what's typed leads with a command, which is the only thing the
-  // colouring overlay below is mounted for.
-  const typedCommand = parseSlashCommand(message);
+  // The runs that take a colour. Empty of anything but plain text most of the
+  // time, which is what the overlay below checks before mounting at all.
+  const segments = useMemo(() => highlightSegments(message), [message]);
+  const highlighted = segments.some((segment) => segment.kind !== "text");
 
   // Two modes, and the difference is deliberate. With nothing typed this is
   // browsing, so the list is grouped — what you just used, then what shipped
@@ -121,29 +131,66 @@ export default function ChatInput({
     if (query === "") return groupCommands(commands, recent);
 
     const matches = filterCommands(commands, query);
-    return matches.length ? [{ label: null, commands: matches }] : [];
+    return matches.length ? [{ label: null, items: matches }] : [];
   }, [commands, query, recent]);
+
+  // The two pickers are mutually exclusive without needing to be arbitrated:
+  // the caret sits in exactly one token, and a token opening with `/` at
+  // position zero is not one opening with `@`. Kept as two independent reads so
+  // neither has to know the other exists.
+  const mention = mentionSpan(message, caret);
+  const files = useFileSearch(cwd, mention?.query ?? null);
 
   // Flattened in render order, so arrowing through the list and drawing it
   // can't disagree about which row an index names.
-  const matches = useMemo(() => groups.flatMap((group) => group.commands), [groups]);
-  const menuOpen = query !== null && !dismissed && matches.length > 0;
-  // Clamped rather than trusted: the commands arrive asynchronously, so a list
-  // that shrinks under an already-moved selection would otherwise index past
-  // its end — and `matches[i]` being undefined only shows up as a crash on the
-  // keystroke that picks it.
-  const active = Math.min(activeIndex, Math.max(matches.length - 1, 0));
+  const commandMatches = useMemo(() => groups.flatMap((group) => group.items), [groups]);
 
+  // Only the count is shared between the two pickers — the lists themselves stay
+  // separate all the way to the pick, so nothing has to be narrowed back out of
+  // a union that `mention` already decided.
+  const rowCount = mention ? files.length : commandMatches.length;
+  const menuOpen = !dismissed && rowCount > 0 && (query !== null || mention !== null);
+  // Clamped rather than trusted: both lists arrive asynchronously, so a list
+  // that shrinks under an already-moved selection would otherwise index past
+  // its end — and an undefined row only shows up as a crash on the keystroke
+  // that picks it.
+  const active = Math.min(activeIndex, Math.max(rowCount - 1, 0));
+
+  // Keyed on the query text rather than on the span, which is a fresh object
+  // every keystroke and would reset the selection on a bare cursor move.
+  const mentionQuery = mention?.query ?? null;
   useEffect(() => {
     setActiveIndex(0);
-    if (query === null) setDismissed(false);
-  }, [query]);
+    if (query === null && mentionQuery === null) setDismissed(false);
+  }, [query, mentionQuery]);
 
-  const pick = (command: SlashCommand) => {
+  const pickCommand = (command: SlashCommand) => {
     const next = applyCommand(message, command.name);
     pendingCaretRef.current = next.caret;
     setMessage(next.text);
     textareaRef.current?.focus();
+  };
+
+  const pickFile = (file: FileMatch) => {
+    if (!mention) return;
+
+    const next = applyMention(message, mention, file.path);
+    pendingCaretRef.current = next.caret;
+    setMessage(next.text);
+    textareaRef.current?.focus();
+  };
+
+  /// The keyboard's way into whichever list is drawn. A click calls the same
+  /// two functions directly, so the two routes cannot diverge.
+  const pickRow = (index: number) => {
+    if (mention) {
+      const file = files[index];
+      if (file) pickFile(file);
+      return;
+    }
+
+    const command = commandMatches[index];
+    if (command) pickCommand(command);
   };
 
   useLayoutEffect(() => {
@@ -322,18 +369,32 @@ export default function ChatInput({
               "border border-[oklch(1_0_0/6%)] bg-card focus-within:border-[oklch(1_0_0/8%)]",
           )}
         >
-          {menuOpen && (
-            <SlashCommandMenu
-              groups={groups}
-              activeIndex={active}
-              onPick={pick}
-              onHover={setActiveIndex}
-              // The empty state puts the toolbar above the input and leaves the
-              // window empty below it, so the list opens the other way round —
-              // upward it would cover the controls it sits next to.
-              placement={isNewTask ? "below" : "above"}
-            />
-          )}
+          {/* Two separate consequences of the empty state, passed separately
+              because they are separate things that happen to coincide. The
+              toolbar sits above the input there and the window is empty below
+              it, so the list opens downward — upward it would cover the controls
+              it sits next to. And the card behind it has no fill or border, so
+              the list drops its own to match. */}
+          {menuOpen &&
+            (mention ? (
+              <FileMentionMenu
+                files={files}
+                activeIndex={active}
+                onPick={pickFile}
+                onHover={setActiveIndex}
+                placement={isNewTask ? "below" : "above"}
+                bare={isNewTask}
+              />
+            ) : (
+              <SlashCommandMenu
+                groups={groups}
+                activeIndex={active}
+                onPick={pickCommand}
+                onHover={setActiveIndex}
+                placement={isNewTask ? "below" : "above"}
+                bare={isNewTask}
+              />
+            ))}
 
           {/* Both buttons sit on the last line. At one line that reads as
               centered anyway, because the textarea's vertical padding below is
@@ -360,23 +421,23 @@ export default function ChatInput({
                 // follows the caret however it moved rather than only on typing.
                 onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
                 onKeyDown={(e) => {
-                  // The picker owns these keys while it is open, and only then —
-                  // Enter completes the highlighted command instead of sending,
+                  // Whichever picker is open owns these keys, and only while it
+                  // is — Enter completes the highlighted row instead of sending,
                   // which is the one place the composer's usual rule gives way.
                   if (menuOpen && !e.nativeEvent.isComposing) {
                     if (e.key === "ArrowDown") {
                       e.preventDefault();
-                      setActiveIndex((active + 1) % matches.length);
+                      setActiveIndex((active + 1) % rowCount);
                       return;
                     }
                     if (e.key === "ArrowUp") {
                       e.preventDefault();
-                      setActiveIndex((active - 1 + matches.length) % matches.length);
+                      setActiveIndex((active - 1 + rowCount) % rowCount);
                       return;
                     }
                     if (e.key === "Enter" || e.key === "Tab") {
                       e.preventDefault();
-                      pick(matches[active]);
+                      pickRow(active);
                       return;
                     }
                     if (e.key === "Escape") {
@@ -401,25 +462,27 @@ export default function ChatInput({
                   "block w-full resize-none overflow-y-auto bg-transparent placeholder:text-muted-foreground focus:outline-none",
                   TEXT_BOX,
                   isNewTask ? "px-0" : "px-1",
-                  // Hands the glyphs to the overlay only while there is a command
+                  // Hands the glyphs to the overlay only while there is something
                   // to colour. Every other moment the textarea draws its own text
                   // as before, so the usual case keeps no dependency on the
                   // overlay rendering correctly.
-                  typedCommand ? "text-transparent caret-foreground" : "text-foreground",
+                  highlighted ? "text-transparent caret-foreground" : "text-foreground",
                 )}
               />
 
-              {/* Draws the text the textarea is hiding, so the command can take a
-                  colour — a textarea has no way to style part of its value.
-                  Painted *over* the textarea rather than under it, so a selection
-                  band sits behind these glyphs instead of covering them; the
-                  caret still shows, since it falls between them.
+              {/* Draws the text the textarea is hiding, so a command or a file
+                  mention can take a colour — a textarea has no way to style part
+                  of its value. Painted *over* the textarea rather than under it,
+                  so a selection band sits behind these glyphs instead of covering
+                  them; the caret still shows, since it falls between them.
 
-                  Mounted only alongside `text-transparent` above, and fed from the
-                  same `message`, so the two cannot disagree about what is on
-                  screen. `TEXT_BOX` and the padding are shared with the textarea
-                  for the same reason — any drift shows up as doubled text. */}
-              {typedCommand && (
+                  Mounted only alongside `text-transparent` above, and built from
+                  the same segments the transcript renders, so neither the two
+                  copies of the text nor the two surfaces can disagree about what
+                  is coloured. `TEXT_BOX` and the padding are shared with the
+                  textarea for the same reason — any drift shows up as doubled
+                  text. */}
+              {highlighted && (
                 <div
                   ref={mirrorRef}
                   aria-hidden
@@ -429,8 +492,27 @@ export default function ChatInput({
                     isNewTask ? "px-0" : "px-1",
                   )}
                 >
-                  <span className="text-accent-command">/{typedCommand.name}</span>
-                  {message.slice(typedCommand.name.length + 1)}
+                  {segments.map((segment, i) => {
+                    // Every glyph the textarea lays out has to be laid out here
+                    // too, so a mention is dimmed rather than shortened — the
+                    // transcript is where it collapses to the filename.
+                    if (segment.kind === "mention") {
+                      const { dir, name } = splitMention(segment.text);
+
+                      return (
+                        <span key={i} className={SEGMENT_COLOR.mention}>
+                          <span className="opacity-45">{dir}</span>
+                          {name}
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <span key={i} className={SEGMENT_COLOR[segment.kind]}>
+                        {segment.text}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </div>

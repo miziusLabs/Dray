@@ -64,6 +64,11 @@
      against the foreground beside it. Light for a yellow (0.82): the hue peaks
      bright, so a darker one turns olive rather than reading as gold. */
   --accent-command: oklch(0.82 0.13 90);
+  /* A file mention. Paired with `--accent-command` and deliberately far from it
+     in hue — the two can sit in one sentence (`/review @src/lib/slash.ts`), so
+     they have to be told apart at a glance rather than read as one run. Same
+     lightness and chroma, so neither outranks the other. */
+  --accent-mention: oklch(0.82 0.13 230);
 }
 
 @theme inline {
@@ -98,6 +103,7 @@
   --color-surface-raised: var(--surface-raised);
   --color-accent-thinking: var(--accent-thinking);
   --color-accent-command: var(--accent-command);
+  --color-accent-mention: var(--accent-mention);
 
   /* A highlight travelling across the text, not a fade of the whole line —
      `background-clip: text` is what confines it to the glyphs, so the element

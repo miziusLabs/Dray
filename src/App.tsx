@@ -98,8 +98,11 @@ function App() {
 
   // An open session's own directory, since project- and local-scoped commands
   // differ per repo and a session can be running somewhere the picker isn't
-  // pointed — a worktree, or a project switched away from since.
-  const slashCommands = useSlashCommands(selectedSession?.cwd ?? projectPath);
+  // pointed — a worktree, or a project switched away from since. The `@` picker
+  // resolves against the same directory for the same reason, and off the same
+  // expression so the two can't answer for different trees.
+  const composerCwd = selectedSession?.cwd ?? projectPath;
+  const slashCommands = useSlashCommands(composerCwd);
 
   const baseline = useMemo(
     () => baselineFor(selectedSession?.events ?? []),
@@ -256,6 +259,7 @@ function App() {
         <ChatInput
           onSend={handleSendMsg}
           commands={slashCommands}
+          cwd={composerCwd}
           onStop={handleInterrupt}
           busy={busy}
           sessionId={selectedSessionId}

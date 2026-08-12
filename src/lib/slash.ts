@@ -99,9 +99,13 @@ export function commandSource(command: SlashCommand): CommandSource {
 
 /// A run of commands drawn together. `label` is set only where the grouping
 /// isn't self-evident from the contents.
+///
+/// Structurally a `PickerGroup<SlashCommand>` — the field is `items` rather than
+/// `commands` so it can be handed to the shared menu without a mapping step
+/// whose only job would be renaming it.
 export type CommandGroup = {
   label: string | null;
-  commands: SlashCommand[];
+  items: SlashCommand[];
 };
 
 /// Kept short on purpose: the list shows seven rows at a time, so a longer
@@ -134,10 +138,10 @@ export function groupCommands(commands: SlashCommand[], recent: string[]): Comma
   const rest = commands.filter((command) => !promoted.has(command.name));
 
   return [
-    { label: "Recently used", commands: recentCommands },
-    { label: null, commands: rest.filter((c) => commandSource(c) === "harness") },
-    { label: null, commands: rest.filter((c) => commandSource(c) !== "harness") },
-  ].filter((group) => group.commands.length > 0);
+    { label: "Recently used", items: recentCommands },
+    { label: null, items: rest.filter((c) => commandSource(c) === "harness") },
+    { label: null, items: rest.filter((c) => commandSource(c) !== "harness") },
+  ].filter((group) => group.items.length > 0);
 }
 
 /// Splits a sent message into its command and the rest, or `null` for ordinary

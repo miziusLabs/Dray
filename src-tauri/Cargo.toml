@@ -30,3 +30,4 @@ uuid = { version = "1.16", features = ["v7"] }
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 dirs = "6.0.0"
 tauri-plugin-dialog = "2"
+fff-search = "0.10.3"

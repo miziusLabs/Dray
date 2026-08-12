@@ -1,5 +1,6 @@
 use crate::{
     events::ApprovalPolicy,
+    files::FileMatch,
     git::BranchList,
     harness::claude_code::commands::SlashCommand,
     models::{Effort, Model, ModelId},
@@ -13,6 +14,7 @@ use tauri::{AppHandle, State};
 pub mod binpath;
 #[path = "events/events.rs"]
 pub mod events;
+pub mod files;
 pub mod git;
 #[path = "harness/harness.rs"]
 pub mod harness;
@@ -75,6 +77,29 @@ fn list_models() -> Vec<Model> {
 async fn list_slash_commands(cwd: &str) -> Result<Vec<SlashCommand>, String> {
     harness::claude_code::commands::list_commands(cwd)
         .await
+        .map_err(|e| e.to_string())
+}
+
+/// Starts indexing a directory's files so the `@` picker opens on a warm index.
+/// Fire-and-forget: the walk runs on its own thread and this returns at once.
+#[tauri::command]
+async fn warm_file_index(cwd: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || files::warm(&cwd))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Fuzzy file search for the `@` picker.
+///
+/// On `spawn_blocking` because the index is synchronous throughout — the search
+/// holds a `parking_lot` read guard across the whole scoring pass, which is not
+/// something that may be held across an await point.
+#[tauri::command]
+async fn search_files(cwd: String, query: String, limit: usize) -> Result<Vec<FileMatch>, String> {
+    tokio::task::spawn_blocking(move || files::search(&cwd, &query, limit))
+        .await
+        .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
 }
 
@@ -280,6 +305,8 @@ pub fn run() {
             send_msg,
             list_models,
             list_slash_commands,
+            warm_file_index,
+            search_files,
             list_sessions_by_project,
             list_session_index_items,
             get_session_by_id,

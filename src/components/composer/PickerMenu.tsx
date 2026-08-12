@@ -1,0 +1,266 @@
+import { useEffect, useRef, type ReactNode } from "react";
+import { CornerDownLeft } from "lucide-react";
+
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { cn } from "@/lib/utils";
+
+/// The list that opens over the composer while `/` or `@` is being typed.
+///
+/// Deliberately not a Radix menu, unlike every other picker in the toolbar:
+/// those take focus when they open, and this one must not — the textarea stays
+/// focused so typing keeps filtering the list. Every key it responds to is
+/// handled by the composer's own `onKeyDown` and arrives here as `activeIndex`,
+/// which is the same bargain the questionnaire card makes for the same reason.
+///
+/// `groups` arrive in render order and `activeIndex` addresses the whole list
+/// flattened, so the caller's keyboard navigation and this drawing can't
+/// disagree about which row is which.
+///
+/// Generic over its item because the two pickers differ only in what a row says.
+/// Everything that was hard to get right here — the container-local scrolling,
+/// the phantom-hover guard, the row metrics the visible-row count is derived
+/// from — is shared rather than reimplemented per picker, which is also what
+/// keeps them looking like one control rather than two similar ones.
+export type PickerGroup<T> = {
+  /// Set only where the grouping isn't self-evident from the contents.
+  label: string | null;
+  items: T[];
+};
+
+export default function PickerMenu<T>({
+  groups,
+  label,
+  keyOf,
+  renderItem,
+  activeIndex,
+  onPick,
+  onHover,
+  placement = "above",
+  bare = false,
+}: {
+  groups: PickerGroup<T>[];
+  /// Named for assistive tech, which otherwise reads an unlabelled listbox.
+  label: string;
+  keyOf: (item: T) => string;
+  /// The row's contents only — the row itself (its height, padding, and
+  /// selected fill) belongs to this component, so no picker can drift.
+  renderItem: (item: T) => ReactNode;
+  activeIndex: number;
+  onPick: (item: T) => void;
+  /// Hovering *moves* the selection rather than painting a second highlight.
+  /// Two independently lit rows would leave Enter and the click landing on
+  /// different items, which is the one thing this list must never do.
+  onHover: (index: number) => void;
+  /// Which side of the composer to open on. Above by default, where the
+  /// transcript is the only thing covered; below on a new task, where the
+  /// toolbar sits above the input and the empty half of the window is
+  /// underneath it. The hint row swaps ends to match, so the list always stays
+  /// the half nearer the input.
+  placement?: "above" | "below";
+  /// Follows the composer's own empty state, where the card drops its fill and
+  /// border: the list drops them too and sits directly on the page. A separate
+  /// prop from `placement` rather than inferred from it — the two happen to
+  /// travel together today, but one is geometry and one is surface, and reading
+  /// the second off the first is what makes a later third state impossible.
+  bare?: boolean;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef<HTMLButtonElement>(null);
+  /// The last position the pointer was actually at. Compared against, not
+  /// merely stored — see the guard in `handleMove`.
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Keeps the selected row in view by scrolling *this* container and nothing
+  // else. `scrollIntoView` was wrong here even with `block: "nearest"`: it
+  // walks every scrollable ancestor, so arrowing through the list also nudged
+  // the transcript behind it, which read as the whole view shifting.
+  //
+  // The container's own padding is subtracted from both edges, so a row
+  // scrolled to either end stops short of the box rather than against it —
+  // without that the padding only ever shows at rest, and the highlighted row
+  // sat flush on the border exactly when it was the one being looked at.
+  useEffect(() => {
+    const list = listRef.current;
+    const row = activeRef.current;
+    if (!list || !row) return;
+
+    const style = getComputedStyle(list);
+    const padTop = parseFloat(style.paddingTop);
+    const padBottom = parseFloat(style.paddingBottom);
+
+    const rowBox = row.getBoundingClientRect();
+    const listBox = list.getBoundingClientRect();
+
+    const top = listBox.top + padTop;
+    const bottom = listBox.bottom - padBottom;
+
+    if (rowBox.top < top) {
+      list.scrollTop -= top - rowBox.top;
+    } else if (rowBox.bottom > bottom) {
+      list.scrollTop += rowBox.bottom - bottom;
+    }
+  }, [activeIndex]);
+
+  /// Hover only counts when the pointer genuinely moved.
+  ///
+  /// Scrolling the list slides a different row under a stationary cursor, and
+  /// the browser reports that as a `mousemove` at the same coordinates. Taken
+  /// at face value it hijacked the selection: arrowing past the last visible
+  /// row scrolled the next one into place, the phantom move selected whatever
+  /// had slid under the pointer, and the highlight snapped backwards.
+  const handleMove = (event: React.MouseEvent, index: number) => {
+    const { clientX: x, clientY: y } = event;
+    const last = pointerRef.current;
+    if (last && last.x === x && last.y === y) return;
+
+    pointerRef.current = { x, y };
+    onHover(index);
+  };
+
+  if (!groups.length) return null;
+
+  // Runs across the whole list rather than restarting per group, so it lines up
+  // with the flat index the composer navigates by.
+  let row = -1;
+  const below = placement === "below";
+
+  /* Outside the box: nothing about a list that never holds focus says it is
+     navigable, but the hint is chrome about the list rather than part of it.
+     Escape is left out — it's the one key everyone already tries.
+
+     `bg-background` rather than transparent, because the row floats over the
+     transcript and without a fill the text sat on whatever happened to be
+     scrolled behind it. Body's own colour, so it reads as a gap in the page
+     rather than as another surface. The padding is the row's own — the fill has
+     to cover the text, not just sit under the box. */
+  const hint = (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-lg bg-background px-1.5 py-1 text-ui text-muted-foreground/50",
+        below ? "mt-1.5" : "mb-1.5",
+      )}
+    >
+      <KbdGroup>
+        <Kbd>↑</Kbd>
+        <Kbd>↓</Kbd>
+        <span className="ml-0.5">navigate</span>
+      </KbdGroup>
+      <KbdGroup>
+        <Kbd>
+          <CornerDownLeft strokeWidth={2} />
+        </Kbd>
+        <span className="ml-0.5">select</span>
+      </KbdGroup>
+    </div>
+  );
+
+  return (
+    // Anchored to the card and lifted clear on whichever side it opens, so the
+    // list grows into empty space rather than pushing the composer around as it
+    // filters.
+    //
+    // `top-full`/`bottom-full` clear the card's own `py-3`, so the gap is really
+    // 12px of that plus this margin. With a border to separate them that reads
+    // as one box beside another; with `bare` there is no edge, so the same gap
+    // reads as the list having drifted away from the input — hence the pull
+    // back, sized to leave the 6px the bordered state shows.
+    <div
+      className={cn(
+        "absolute left-0 z-50 w-full",
+        below && (bare ? "top-full -mt-1.5" : "top-full mt-1.5"),
+        !below && (bare ? "bottom-full -mb-1.5" : "bottom-full mb-1.5"),
+      )}
+    >
+      {!below && hint}
+
+      {/* The frame and the scroller are separate elements on purpose. With the
+          radius on the scrolling box itself, the scrollbar is laid out in that
+          box's own corner and spills past the curve — visibly clipped by it at
+          the top and bottom ends. Rounding an `overflow-hidden` parent instead
+          clips the scrollbar to the curve, so it stops short of the corners the
+          way the rows do.
+
+          `bare` drops the border, the radius and the shadow together, and they
+          do go together: with no border and the page's own fill there is no
+          edge for a radius to round or a shadow to lift, so the shadow would be
+          a soft halo around nothing and the radius would only be back to
+          clipping a scrollbar that no longer needs it. The selected row is what
+          marks the list there. Rows keep their own radius either way — that one
+          is the shape of the highlight, not of the box. */}
+      <div
+        className={cn(
+          "overflow-hidden",
+          bare
+            ? "bg-background text-foreground"
+            : "rounded-xl border border-[oklch(1_0_0/8%)] bg-popover text-popover-foreground shadow-md",
+        )}
+      >
+        <div
+          ref={listRef}
+          role="listbox"
+          aria-label={label}
+          // Seven rows either way, and that is why there are two heights: 7 ×
+          // the row's own `h-8` is 14rem, and the bordered state adds the
+          // 0.5rem of `py-2` at each end. Written out rather than computed, so
+          // it costs nothing at render — but it does mean these numbers, `h-8`
+          // and `py-2` have to move together.
+          //
+          // `bare` drops the inset with the box it was insetting from: with no
+          // border there is nothing for the rows to be held away from, and the
+          // gap only reads as the list sitting oddly short of its own edge.
+          className={cn(
+            "overflow-y-auto overscroll-contain",
+            bare ? "max-h-[14rem]" : "max-h-[15rem] px-1 py-2",
+          )}
+        >
+          {groups.map((group, g) => (
+            <div
+              key={group.label ?? `group-${g}`}
+              className={cn(
+                g > 0 && "mt-2",
+                // Only a labelled section is closed off by a rule, which today
+                // means recents and nothing else. The unlabelled groups are
+                // separated by their gap alone.
+                g > 0 && groups[g - 1].label !== null && "border-t border-dotted border-border/40 pt-2",
+              )}
+            >
+              {group.label && (
+                <div className="px-2 pb-0.5 text-ui text-muted-foreground/50">{group.label}</div>
+              )}
+
+              {group.items.map((item) => {
+                row += 1;
+                const index = row;
+
+                return (
+                  <button
+                    key={keyOf(item)}
+                    ref={index === activeIndex ? activeRef : undefined}
+                    type="button"
+                    role="option"
+                    aria-selected={index === activeIndex}
+                    // The textarea must keep focus — losing it on mousedown would
+                    // close the menu before the click ever lands.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseMove={(e) => handleMove(e, index)}
+                    onClick={() => onPick(item)}
+                    className={cn(
+                      "flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-ui",
+                      index === activeIndex
+                        ? "bg-accent text-accent-foreground"
+                        : "text-foreground",
+                    )}
+                  >
+                    {renderItem(item)}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {below && hint}
+    </div>
+  );
+}

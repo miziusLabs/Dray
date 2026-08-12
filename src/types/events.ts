@@ -278,6 +278,22 @@ export type FileChange = "add" | "update" | "delete";
 export type FileEdit = { path: string, change: FileChange, unifiedDiff: string | null, };
 
 /**
+ * One row in the picker. `path` is relative to the indexed directory, which is
+ * also what gets typed into the prompt — the CLI resolves `@path` against the
+ * same cwd the child was spawned in, so no rewriting is needed on either side.
+ */
+export type FileMatch = { path: string, 
+/**
+ * The last segment, split out so the row can weight the name over the
+ * directory rather than making the reader find it inside the path.
+ */
+name: string, 
+/**
+ * Everything before `name`, without a trailing slash. Empty at the root.
+ */
+dir: string, };
+
+/**
  * Both sides of one file's change, as the text a diff viewer compares.
  */
 export type FileVersions = { 
