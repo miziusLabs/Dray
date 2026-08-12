@@ -1,8 +1,23 @@
 use std::format;
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+
+/// Reads an explicit `null` as the type's default.
+///
+/// `#[serde(default)]` covers a field that is *absent*; it does nothing for one
+/// that is present and null, which fails against any non-`Option` type. The CLI
+/// does both — a synthetic message (the reply to a built-in slash command) sends
+/// `"iterations": null` where an ordinary one omits the key — so a collection
+/// that can arrive either way needs this as well as `default`.
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -775,8 +790,11 @@ pub struct Usage {
     pub speed: Option<String>,
     #[serde(default)]
     pub inference_geo: Option<String>,
-    /// Per-request breakdown when a turn took several model calls.
-    #[serde(default)]
+    /// Per-request breakdown when a turn took several model calls. Sent as an
+    /// explicit `null` on a synthetic message, hence `null_as_default` — without
+    /// it every built-in slash command's reply failed the whole line, so the
+    /// command appeared to do nothing at all.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub iterations: Vec<UsageIteration>,
 }
 
@@ -1416,6 +1434,56 @@ mod tests {
             .collect();
 
         assert_eq!(flags, vec![(false, true), (true, false)]);
+    }
+
+    /// A built-in slash command (`/rename`) answered by the CLI itself rather
+    /// than by the model. The reply is a **synthetic** assistant message —
+    /// `model: "<synthetic>"`, every token count zero — and it is the only
+    /// capture where `usage.iterations` arrives as an explicit `null`.
+    ///
+    /// That null is what made every built-in command look broken: `iterations`
+    /// is a `Vec` and `#[serde(default)]` only covers an absent key, so the
+    /// whole line failed to parse, the reply never reached the transcript, and
+    /// the command read as doing nothing. Skills were unaffected because they
+    /// answer through an ordinary model turn.
+    #[test]
+    fn parses_a_builtin_commands_synthetic_reply() {
+        let events = parse_fixture(include_str!("fixtures/builtin_command.jsonl"));
+        assert_eq!(events.len(), 3, "every line parses, none dropped");
+
+        let message = events
+            .iter()
+            .find_map(|event| match event {
+                ClaudeCodeEvent::Assistant { message, .. } => Some(message),
+                _ => None,
+            })
+            .expect("the command answers with an assistant message");
+
+        assert_eq!(message.model, "<synthetic>");
+        assert!(matches!(
+            message.content.first(),
+            Some(ContentBlock::Text { text }) if text.contains("renamed")
+        ));
+
+        let usage = message.usage.as_ref().expect("a synthetic message carries usage");
+        assert!(usage.iterations.is_empty(), "a null list reads as an empty one");
+        assert_eq!(usage.input_tokens, 0, "the CLI answered without the model");
+    }
+
+    /// Pinned apart from the fixture because the distinction is exactly the one
+    /// that was missed: `default` answers for a key that isn't there, and does
+    /// nothing at all for a key that is there and null.
+    #[test]
+    fn a_null_collection_is_not_the_same_as_a_missing_one() {
+        let with_null: Usage =
+            serde_json::from_str(r#"{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"iterations":null}"#)
+                .expect("an explicit null must not fail the line");
+        assert!(with_null.iterations.is_empty());
+
+        let omitted: Usage =
+            serde_json::from_str(r#"{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}"#)
+                .unwrap();
+        assert!(omitted.iterations.is_empty());
     }
 
     /// A subtype this build has never seen must degrade to `Unrecognized`, not

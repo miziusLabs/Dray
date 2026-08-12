@@ -1472,6 +1472,39 @@ mod tests {
         ));
     }
 
+    /// A built-in slash command answers without the model, and its reply has to
+    /// reach the transcript like any other text. Asserted through the mapper
+    /// rather than the parser alone because "the line parses" was never the
+    /// point — the user-visible failure was an empty turn.
+    ///
+    /// The zeroed usage must also leave the context gauge alone: a synthetic
+    /// turn spends nothing, and reporting an occupancy of zero would blank a
+    /// reading the previous turn had legitimately set.
+    #[test]
+    fn maps_a_builtin_commands_reply_into_the_transcript() {
+        let events = map_fixture(
+            &mut Mapper::default(),
+            include_str!("fixtures/builtin_command.jsonl"),
+        );
+
+        assert!(
+            events.iter().any(|event| matches!(
+                &event.payload,
+                AgentEventPayload::AssistantText { text, .. } if text.contains("renamed")
+            )),
+            "the command's answer never reached the transcript"
+        );
+
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentEventPayload::TurnCompleted {
+                status: TurnStatus::Success,
+                usage: Some(usage),
+                ..
+            } if usage.context_window.is_none()
+        )));
+    }
+
     /// A compaction is exactly two events, and the CLI's own bookkeeping that
     /// follows it is not conversation.
     #[test]
