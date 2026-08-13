@@ -14,6 +14,11 @@ OUT="src-tauri/icons"
 # flat PNGs are the window/Linux/tray icon, where full-bleed is right.
 INSET=824
 
+# `tauri::generate_context!` rejects a window icon that isn't RGBA, and magick
+# happily writes a palette PNG when the resized art has few enough colours — so
+# every PNG is forced to 32-bit rather than left to that heuristic.
+PNG32=PNG32:
+
 make_icns() {
   local src="$1" dest="$2" tmp iconset
   tmp="$(mktemp -d)"
@@ -25,7 +30,7 @@ make_icns() {
               "128 128x128" "256 128x128@2x" "256 256x256" "512 256x256@2x" \
               "512 512x512" "1024 512x512@2x"; do
     local px="${pair% *}" name="${pair#* }"
-    magick "$tmp/master.png" -resize "${px}x${px}" "$iconset/icon_$name.png"
+    magick "$tmp/master.png" -resize "${px}x${px}" "$PNG32$iconset/icon_$name.png"
   done
   iconutil -c icns "$iconset" -o "$dest"
   rm -rf "$tmp"
@@ -33,10 +38,10 @@ make_icns() {
 
 make_flat() {
   local src="$1" dir="$2"
-  magick "$src" -resize 32x32 "$dir/32x32.png"
-  magick "$src" -resize 128x128 "$dir/128x128.png"
-  magick "$src" -resize 256x256 "$dir/128x128@2x.png"
-  magick "$src" -resize 1024x1024 "$dir/icon.png"
+  magick "$src" -resize 32x32 "$PNG32$dir/32x32.png"
+  magick "$src" -resize 128x128 "$PNG32$dir/128x128.png"
+  magick "$src" -resize 256x256 "$PNG32$dir/128x128@2x.png"
+  magick "$src" -resize 1024x1024 "$PNG32$dir/icon.png"
 }
 
 make_flat "$SRC/icon-1024.png" "$OUT"
