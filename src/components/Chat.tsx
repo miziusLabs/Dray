@@ -40,6 +40,11 @@ type ChatProps = {
   /// Whether a compaction is running. Sits beside the task indicator for the
   /// same reason: it belongs to the session, not to any one turn.
   compacting?: boolean;
+  /// Both side panes are open, so the pane is at its narrowest and the rail sits
+  /// close to the text. Passed in rather than measured here: the shell owns those
+  /// two toggles, and the rail overlays the transcript at every width anyway — so
+  /// this is about how crowded the pane *is*, not whether the rail fits.
+  crowded?: boolean;
 };
 
 /// How long an answered permission card holds its place before going.
@@ -68,16 +73,6 @@ const JUMP_PAD_PX = 12;
 /// Below this the rail is one or two ticks describing what is already on screen,
 /// which is chrome for nothing.
 const RAIL_MIN = 2;
-
-/// The narrowest pane that leaves the rail a gutter to sit in: the transcript
-/// column (`max-w-3xl` plus its `px-4`) and roughly 40px either side.
-///
-/// Measured rather than expressed as a container query, and the difference is
-/// not stylistic. A hidden rail still has mounted triggers, and a tooltip whose
-/// trigger has no box repositions itself to the window's top-left corner instead
-/// of closing — which is exactly what opening the right panel with a preview up
-/// used to do. Unmounting the rail takes its tooltips with it.
-const RAIL_MIN_PANE_PX = 880;
 
 /// The cards to draw: the live set, but one beat behind when it empties.
 function useLingeringCards(pending: PendingAsk[]): PendingAsk[] {
@@ -116,6 +111,7 @@ export default function Chat({
   working = null,
   backgroundTaskCount = 0,
   compacting = false,
+  crowded = false,
 }: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -149,11 +145,7 @@ export default function Chat({
     [turns],
   );
 
-  // Whether the pane has room for the rail. Starts closed so a narrow pane never
-  // paints one over the transcript for a frame; the observer below settles it
-  // before paint.
-  const [roomForRail, setRoomForRail] = useState(false);
-  const showRail = roomForRail && checkpoints.length >= RAIL_MIN;
+  const showRail = checkpoints.length >= RAIL_MIN;
   const [activeTurn, setActiveTurn] = useState<string | null>(null);
 
   // Told apart by the type `block_start` declared, not by content — thinking
@@ -344,11 +336,6 @@ export default function Chat({
       // A turn that grew or collapsed moves every turn under it, with no scroll
       // event to notice it by.
       syncActive();
-      // The same observation carries the pane's width, which is what decides
-      // whether the rail fits — a panel opening or the window resizing both
-      // arrive here. Setting the same boolean twice is a no-op in React, so
-      // this costs nothing on the height changes that dominate.
-      setRoomForRail(scroller.clientWidth >= RAIL_MIN_PANE_PX);
     });
     ro.observe(scroller);
     ro.observe(content);
@@ -386,7 +373,7 @@ export default function Chat({
         onWheel={onWheel}
         className="h-full overflow-y-auto"
       >
-        <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
+        <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-6">
           {turns.map((turn) => (
             // The wrapper is what the rail measures and scrolls to. It carries
             // no styles of its own — it stands in for the block as the flex item.
@@ -461,9 +448,10 @@ export default function Chat({
           activeKey={activeTurn}
           onSelect={jumpToTurn}
           onWheel={onRailWheel}
+          dimmed={crowded}
           // Centred vertically and outside the scroller, so it holds still while
           // the transcript moves under it.
-          className="absolute left-3 top-1/2 -translate-y-1/2"
+          className="absolute left-1.5 top-1/2 -translate-y-1/2"
         />
       )}
     </div>

@@ -17,6 +17,9 @@ type CheckpointRailProps = {
   /// Fires on the rail's own scroll container, so the handler can tell whether
   /// the rail has room to absorb the gesture before forwarding it.
   onWheel?: React.WheelEventHandler<HTMLDivElement>;
+  /// Fades the rail back. Set when the pane is crowded enough that the ticks sit
+  /// close to the text — hovering brings it back, so nothing is lost.
+  dimmed?: boolean;
   className?: string;
 };
 
@@ -32,6 +35,7 @@ export default function CheckpointRail({
   activeKey,
   onSelect,
   onWheel,
+  dimmed = false,
   className,
 }: CheckpointRailProps) {
   const railRef = useRef<HTMLDivElement>(null);
@@ -53,7 +57,10 @@ export default function CheckpointRail({
       // a column of small targets, so there is nowhere between two ticks that
       // answers to neither.
       className={cn(
-        "flex max-h-[70%] flex-col overflow-y-auto [scrollbar-width:none]",
+        "flex max-h-[70%] flex-col overflow-y-auto [scrollbar-width:none] transition-opacity",
+        // On the container, so the ticks keep their own relative weight — an
+        // active tick still reads brighter than the rest, just quieter overall.
+        dimmed && "opacity-30 hover:opacity-100",
         className,
       )}
     >
@@ -69,7 +76,7 @@ export default function CheckpointRail({
                 aria-label={`Jump to message ${i + 1}`}
                 aria-current={active ? "true" : undefined}
                 onClick={() => onSelect(checkpoint.key)}
-                className="group flex h-3 w-7 shrink-0 items-center"
+                className="group flex h-3 w-5 shrink-0 items-center cursor-pointer"
               >
                 {/* Active is brightness alone, at the default width. Length is
                     the hover affordance — reaching for a tick and having it grow
@@ -77,7 +84,7 @@ export default function CheckpointRail({
                     stayed long read as a second, competing hover. */}
                 <span
                   className={cn(
-                    "h-0.5 w-3 rounded-full transition-all duration-200 group-hover:w-5",
+                    "h-0.5 w-2.5 rounded-full transition-all duration-200 group-hover:w-4",
                     active
                       ? "bg-foreground/70"
                       : "bg-muted-foreground/40 group-hover:bg-muted-foreground",
@@ -92,7 +99,7 @@ export default function CheckpointRail({
             <TooltipContent
               side="right"
               align="center"
-              className="block max-w-80 whitespace-pre-wrap py-2 text-left text-chat"
+              className="block max-w-80 whitespace-pre-wrap py-2 text-left text-chat rounded-xl"
             >
               <span className="line-clamp-4">{checkpoint.preview}</span>
             </TooltipContent>

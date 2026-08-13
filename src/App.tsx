@@ -354,6 +354,7 @@ function App() {
         backgroundTaskCount={backgroundTasks.length}
         compacting={compacting}
         working={working}
+        crowded={!collapsed && panelOpen}
       />
     </AppShell>
     </DiffWorkerPool>
