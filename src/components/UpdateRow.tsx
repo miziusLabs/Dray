@@ -60,7 +60,5 @@ export default function UpdateRow({ status, blocked, onInstall }: UpdateRowProps
 }
 
 function Footer({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="shrink-0 border-t border-sidebar-border px-2 py-2">{children}</div>
-  );
+  return <div className="shrink-0 px-2 py-2">{children}</div>;
 }
