@@ -13,6 +13,7 @@ import { nextPermissionMode } from "@/components/composer/PermissionSelector";
 import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { pickAttachments } from "@/hooks/useAttachments";
 import { useCodeTheme } from "@/hooks/useCodeTheme";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { useFullscreen } from "@/hooks/useFullscreen";
@@ -335,6 +336,7 @@ function App() {
               onCancelBranchSwitch={() => setPendingBranch(null)}
               useWorktree={useWorktree}
               onToggleWorktree={() => setUseWorktree((v) => !v)}
+              onAttach={() => void pickAttachments(selectedSessionId)}
               contextUsage={contextUsage}
               isNewSession={!selectedSessionId}
             />

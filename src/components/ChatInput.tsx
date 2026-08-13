@@ -1,11 +1,21 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, CornerDownLeft, Square, X } from "lucide-react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { ArrowUp, CornerDownLeft, Paperclip, Square, X } from "lucide-react";
 
+import AttachmentTray from "@/components/composer/AttachmentTray";
 import FileMentionMenu from "@/components/composer/FileMentionMenu";
 import SlashCommandMenu from "@/components/composer/SlashCommandMenu";
 import { Button } from "@/components/ui/button";
+import {
+  addAttachmentPaths,
+  clearAttachments,
+  pickAttachments,
+  removeAttachment,
+  useAttachments,
+} from "@/hooks/useAttachments";
 import { useDraft } from "@/hooks/useDraft";
 import { useFileSearch } from "@/hooks/useFileSearch";
+import { useHotkey } from "@/hooks/useHotkey";
 import { useRecentCommands } from "@/hooks/useRecentCommands";
 import { SEGMENT_COLOR, highlightSegments, splitMention } from "@/lib/highlight";
 import { applyMention, mentionSpan } from "@/lib/mention";
@@ -20,7 +30,10 @@ import { cn } from "@/lib/utils";
 import type { FileMatch, SlashCommand } from "@/types/events";
 
 type ChatInputProps = {
-  onSend: (message: string) => void;
+  /// `attachmentPaths` is what the tray held, as absolute paths. The backend
+  /// re-reads each one — nothing but paths crosses the bridge, so a pinned
+  /// screenshot is never uploaded twice.
+  onSend: (message: string, attachmentPaths: string[]) => void;
   /// What the `/` picker offers. Empty until the backend's probe lands, and
   /// empty forever if it failed — the picker simply never opens, and a command
   /// typed by hand still works, since the CLI parses the text either way.
@@ -117,6 +130,13 @@ export default function ChatInput({
   const pendingCaretRef = useRef<number | null>(null);
 
   const [recent, recordCommand] = useRecentCommands();
+
+  const attachments = useAttachments(sessionId);
+  // Set while the OS is dragging files over the window. Tauri intercepts the
+  // native drop before the webview sees it, so there are no HTML drag events to
+  // read here — `onDragDropEvent` is the only source, and it reports paths
+  // rather than `File` handles, which is exactly what the backend wants anyway.
+  const [dragging, setDragging] = useState(false);
 
   // The runs that take a colour. Empty of anything but plain text most of the
   // time, which is what the overlay below checks before mounting at all.
@@ -264,11 +284,54 @@ export default function ChatInput({
     return () => observer.disconnect();
   }, []);
 
-  const canSend = message.trim().length > 0 && !busy;
+  // ⌥ as well as ⌘, so the chord can't collide with the webview's own ⌘O.
+  useHotkey("o", () => void pickAttachments(sessionId), { alt: true });
+
+  // The drop target is the whole window, not the card: a file aimed at the
+  // composer while the transcript fills the screen would otherwise have to be
+  // dropped on a 60px strip. The card is where the affordance is drawn, because
+  // that is where the file is about to land.
+  useEffect(() => {
+    if (archived) return;
+
+    let unlisten: (() => void) | null = null;
+    let live = true;
+
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        // `enter` and `over` are one state here — the drag is over the window
+        // and hasn't been dropped. Treating `enter` as anything else flashes
+        // the overlay off for the frame between it and the first `over`.
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          setDragging(true);
+        } else if (event.payload.type === "drop") {
+          setDragging(false);
+          void addAttachmentPaths(sessionId, event.payload.paths);
+        } else {
+          setDragging(false);
+        }
+      })
+      .then((off) => {
+        // The listener is registered asynchronously, so an unmount can land
+        // first — drop it straight away rather than leaking a handler that
+        // writes into a session this composer has already left.
+        if (live) unlisten = off;
+        else off();
+      });
+
+    return () => {
+      live = false;
+      unlisten?.();
+    };
+  }, [sessionId, archived]);
+
+  const canSend = (message.trim().length > 0 || attachments.length > 0) && !busy;
 
   const submit = () => {
     const trimmed = message.trim();
-    if (!trimmed || busy) return;
+    // An attachment on its own is a real prompt — dropping a screenshot and
+    // pressing Enter is asking about the screenshot.
+    if ((!trimmed && !attachments.length) || busy) return;
 
     // Recorded on send rather than on pick: choosing a command from the list
     // and then deleting it is not using it. Taken from the text, so a command
@@ -276,8 +339,12 @@ export default function ChatInput({
     const command = parseSlashCommand(trimmed);
     if (command) recordCommand(command.name);
 
-    onSend(trimmed);
+    onSend(
+      trimmed,
+      attachments.map((a) => a.path),
+    );
     setMessage("");
+    clearAttachments(sessionId);
   };
 
   // Returns before the form, so there is no disabled textarea to focus and no
@@ -409,6 +476,29 @@ export default function ChatInput({
                 bare={isNewTask}
               />
             ))}
+
+          {/* Covers the card rather than replacing anything, so the text and
+              the tray stay legible underneath and the box doesn't resize the
+              moment a file crosses the window. Inert to pointer events — the
+              drop is the OS's, and Tauri delivers it whatever is on top. */}
+          {dragging && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-2xl border-2 border-muted-foreground/25 bg-background/70 text-ui text-muted-foreground">
+              <Paperclip className="size-3.5" strokeWidth={2} />
+              Drop to attach
+            </div>
+          )}
+
+          {/* Inside the card and above the text, so an attachment reads as part
+              of the message being composed rather than as a separate control.
+              Padded on the same edges as the textarea below it. */}
+          {attachments.length > 0 && (
+            <div className={cn("pt-3", isNewTask ? "px-0" : "px-3")}>
+              <AttachmentTray
+                attachments={attachments}
+                onRemove={(path) => removeAttachment(sessionId, path)}
+              />
+            </div>
+          )}
 
           {/* Both buttons sit on the last line. At one line that reads as
               centered anyway, because the textarea's vertical padding below is

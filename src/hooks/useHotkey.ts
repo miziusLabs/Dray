@@ -20,7 +20,16 @@ export function useHotkey(
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== key.toLowerCase()) return;
+      // `code` is only consulted for an Option chord, and only for a letter.
+      // macOS applies the Option layout to `key` — ⌥O can arrive as "ø" — so a
+      // binding that reads `key` alone silently never fires. The narrowness is
+      // the point: matching by physical position everywhere would fire ⌘B on
+      // Dvorak's N key, so the fallback stays where the layout has already
+      // broken the character.
+      const matches =
+        e.key.toLowerCase() === key.toLowerCase() ||
+        (alt && key.length === 1 && e.code === `Key${key.toUpperCase()}`);
+      if (!matches) return;
       // Accept either modifier rather than branching on platform: a Mac reports
       // metaKey, everything else ctrlKey, and neither fires the other's chord.
       if (meta && !e.metaKey && !e.ctrlKey) return;

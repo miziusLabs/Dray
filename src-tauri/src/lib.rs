@@ -1,4 +1,5 @@
 use crate::{
+    attachments::Attachment,
     events::ApprovalPolicy,
     files::FileMatch,
     git::BranchList,
@@ -11,6 +12,7 @@ use crate::{
 use std::collections::HashMap;
 use tauri::{AppHandle, State};
 
+pub mod attachments;
 pub mod binpath;
 #[path = "events/events.rs"]
 pub mod events;
@@ -29,6 +31,7 @@ pub mod title;
 async fn send_msg(
     session_id: &str,
     prompt: &str,
+    attachment_paths: Vec<String>,
     harness: &str,
     model: ModelId,
     effort: Option<Effort>,
@@ -51,6 +54,7 @@ async fn send_msg(
         .send_msg(
             session_id,
             prompt,
+            &attachment_paths,
             harness,
             model,
             effort,
@@ -64,6 +68,14 @@ async fn send_msg(
         )
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Describes dropped or picked paths for the composer's tray. Returns only the
+/// ones that can be attached — a folder dragged in alongside two files leaves
+/// the two files.
+#[tauri::command]
+async fn read_attachments(paths: Vec<String>) -> Vec<Attachment> {
+    attachments::read_attachments(paths).await
 }
 
 #[tauri::command]
@@ -310,6 +322,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             send_msg,
+            read_attachments,
             list_models,
             list_slash_commands,
             warm_file_index,

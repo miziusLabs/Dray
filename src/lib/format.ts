@@ -59,6 +59,14 @@ export function compactTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
+/// A file size at a glance — "812 B", "1.4 KB", "2.3 MB". Decimal units, which
+/// is what the OS file picker beside it reports.
+export function formatBytes(n: number): string {
+  if (n < 1_000) return `${n} B`;
+  if (n < 1_000_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")} KB`;
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")} MB`;
+}
+
 /// Trailing path segment, for showing a project as its folder name.
 export function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");

@@ -189,6 +189,33 @@ trigger: string | null, preTokens: number | null, postTokens: number | null, dur
 export type ApprovalPolicy = "plan" | "manual" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions";
 
 /**
+ * One thing the user attached, as the composer needs to draw it.
+ */
+export type Attachment = { 
+/**
+ * Where it was picked from. This is the identity the composer dedupes on
+ * and the path the backend re-reads at send time — nothing but paths
+ * crosses back down, so a 4MB preview is never uploaded twice.
+ */
+path: string, name: string, 
+/**
+ * Only meaningful for an image; `None` says nothing about the file beyond
+ * "not something we send as pixels".
+ */
+mimeType: string | null, size: number, 
+/**
+ * Whether this will travel as an image block. Decided by extension *and*
+ * size together, so the composer's thumbnail and the wire agree.
+ */
+isImage: boolean, 
+/**
+ * A `data:` URL for the composer's thumbnail, `None` for a file. Sent up
+ * once and held in frontend memory only — the persisted event points at a
+ * copy on disk instead, so the session log never carries image bytes.
+ */
+preview: string | null, };
+
+/**
  * One outstanding background task. The harness's wire shape is snake_case, so
  * the parser keeps its own struct and the mapper converts — sharing this one
  * would break on `task_id` vs `taskId`.

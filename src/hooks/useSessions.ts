@@ -214,6 +214,7 @@ const upsertSession = (snapshot: SessionSnapshot) =>
 
 const handleSendMsg = async (
   message: string,
+  attachmentPaths: string[] = [],
 ) => {
 
   let sessionId = selectedSessionId;
@@ -247,6 +248,7 @@ const handleSendMsg = async (
     const snapshot = await invoke<SessionSnapshot | null>("send_msg", {
       sessionId,
       prompt: message,
+      attachmentPaths,
       harness: "claude_code",
       model: modelId,
       effort,

@@ -8,6 +8,8 @@ import PermissionSelector from "@/components/composer/PermissionSelector";
 import ProjectSelector from "@/components/composer/ProjectSelector";
 import WorktreeToggle from "@/components/composer/WorktreeToggle";
 import { Button } from "@/components/ui/button";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type {
   ApprovalPolicy,
   BranchList,
@@ -43,6 +45,11 @@ export type ComposerToolbarProps = {
   useWorktree: boolean;
   onToggleWorktree: () => void;
 
+  /// Opens the file picker. The attachments themselves are held in a
+  /// module-level store keyed by session, not passed through here — this row is
+  /// handed to `ChatInput` as an opaque node, so the two cannot share props.
+  onAttach: () => void;
+
   /// How full the model's context is, or `null` before any turn has reported
   /// it. Sits at the far end of the row rather than among the pickers: it
   /// reports rather than sets, and nothing here changes it.
@@ -77,21 +84,36 @@ export default function ComposerToolbar({
   onCancelBranchSwitch,
   useWorktree,
   onToggleWorktree,
+  onAttach,
   contextUsage,
   isNewSession,
 }: ComposerToolbarProps) {
   return (
     <div className="flex min-w-0 items-center gap-0.5 px-1">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        disabled
-        title="Attach"
-        className="rounded-full text-muted-foreground"
-      >
-        <Plus />
-      </Button>
+      {/* No radius override: `icon-sm` already carries the app's rounded-square,
+          and a circle here would be the one round control in a row of them. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onAttach}
+            aria-label="Attach files"
+            className="text-muted-foreground"
+          >
+            <Plus />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          Attach files
+          <KbdGroup>
+            <Kbd>⌘</Kbd>
+            <Kbd>⌥</Kbd>
+            <Kbd>O</Kbd>
+          </KbdGroup>
+        </TooltipContent>
+      </Tooltip>
 
       <PermissionSelector value={permissionMode} onChange={onPermissionModeChange} />
 

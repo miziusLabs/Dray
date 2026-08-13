@@ -1,5 +1,8 @@
 use crate::{
-    events::{now_rfc3339, AgentEvent, AgentEventPayload, ApprovalPolicy, PermissionBehavior},
+    attachments,
+    events::{
+        now_rfc3339, AgentEvent, AgentEventPayload, ApprovalPolicy, ImageRef, PermissionBehavior,
+    },
     git,
     harness::{
         claude_code::{
@@ -166,6 +169,9 @@ impl SessionManager {
         &self,
         session_id: &str,
         prompt: &str,
+        // Absolute paths of what the composer had attached. Re-read here rather
+        // than uploaded: the frontend holds a thumbnail, not bytes.
+        attachment_paths: &[String],
         harness: Harness,
         model: ModelId,
         effort: Option<Effort>,
@@ -248,7 +254,9 @@ impl SessionManager {
                 app,
             )
             .await?;
-            session.send_msg(prompt, baseline, app).await?;
+            session
+                .send_msg(prompt, attachment_paths, baseline, app)
+                .await?;
             // The prompt event is synthesized by `send_msg`, so read the log
             // back rather than returning empty — otherwise the frontend's first
             // render drops the user's own message.
@@ -306,7 +314,7 @@ impl SessionManager {
             // but alive, so the narrower the gap the less of the user's own
             // editing lands on the turn's side of the diff.
             let baseline = git::snapshot_tree(&session_cwd).await;
-            s.send_msg(prompt, baseline, app).await?;
+            s.send_msg(prompt, attachment_paths, baseline, app).await?;
             return Ok(None);
         }
 
@@ -329,7 +337,9 @@ impl SessionManager {
             app,
         )
         .await?;
-        session.send_msg(prompt, baseline, app).await?;
+        session
+            .send_msg(prompt, attachment_paths, baseline, app)
+            .await?;
         sessions_guard.insert(session_id.to_string(), session);
         Ok(None)
     }
@@ -386,6 +396,13 @@ impl SessionManager {
         let running = self.sessions.lock().await.remove(session_id);
         if let Some(session) = running {
             session.kill().await?;
+        }
+
+        // Best-effort: the images are a convenience for the transcript that is
+        // about to stop existing, so failing to remove them must not fail the
+        // delete the user asked for.
+        if let Err(e) = attachments::delete_session_attachments(session_id).await {
+            eprintln!("could not delete attachments for {session_id}: {e}");
         }
 
         delete_session(session_id).await
@@ -484,14 +501,28 @@ impl Session {
     pub async fn send_msg(
         &mut self,
         prompt: &str,
+        attachment_paths: &[String],
         baseline: Option<String>,
         app: &AppHandle,
     ) -> Result<()> {
         let seq = self.seq.fetch_add(1, Relaxed);
 
+        // Ahead of the event, because it is what decides the event's own text:
+        // a non-image attachment becomes an `@path` mention on the prompt, and
+        // the transcript has to show what the model was actually given.
+        let prepared = attachments::prepare(&self.id, prompt, attachment_paths).await?;
+
         let payload = AgentEventPayload::UserMessage {
-            text: prompt.to_string(),
-            images: Vec::new(),
+            text: prepared.text.clone(),
+            images: prepared
+                .images
+                .iter()
+                .map(|i| ImageRef {
+                    path: Some(i.stored_path.clone()),
+                    url: None,
+                    mime_type: Some(i.mime_type.clone()),
+                })
+                .collect(),
             baseline,
         };
         let agent_event = AgentEvent {
@@ -515,7 +546,30 @@ impl Session {
 
         append_session_event(&self.id, agent_event).await?;
 
-        let prompt = json!({"type":"user","message":{"role":"user","content": prompt}});
+        // A bare string is the whole content when nothing is attached — the
+        // shape every fixture captures, kept rather than always sending the
+        // one-element block array it is sugar for.
+        let content = if prepared.images.is_empty() {
+            json!(prepared.text)
+        } else {
+            let mut blocks = Vec::new();
+            if !prepared.text.is_empty() {
+                blocks.push(json!({"type": "text", "text": prepared.text}));
+            }
+            for image in &prepared.images {
+                blocks.push(json!({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image.mime_type,
+                        "data": image.data,
+                    },
+                }));
+            }
+            json!(blocks)
+        };
+
+        let prompt = json!({"type":"user","message":{"role":"user","content": content}});
         write_line(&self.stdin, &prompt).await?;
 
         // After the write: a prompt that never reached the child starts
