@@ -48,13 +48,21 @@ Use **pnpm**, not npm. `tauri.conf.json` hardcodes `pnpm dev` / `pnpm build` as 
 pnpm tauri dev
 ```
 
-That is the real entry point — it builds and runs the Rust app and starts Vite via `beforeDevCommand`.
+That is the real entry point — it builds and runs the Rust app and starts Vite via `beforeDevCommand`. `pnpm tauri` is a shim ([scripts/tauri.mjs](scripts/tauri.mjs)) that merges `tauri.dev.conf.json` into the `dev` subcommand only, so the dev app carries its own name and icon and `build` is untouched. The Tauri CLI merges an extra config only when it is named on the command line, and there is no dev-flavoured config it picks up on its own — hence the shim rather than a config file convention.
 
 - `pnpm dev` — frontend only, port 1420 (`strictPort: true`, so a busy port is a hard failure, not a fallback). `invoke` calls do nothing in a plain browser, so this is only useful for pure-CSS/layout work.
 - `pnpm build` — `tsc && vite build`. `pnpm tauri build` for a bundled app.
 - `cd src-tauri && cargo test` — the Rust tests (173: parser + mapper + event-model compatibility, plus git and the file index). Single test: `cargo test parses_complex_fixture`.
 - `cd src-tauri && cargo check` — fast type check without linking the whole app.
 - `pnpm test` — the frontend tests (vitest, 87, node environment, no DOM). Scoped to the pure logic where being wrong is invisible on screen: [streaming.ts](src/lib/streaming.ts), which has a wire format to get wrong and reads the same committed fixtures the Rust tests do rather than keeping its own captures; and the composer's caret arithmetic ([slash.ts](src/lib/slash.ts), [mention.ts](src/lib/mention.ts), [highlight.ts](src/lib/highlight.ts)), where the same string opens a picker or doesn't depending only on where the cursor is. Components are not tested — there is no DOM here.
+
+## App icon
+
+The 1024px masters in `src-tauri/icons/src/` are Icon Composer exports and are the only thing to edit; `pnpm icons` ([scripts/icons.sh](scripts/icons.sh)) regenerates everything else, and the outputs are committed so no build step depends on it. `icon-1024.png` is the app, `icon-dev-1024.png` the dev flavour.
+
+**The icns is inset, the flat PNGs are not.** An Icon Composer export runs full-bleed to the canvas edge, but macOS sizes dock icons off an 824/1024 grid — an icns built from the raw master draws visibly larger than every neighbour in the dock. The flat PNGs are the window, Linux, and tray icon, where full-bleed is right, so only `icns()` insets.
+
+`icon-dark-1024.png` is kept beside the others and wired to nothing. An `.icns` has no appearance variants and Tauri's `bundle.icon` is a flat list, so a dark app icon needs an asset catalog the bundler doesn't build.
 
 ## Architecture: the event pipeline
 
