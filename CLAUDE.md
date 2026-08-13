@@ -222,6 +222,30 @@ The asymmetry is the point: appending to a private file is atomic, rewriting a s
 
 `cwd` on the index is authoritative on resume — `send_msg` reads it rather than trusting the caller's argument, since the project picker makes the two able to disagree and resuming in the wrong directory is silent.
 
+## Updates
+
+**Two signatures, and conflating them is the first mistake to avoid.** The minisign keypair (`pnpm tauri signer generate`) is the updater's own integrity check: the public half sits in `plugins.updater.pubkey` and the private half is a build-time env var, and a bundle built without it is refused by every client. Apple's Developer ID signature is a different question entirely — it is what stops macOS blocking a download, and it says nothing about whether the payload is the one this app published. Both are set in [release.yml](.github/workflows/release.yml); only the first is needed for a local build, which is why [install.sh](scripts/install.sh) exports the key itself and fails early with a readable message rather than letting the bundler complain about a public key with no private one.
+
+**A tag's shape picks the channel**, and semver does the rest. `v0.3.0` is stable, `v0.3.0-beta.1` is beta, and because `0.3.0-beta.1` sorts *below* `0.3.0`, a beta user is offered the stable release the moment it ships — no logic anywhere reproduces that rule. What the release job does encode is the other half: a stable release writes both manifests, a beta release writes only `beta.json`, so beta is a superset rather than a fork.
+
+**The manifests live on an `updates` branch served by GitHub Pages, not in the release.** `/releases/latest/download/` is the obvious host and cannot work here: it skips prereleases, so beta would have no fixed URL. The artifacts still live on the release — the manifest only points at them — so Pages carries two small JSON files and GitHub remains the CDN.
+
+**The channel is chosen per check, in Rust, not in `tauri.conf.json`.** [updater.rs](src-tauri/src/updater.rs) builds the updater with the channel's endpoint each time, so switching channels needs no rebuild; the config endpoint is only what a caller naming no channel would get. There is no channel picker yet — [useUpdater](src/hooks/useUpdater.ts) reads `ade.updateChannel` from storage and defaults to stable.
+
+**Nothing is emitted until there is an update**, so `null` is the frontend's resting state and covers every failure. A check that can't reach the manifest is the common case, not an error worth a row — being offline is not something the reader can act on. The bundle downloads as soon as it's found and is held in memory until the user presses install; progress is emitted only on a change of whole percent, since chunks land every few KB and a per-chunk event is thousands of renders per bundle.
+
+**Install is blocked while any session is mid-turn, and the button waits rather than warning.** Swapping the bundle relaunches the app, which kills every child mid-turn. The check is `statusBySession` in [App.tsx](src/App.tsx) and it is complete on its own: no child survives a restart, so a session from an earlier run cannot still be running. The check lives at the button rather than in `install_update` because that command is the point of no return — it never returns on success, since `restart` diverges, and an `invoke` that resolves at all means the install failed.
+
+**The update row is drawn only when there is something to say.** The sidebar has no permanent footer; a row reading "up to date" is chrome for a fact nobody asked about. It shows nothing while the sidebar is collapsed, and that is deliberate — the next check keeps the offer alive, and an update is not urgent enough to earn a second home in the header the way the changes indicator did.
+
+## Quitting
+
+**Every route out is intercepted, because only one of them was ever preventable.** The window's close button fires `CloseRequested`, which [lib.rs](src-tauri/src/lib.rs) prevents outright. ⌘Q does not: macOS sends the predefined Quit item straight to `NSApplication.terminate` and Tauri emits no `ExitRequested` for it. So [quit.rs](src-tauri/src/quit.rs) builds the app menu by hand with a *custom* Quit item carrying the same accelerator, which does arrive as a menu event. That is the only reason this app has a menu of its own — and it is why the Edit submenu has to be rebuilt too, since without its items macOS gives the webview no ⌘C/⌘V at all.
+
+**The dialog asks regardless of what is running**, on purpose. A quit is cheap to confirm and expensive to get wrong, and a dialog that appears only sometimes is one nobody builds a habit around. Cancelling is not "quit later" — the quit was already dropped by the time the dialog is on screen.
+
+**A second unanswered request exits.** With every route intercepted, a frontend that never painted would leave the app unquittable, so `PendingQuit` tracks whether a request is on screen and a second one while the first is unanswered exits outright. Cancelling clears the flag through `dismiss_quit`, so the hatch never opens for someone who simply changed their mind twice.
+
 ## Parser conventions
 
 [parser.rs](src-tauri/src/harness/claude_code/parser.rs) is the file most likely to need extending, and it has firm conventions:
@@ -373,12 +397,16 @@ Several things are deliberately unfinished — don't mistake them for bugs:
 
 - **Command source is inferred, and one half of it reads display text.** `commandSource` splits harness / plugin / user from the only two signals the `initialize` payload carries: a plugin namespaces its name (`railway:deploy`), and a user- or project-scoped command has the scope appended to its *description* (`… (user)`). There is no scope field. So `harness` means "neither of those", which files the CLI's built-ins (`/compact`) together with the skills Anthropic ships beside them (`/dataviz`, `/code-review`) — nothing tells those apart, and for the reader they are the same thing: nobody installed them. `system/init` is not a better source; `slash_commands - skills` mixes built-ins with plugin and custom `.md` commands, and arrives too late for the picker anyway. The description test fails benignly — a reworded suffix files a command under the wrong heading and changes nothing else — which is why it isn't worth a sturdier scheme the wire won't support.
 
+- **The beta channel has no picker.** `ade.updateChannel` in local storage is the whole switch, and nothing writes it. The backend takes the channel per check, so a picker is a control and a `setChannel`, not a protocol change.
+
 - **The TS event types are generated, not written.** `ts-rs` derives them from the Rust model into `src/types/events.ts`, which is checked in so the frontend build needs no Rust toolchain. `cargo test` regenerates; never edit the output. Two settings live in `src-tauri/.cargo/config.toml`: the export path, and `TS_RS_LARGE_INT = "number"` because `u64` otherwise becomes `bigint`, which `JSON.parse` never produces.
 
 ## Known issues
 
 Diagnosed defects, not yet fixed. Unlike *Current state* above, these are broken rather than unbuilt. Delete the entry when you fix it.
 
+- **Quit from the Dock's context menu is unguarded.** It bypasses the menu bar, so the custom Quit item never sees it and the confirmation never appears. Nothing in the Tauri API reaches it today — `applicationShouldTerminate` is the hook and it is not exposed. The only route out that skips the dialog.
+- **A blocked install has no way to say when it will unblock.** The row waits on any session being mid-turn but names none of them, so on a busy app "waiting for the running task to finish" is the whole of what the reader gets. Naming the session, or offering to install once it settles, is the fix.
 - **Changing effort respawns the child.** The CLI has no `set_effort` control request (`set_model` exists and works), so the session is killed and resumed by id. Harmless today — the respawn happens inside `send_msg`, which only runs when the user types, so no turn is in flight. Revisit when queued/mid-turn messages land.
 - **Worktree paths are computed, not verified.** `worktree_path()` joins the convention instead of reading `init`'s `cwd`. Correct as of now; reading it back isn't worth it — `init` fires repeatedly, so each would need a re-write plus dedup.
 - **A permission request stranded by a child that dies mid-run is unanswerable.** The pending map lives in `Session`, so killing the child without quitting — the effort-change respawn is the only path today — leaves a card whose buttons error with "no running session". A restart is fine, since the request was never persisted. The request itself is not lost either way: the CLI re-asks on resume.

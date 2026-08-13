@@ -5,6 +5,7 @@ import Chat from "@/components/Chat";
 import ChangesPanel from "@/components/ChangesPanel";
 import ChatInput from "@/components/ChatInput";
 import DiffWorkerPool from "@/components/DiffWorkerPool";
+import QuitDialog from "@/components/QuitDialog";
 import RightPanel, { PanelToggle, TabBody, type PanelTab } from "@/components/RightPanel";
 import Sidebar, { DevBadge, SidebarToggle, sortSessions } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
@@ -22,6 +23,7 @@ import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSessions } from "@/hooks/useSessions";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
+import { useUpdater } from "@/hooks/useUpdater";
 import { changeRange, turnChangedTree } from "@/lib/changes";
 import { playCelebration } from "@/lib/sound";
 import { buildTranscript } from "@/lib/transcript";
@@ -81,6 +83,14 @@ function App() {
     "ade.projectFilter",
     null,
   );
+  const { status: updateStatus, install: installUpdate } = useUpdater();
+
+  // Every session the app has started this run, not the open one: the install
+  // relaunches the app, so any live child is one this would kill mid-turn. A
+  // session from a previous run cannot still be running — no child survives a
+  // restart — so the live map answers this on its own.
+  const anyRunning = Object.values(statusBySession).some((s) => s === "in_progress");
+
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useLocalStorage<PanelTab>("ade.panelTab", "changes");
   const [selectedSubagentId, setSelectedSubagentId] = useState<string | null>(null);
@@ -234,6 +244,9 @@ function App() {
           onDelete={deleteSession}
           showArchived={showArchived}
           onToggleArchived={() => setShowArchived((v) => !v)}
+          updateStatus={updateStatus}
+          updateBlocked={anyRunning}
+          onInstallUpdate={() => void installUpdate()}
         />
       }
       header={
@@ -364,6 +377,7 @@ function App() {
         crowded={!collapsed && panelOpen}
       />
     </AppShell>
+    <QuitDialog />
     </DiffWorkerPool>
     </TooltipProvider>
   );

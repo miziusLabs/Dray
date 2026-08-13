@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 
+import UpdateRow from "@/components/UpdateRow";
 import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,7 +39,12 @@ import { useFullscreen } from "@/hooks/useFullscreen";
 import { isToday, relativeTime } from "@/lib/format";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import type { Project, SessionIndexItem, SessionStatus } from "@/types/events";
+import type {
+  Project,
+  SessionIndexItem,
+  SessionStatus,
+  UpdateStatus,
+} from "@/types/events";
 
 type SidebarProps = {
   // Already scoped to `projectFilter` by the caller, so the list and the ⌘⌥↑/↓
@@ -63,6 +69,11 @@ type SidebarProps = {
   // `null` is every project, and it is the entry the filter opens on.
   projectFilter: string | null;
   onProjectFilterChange: (path: string | null) => void;
+  updateStatus: UpdateStatus | null;
+  // Any session mid-turn, not just the open one — installing relaunches the
+  // whole app.
+  updateBlocked: boolean;
+  onInstallUpdate: () => void;
 };
 
 /// The order the list is drawn in. Exported because the ⌘⌥↑/↓ shortcut steps
@@ -142,6 +153,9 @@ export default function Sidebar({
   projects,
   projectFilter,
   onProjectFilterChange,
+  updateStatus,
+  updateBlocked,
+  onInstallUpdate,
 }: SidebarProps) {
   const fullscreen = useFullscreen();
 
@@ -267,6 +281,15 @@ export default function Sidebar({
             Hidden with only one row: there's nothing to jump or switch to. */}
         {sorted.length > 1 && <ShortcutHint selected={selectedSessionId !== null} />}
       </div>
+
+      {/* Outside the scroll container, unlike the shortcut hint above it: that
+          is a one-time tip that has earned its way off screen, and this is an
+          offer that has to still be there when the list is long. */}
+      <UpdateRow
+        status={updateStatus}
+        blocked={updateBlocked}
+        onInstall={onInstallUpdate}
+      />
     </aside>
   );
 }

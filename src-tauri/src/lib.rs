@@ -10,7 +10,7 @@ use crate::{
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot, SessionStatus},
 };
 use std::collections::HashMap;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State, WindowEvent};
 
 pub mod attachments;
 pub mod binpath;
@@ -23,9 +23,11 @@ pub mod harness;
 #[path = "models/models.rs"]
 pub mod models;
 pub mod projects;
+pub mod quit;
 pub mod session;
 pub mod store;
 pub mod title;
+pub mod updater;
 
 #[tauri::command]
 async fn send_msg(
@@ -319,7 +321,24 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
+        .manage(updater::PendingUpdate::default())
+        .manage(quit::PendingQuit::default())
+        .menu(quit::menu)
+        .on_menu_event(|app, event| {
+            if event.id() == quit::QUIT_ID {
+                quit::request(app);
+            }
+        })
+        .on_window_event(|window, event| {
+            // The dialog answers with `confirm_quit`, which exits outright — so
+            // this arm never has to let a close through.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                quit::request(window.app_handle());
+            }
+        })
         .setup(|_app| {
             // A persisted `in_progress` can't be true anymore — no child
             // survived the restart. Spawned, not awaited: the reset needs no
@@ -356,6 +375,10 @@ pub fn run() {
             cancel_queued,
             respond_permission,
             answer_questions,
+            updater::check_update,
+            updater::install_update,
+            quit::confirm_quit,
+            quit::dismiss_quit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
