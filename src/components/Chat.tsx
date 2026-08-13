@@ -5,6 +5,7 @@ import BackgroundTasksIndicator from "@/components/chat/BackgroundTasksIndicator
 import CheckpointRail, { type Checkpoint } from "@/components/chat/CheckpointRail";
 import CompactingIndicator from "@/components/chat/CompactingIndicator";
 import PermissionRequest from "@/components/chat/PermissionRequest";
+import QueuedMessages from "@/components/chat/QueuedMessages";
 import QuestionRequest from "@/components/chat/QuestionRequest";
 import Reasoning from "@/components/chat/Reasoning";
 import WorkingIndicator from "@/components/chat/WorkingIndicator";
@@ -13,7 +14,7 @@ import TurnBlock from "@/components/chat/TurnBlock";
 import type { StreamingBlock, Working } from "@/hooks/useSessions";
 import { toolArgument } from "@/lib/tools";
 import { buildTranscript, type PendingAsk } from "@/lib/transcript";
-import type { SessionSnapshot } from "@/types/events";
+import type { QueuedMessage, SessionSnapshot } from "@/types/events";
 
 type ChatProps = {
   session: SessionSnapshot | null;
@@ -40,6 +41,10 @@ type ChatProps = {
   /// Whether a compaction is running. Sits beside the task indicator for the
   /// same reason: it belongs to the session, not to any one turn.
   compacting?: boolean;
+  /// Prompts typed into the running turn that the app has not handed to the CLI
+  /// yet. Rendered here rather than built from the log, because a held prompt is
+  /// deliberately unpersisted until it is delivered.
+  queuedMessages?: QueuedMessage[];
   /// Both side panes are open, so the pane is at its narrowest and the rail sits
   /// close to the text. Passed in rather than measured here: the shell owns those
   /// two toggles, and the rail overlays the transcript at every width anyway — so
@@ -111,6 +116,7 @@ export default function Chat({
   working = null,
   backgroundTaskCount = 0,
   compacting = false,
+  queuedMessages = [],
   crowded = false,
 }: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -433,6 +439,8 @@ export default function Chat({
               />
             ),
           )}
+
+          <QueuedMessages messages={queuedMessages} />
 
           {backgroundTaskCount > 0 && (
             <BackgroundTasksIndicator count={backgroundTaskCount} />

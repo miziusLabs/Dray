@@ -130,6 +130,15 @@ pub enum AgentEventPayload {
         /// panel: nothing to show.
         #[serde(default)]
         baseline: Option<String>,
+        /// Typed while a turn was already running, so the CLI folds it into that
+        /// turn rather than starting a new one.
+        ///
+        /// Two transcript rules read this and both invert on it: a queued prompt
+        /// does not abandon the tool calls open before it — it is not proof the
+        /// turn stopped — and it does not cut a new turn, because the CLI answers
+        /// it inside the running one and emits a single `result` for both.
+        #[serde(default)]
+        queued: bool,
     },
     AssistantText {
         /// `Some` only when this content was also streamed, naming the preview
@@ -795,10 +804,10 @@ mod tests {
             serde_json::from_str(r#"{"type":"user_message","text":"hi"}"#).unwrap();
         assert!(matches!(
             v,
-            // `baseline` defaults too: every prompt logged before the changes
-            // panel existed has no snapshot behind it, and must not fail the line.
-            AgentEventPayload::UserMessage { ref text, ref images, ref baseline }
-                if text == "hi" && images.is_empty() && baseline.is_none()
+            // `baseline` and `queued` default too: every prompt logged before
+            // each of those existed must not fail the line.
+            AgentEventPayload::UserMessage { ref text, ref images, ref baseline, queued }
+                if text == "hi" && images.is_empty() && baseline.is_none() && !queued
         ));
 
         let v: AgentEventPayload = serde_json::from_str(

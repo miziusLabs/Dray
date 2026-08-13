@@ -59,7 +59,17 @@ head: string | null, } | { "type": "settings_changed" } & Settings | { "type": "
  * logged before this field existed. Both mean the same thing to the
  * panel: nothing to show.
  */
-baseline: string | null, } | { "type": "assistant_text", 
+baseline: string | null, 
+/**
+ * Typed while a turn was already running, so the CLI folds it into that
+ * turn rather than starting a new one.
+ *
+ * Two transcript rules read this and both invert on it: a queued prompt
+ * does not abandon the tool calls open before it — it is not proof the
+ * turn stopped — and it does not cut a new turn, because the CLI answers
+ * it inside the running one and emits a single `result` for both.
+ */
+queued: boolean, } | { "type": "assistant_text", 
 /**
  * `Some` only when this content was also streamed, naming the preview
  * it supersedes. `None` — the common case, covering Claude Code
@@ -515,11 +525,45 @@ label: string, description: string | null,
  */
 preview: string | null, };
 
+/**
+ * A prompt typed while a turn was running, held here until the turn reaches a
+ * point where handing it to the CLI costs nothing.
+ *
+ * It is *not* persisted while it waits, and that is what makes cancelling it
+ * clean: the log is append-only, so a queued message written on arrival could
+ * only be retracted with a tombstone event. Held here instead, a cancel leaves
+ * no trace at all. Nothing is lost by waiting — the flush persists it, and the
+ * only window where it exists solely in memory is one the user is still
+ * allowed to take it back from.
+ */
+export type QueuedMessage = { id: string, sessionId: string, 
+/**
+ * The raw prompt. Attachments are resolved at flush rather than now, so
+ * what the composer gets back on a cancel is what the user typed.
+ */
+text: string, attachmentPaths: Array<string>, };
+
 export type RateLimit = { usedPercent: number | null, windowMinutes: number | null, 
 /**
  * RFC3339, normalized from whatever the harness reports.
  */
 resetsAt: string | null, planType: string | null, };
+
+/**
+ * What a send did. The two fields are mutually exclusive in practice — a
+ * session being created cannot already be running a turn — but they answer
+ * different questions and the frontend acts on each separately.
+ */
+export type SendOutcome = { 
+/**
+ * `Some` only when this send created the session.
+ */
+snapshot: SessionSnapshot | null, 
+/**
+ * `Some` when a turn was already running, so the prompt is held rather
+ * than sent. The frontend draws it as pending and can still take it back.
+ */
+queued: QueuedMessage | null, };
 
 export type SessionIndexItem = { sessionId: string, harness: Harness, 
 /**

@@ -57,6 +57,45 @@ pub struct SessionStatusEvent {
     pub modified: Option<String>,
 }
 
+/// A prompt typed while a turn was running, held here until the turn reaches a
+/// point where handing it to the CLI costs nothing.
+///
+/// It is *not* persisted while it waits, and that is what makes cancelling it
+/// clean: the log is append-only, so a queued message written on arrival could
+/// only be retracted with a tombstone event. Held here instead, a cancel leaves
+/// no trace at all. Nothing is lost by waiting — the flush persists it, and the
+/// only window where it exists solely in memory is one the user is still
+/// allowed to take it back from.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedMessage {
+    pub id: String,
+    pub session_id: String,
+    /// The raw prompt. Attachments are resolved at flush rather than now, so
+    /// what the composer gets back on a cancel is what the user typed.
+    pub text: String,
+    pub attachment_paths: Vec<String>,
+}
+
+/// Held prompts, oldest first. Shared with the stdout task, which is where the
+/// boundary that flushes them is seen.
+pub type QueuedMessages = Arc<Mutex<Vec<QueuedMessage>>>;
+
+/// What a send did. The two fields are mutually exclusive in practice — a
+/// session being created cannot already be running a turn — but they answer
+/// different questions and the frontend acts on each separately.
+#[derive(Debug, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub struct SendOutcome {
+    /// `Some` only when this send created the session.
+    pub snapshot: Option<SessionSnapshot>,
+    /// `Some` when a turn was already running, so the prompt is held rather
+    /// than sent. The frontend draws it as pending and can still take it back.
+    pub queued: Option<QueuedMessage>,
+}
+
 /// Drives [`SessionStatus`] from the mapped event stream plus the user's own
 /// sends.
 ///
@@ -71,6 +110,9 @@ pub struct StatusTracker {
     /// An `init` opened a model call that no `result` has closed yet.
     model_call_open: bool,
     background_tasks: usize,
+    /// Main-thread tool calls started and not yet finished. Not a status input —
+    /// it decides whether an arriving prompt is written now or held.
+    open_tool_calls: usize,
 }
 
 impl StatusTracker {
@@ -106,6 +148,42 @@ impl StatusTracker {
             }
             _ => None,
         }
+    }
+
+    /// Whether a turn is running right now, which is what decides that an
+    /// arriving prompt is queued rather than sent. Read *before* `on_send`,
+    /// which marks in-progress unconditionally and would answer for itself.
+    pub fn is_busy(&self) -> bool {
+        self.status == SessionStatus::InProgress
+    }
+
+    /// Counts main-thread tool calls in and out. Fed separately from
+    /// [`Self::on_event`] because only the caller holds the event envelope, and
+    /// a *subagent's* tool call must not count: it runs on its own thread and
+    /// its result is not a point where the CLI injects a queued prompt.
+    pub fn note_tool_call(&mut self, payload: &AgentEventPayload) {
+        match payload {
+            AgentEventPayload::ToolCallStarted { .. } => self.open_tool_calls += 1,
+            AgentEventPayload::ToolCallCompleted { .. } => {
+                self.open_tool_calls = self.open_tool_calls.saturating_sub(1)
+            }
+            // A turn cannot end with a call still running, and an interrupt ends
+            // one without completing its calls — so the count is reset here
+            // rather than left to drift up over a session.
+            AgentEventPayload::TurnCompleted { .. } => self.open_tool_calls = 0,
+            _ => {}
+        }
+    }
+
+    /// Whether a main-thread tool call is running right now.
+    ///
+    /// This is what decides that a prompt goes out immediately instead of being
+    /// held: the CLI injects a buffered prompt at the next tool *result*, and
+    /// while a tool runs that result is still ahead — so writing now catches it,
+    /// where waiting for the boundary this app can see would miss it by the few
+    /// milliseconds between the result line and the model call that follows it.
+    pub fn tool_in_flight(&self) -> bool {
+        self.open_tool_calls > 0
     }
 
     /// The user read the finished session. Only `Completed` clears — selecting
@@ -184,7 +262,7 @@ impl SessionManager {
         worktree_name: Option<&str>,
         is_new_session: bool,
         app: &AppHandle,
-    ) -> Result<Option<SessionSnapshot>> {
+    ) -> Result<SendOutcome> {
         let model_spec = find_model(model).with_context(|| format!("unknown model {model:?}"))?;
         let effort = resolve_effort(&model_spec, effort);
 
@@ -268,20 +346,39 @@ impl SessionManager {
 
             // Returned so the frontend learns the resolved worktree name and
             // the backend-truncated title rather than guessing either.
-            return Ok(Some(SessionSnapshot {
-                index_item: item,
-                events,
-            }));
+            return Ok(SendOutcome {
+                snapshot: Some(SessionSnapshot {
+                    index_item: item,
+                    events,
+                }),
+                queued: None,
+            });
         }
 
         let mut sessions_guard = self.sessions.lock().await;
 
+        // Decided here rather than by the caller: the frontend's own `busy` is
+        // optimistic, and this is the only reading taken on the same lock the
+        // write goes out under.
+        let (busy, tool_in_flight) = match sessions_guard.get(session_id) {
+            Some(s) => {
+                let tracker = s.status.lock().await;
+                (tracker.is_busy(), tracker.tool_in_flight())
+            }
+            None => (false, false),
+        };
+
         // Effort is fixed at spawn — the CLI has no `set_effort` control request
         // — so changing it means replacing the child. Resuming by id keeps the
         // conversation, and the log continues from the persisted seq.
-        let effort_changed = sessions_guard
-            .get(session_id)
-            .is_some_and(|s| s.effort != effort);
+        //
+        // Never while a turn runs: the kill would destroy the very turn the
+        // prompt is being queued onto. The index still records the pick below,
+        // so the next idle send is what respawns.
+        let effort_changed = !busy
+            && sessions_guard
+                .get(session_id)
+                .is_some_and(|s| s.effort != effort);
 
         if effort_changed {
             if let Some(s) = sessions_guard.remove(session_id) {
@@ -303,6 +400,38 @@ impl SessionManager {
             // Before the send, so the index reflects intent even if writing to
             // the child fails — the prompt event is persisted ahead of stdin too.
             touch_session_index_item(session_id, model, effort, permission_mode).await?;
+
+            // A turn is running, so this prompt is held rather than sent, and
+            // none of the live controls below fire with it. `set_model` and
+            // `set_permission_mode` were verified switching an *idle* child;
+            // what they do to a turn mid-flight is unknown, and a queued prompt
+            // is not worth finding out on. The index above has the user's pick
+            // either way, so the next idle send applies it.
+            if busy {
+                // A tool is running, so the CLI's next injection point — that
+                // tool's result — is still ahead, and writing now is what lands
+                // the prompt on it. Holding for the `tool_call_completed` this
+                // app can see would miss it: the CLI dispatches the next model
+                // call within a few milliseconds of emitting the result line, so
+                // the prompt would sit in its buffer through another whole tool
+                // call before being read. Measured, and the reason this branch
+                // exists rather than one uniform hold.
+                //
+                // The cost is that there is no window to cancel in — which the
+                // UI states by itself, since a prompt written straight through
+                // draws no pending row and so offers no Esc.
+                if tool_in_flight {
+                    s.queue_and_flush(prompt, attachment_paths, app).await;
+                    return Ok(SendOutcome::default());
+                }
+
+                let queued = s.queue_msg(prompt, attachment_paths).await;
+                return Ok(SendOutcome {
+                    snapshot: None,
+                    queued: Some(queued),
+                });
+            }
+
             if s.model != model {
                 s.set_model(&model_spec).await?;
             }
@@ -315,7 +444,7 @@ impl SessionManager {
             // editing lands on the turn's side of the diff.
             let baseline = git::snapshot_tree(&session_cwd).await;
             s.send_msg(prompt, attachment_paths, baseline, app).await?;
-            return Ok(None);
+            return Ok(SendOutcome::default());
         }
 
         touch_session_index_item(session_id, model, effort, permission_mode).await?;
@@ -341,7 +470,7 @@ impl SessionManager {
             .send_msg(prompt, attachment_paths, baseline, app)
             .await?;
         sessions_guard.insert(session_id.to_string(), session);
-        Ok(None)
+        Ok(SendOutcome::default())
     }
 
     /// Interrupts a session's in-flight turn. Errors when no live child holds
@@ -352,6 +481,18 @@ impl SessionManager {
             bail!("no running session {session_id}");
         };
         session.interrupt().await
+    }
+
+    /// Takes back the newest prompt still waiting on a boundary, returning it
+    /// so the composer can put the text back where the user left it.
+    ///
+    /// A session with no live child answers `None` rather than erroring: the
+    /// queue died with the process, which is the same "nothing to take back"
+    /// the frontend already handles.
+    pub async fn cancel_queued(&self, session_id: &str) -> Option<QueuedMessage> {
+        let sessions_guard = self.sessions.lock().await;
+        let session = sessions_guard.get(session_id)?;
+        session.cancel_queued().await
     }
 
     /// Answers a permission request. Errors when the session has no live child:
@@ -454,6 +595,9 @@ pub struct Session {
     pub status: Arc<Mutex<StatusTracker>>,
     /// Permission requests the mapper has registered and nobody has answered.
     pub pending_permissions: PendingPermissions,
+    /// Prompts typed during a running turn, waiting for the next boundary.
+    /// Shared with the stdout task, which is what flushes them.
+    pub queued: QueuedMessages,
 }
 
 impl Session {
@@ -505,72 +649,18 @@ impl Session {
         baseline: Option<String>,
         app: &AppHandle,
     ) -> Result<()> {
-        let seq = self.seq.fetch_add(1, Relaxed);
-
-        // Ahead of the event, because it is what decides the event's own text:
-        // a non-image attachment becomes an `@path` mention on the prompt, and
-        // the transcript has to show what the model was actually given.
-        let prepared = attachments::prepare(&self.id, prompt, attachment_paths).await?;
-
-        let payload = AgentEventPayload::UserMessage {
-            text: prepared.text.clone(),
-            images: prepared
-                .images
-                .iter()
-                .map(|i| ImageRef {
-                    path: Some(i.stored_path.clone()),
-                    url: None,
-                    mime_type: Some(i.mime_type.clone()),
-                })
-                .collect(),
+        deliver_prompt(
+            &self.id,
+            prompt,
+            attachment_paths,
             baseline,
-        };
-        let agent_event = AgentEvent {
-            id: Uuid::now_v7().to_string(),
-            session_id: self.id.clone(),
-            harness: ClaudeCode,
-            seq,
-            ts: now_rfc3339(),
-            // Nothing tracks turns yet; Claude Code opens one per `init`.
-            turn_id: None,
-            subagent: None,
-            payload,
-            raw: None,
-        };
-
-        app.emit("agent_event", &agent_event)?;
-
-        let mut events_guard = self.events.lock().await;
-        events_guard.push(agent_event.clone());
-        drop(events_guard);
-
-        append_session_event(&self.id, agent_event).await?;
-
-        // A bare string is the whole content when nothing is attached — the
-        // shape every fixture captures, kept rather than always sending the
-        // one-element block array it is sugar for.
-        let content = if prepared.images.is_empty() {
-            json!(prepared.text)
-        } else {
-            let mut blocks = Vec::new();
-            if !prepared.text.is_empty() {
-                blocks.push(json!({"type": "text", "text": prepared.text}));
-            }
-            for image in &prepared.images {
-                blocks.push(json!({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": image.mime_type,
-                        "data": image.data,
-                    },
-                }));
-            }
-            json!(blocks)
-        };
-
-        let prompt = json!({"type":"user","message":{"role":"user","content": content}});
-        write_line(&self.stdin, &prompt).await?;
+            false,
+            &self.seq,
+            &self.events,
+            &self.stdin,
+            app,
+        )
+        .await?;
 
         // After the write: a prompt that never reached the child starts
         // nothing, and the command's error is what the frontend acts on.
@@ -579,6 +669,49 @@ impl Session {
         }
 
         Ok(())
+    }
+
+    /// Holds a prompt typed during a running turn. Nothing is written or
+    /// persisted here — [`flush_queued`] does both once the turn reaches a
+    /// boundary, which is what leaves a cancel possible until then.
+    pub async fn queue_msg(&self, prompt: &str, attachment_paths: &[String]) -> QueuedMessage {
+        let message = QueuedMessage {
+            id: Uuid::now_v7().to_string(),
+            session_id: self.id.clone(),
+            text: prompt.to_string(),
+            attachment_paths: attachment_paths.to_vec(),
+        };
+        self.queued.lock().await.push(message.clone());
+        message
+    }
+
+    /// Takes back the newest held prompt, newest-first because that is the one
+    /// the user just typed and the only one the composer is offering to undo.
+    ///
+    /// `None` means the flush won the race, which needs no handling beyond
+    /// leaving the composer alone: the prompt is on its way and the frontend
+    /// learns so from the `user_message` that follows.
+    pub async fn cancel_queued(&self) -> Option<QueuedMessage> {
+        self.queued.lock().await.pop()
+    }
+
+    /// Holds a prompt and immediately hands it over, for the case where a tool
+    /// call is already running.
+    ///
+    /// Through the queue rather than written directly, so a prompt already
+    /// waiting goes out ahead of this one instead of being overtaken.
+    pub async fn queue_and_flush(&self, prompt: &str, attachment_paths: &[String], app: &AppHandle) {
+        self.queue_msg(prompt, attachment_paths).await;
+        flush_queued(
+            &self.id,
+            &self.queued,
+            &self.seq,
+            &self.events,
+            &self.stdin,
+            &self.status,
+            app,
+        )
+        .await;
     }
 
     /// Switches the model of a running child. Verified against the CLI: the
@@ -779,10 +912,220 @@ pub async fn write_line(stdin: &Arc<Mutex<ChildStdin>>, value: &serde_json::Valu
     Ok(())
 }
 
+/// Persists the user's own prompt event, emits it, then writes it to the
+/// child's stdin — the CLI never echoes a prompt back, so this is the only
+/// place it enters the transcript.
+///
+/// Free rather than a method because a queued prompt is delivered from the
+/// stdout task, which holds the same handles but no `Session`.
+#[allow(clippy::too_many_arguments)]
+async fn deliver_prompt(
+    session_id: &str,
+    prompt: &str,
+    attachment_paths: &[String],
+    baseline: Option<String>,
+    queued: bool,
+    seq: &Arc<AtomicU64>,
+    events: &Arc<Mutex<Vec<AgentEvent>>>,
+    stdin: &Arc<Mutex<ChildStdin>>,
+    app: &AppHandle,
+) -> Result<()> {
+    let seq = seq.fetch_add(1, Relaxed);
+
+    // Ahead of the event, because it is what decides the event's own text:
+    // a non-image attachment becomes an `@path` mention on the prompt, and
+    // the transcript has to show what the model was actually given.
+    let prepared = attachments::prepare(session_id, prompt, attachment_paths).await?;
+
+    let payload = AgentEventPayload::UserMessage {
+        text: prepared.text.clone(),
+        images: prepared
+            .images
+            .iter()
+            .map(|i| ImageRef {
+                path: Some(i.stored_path.clone()),
+                url: None,
+                mime_type: Some(i.mime_type.clone()),
+            })
+            .collect(),
+        baseline,
+        queued,
+    };
+    let agent_event = AgentEvent {
+        id: Uuid::now_v7().to_string(),
+        session_id: session_id.to_string(),
+        harness: ClaudeCode,
+        seq,
+        ts: now_rfc3339(),
+        // Nothing tracks turns yet; Claude Code opens one per `init`.
+        turn_id: None,
+        subagent: None,
+        payload,
+        raw: None,
+    };
+
+    app.emit("agent_event", &agent_event)?;
+
+    let mut events_guard = events.lock().await;
+    events_guard.push(agent_event.clone());
+    drop(events_guard);
+
+    append_session_event(session_id, agent_event).await?;
+
+    // A bare string is the whole content when nothing is attached — the
+    // shape every fixture captures, kept rather than always sending the
+    // one-element block array it is sugar for.
+    let content = if prepared.images.is_empty() {
+        json!(prepared.text)
+    } else {
+        let mut blocks = Vec::new();
+        if !prepared.text.is_empty() {
+            blocks.push(json!({"type": "text", "text": prepared.text}));
+        }
+        for image in &prepared.images {
+            blocks.push(json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image.mime_type,
+                    "data": image.data,
+                },
+            }));
+        }
+        json!(blocks)
+    };
+
+    let line = json!({"type":"user","message":{"role":"user","content": content}});
+    write_line(stdin, &line).await
+}
+
+/// Hands every held prompt to the child, oldest first.
+///
+/// Called from the stdout loop on a tool call starting or finishing, or on the
+/// turn ending. Those are the points where writing costs nothing: the CLI
+/// buffers a mid-turn prompt and injects it at its *next* tool result, so a
+/// prompt written while a tool runs lands on that tool's result rather than
+/// waiting for the one after — and a turn that never calls a tool would not
+/// have absorbed it at all, so flushing at the end just starts the new turn the
+/// CLI would have started anyway.
+///
+/// Verified against the CLI: nothing is written back to say a prompt was
+/// absorbed, so the boundary is the app's only handle on when to let go of one.
+///
+/// Failures are logged, not propagated — the stdout loop must survive anything,
+/// and a prompt that cannot be written is one the user can retype.
+pub async fn flush_queued(
+    session_id: &str,
+    queued: &QueuedMessages,
+    seq: &Arc<AtomicU64>,
+    events: &Arc<Mutex<Vec<AgentEvent>>>,
+    stdin: &Arc<Mutex<ChildStdin>>,
+    status: &Arc<Mutex<StatusTracker>>,
+    app: &AppHandle,
+) {
+    // Drained under one lock so a cancel arriving mid-flush either takes a
+    // message back before any of this or finds nothing — never races a
+    // half-written batch.
+    let batch: Vec<QueuedMessage> = std::mem::take(&mut *queued.lock().await);
+
+    if batch.is_empty() {
+        return;
+    }
+
+    for message in batch {
+        // No baseline, and this is the load-bearing half of the queued case:
+        // the changes panel pairs the newest baseline with the newest head
+        // after it, so a snapshot taken here would cut the running turn's
+        // range in two and credit it with only the work that came after this
+        // prompt. `None` makes `changeRange` walk past it to the real prompt.
+        if let Err(err) = deliver_prompt(
+            session_id,
+            &message.text,
+            &message.attachment_paths,
+            None,
+            true,
+            seq,
+            events,
+            stdin,
+            app,
+        )
+        .await
+        {
+            eprintln!("[queued flush err] {err}");
+        }
+    }
+
+    // A flush at `turn_completed` lands just after the tracker marked the
+    // session finished, and the prompt it just wrote opens a new turn the CLI
+    // has not announced yet. Without this the composer reads idle for the
+    // second or so until `init` arrives — offering to send into a session that
+    // is already working. Redundant at a tool boundary, where the session is
+    // in-progress and `on_send` reports no change.
+    if let Some(next) = status.lock().await.on_send() {
+        publish_status(session_id, next, app).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::harness::claude_code::{mapper::Mapper, parser};
+
+    /// Drives the real capture through the counter that decides whether a
+    /// prompt is written now or held. Two things have to hold across it: a call
+    /// in flight is visible while it runs, and nothing is left in flight once
+    /// the turns are over — a counter that drifted up would make every later
+    /// prompt skip the queue and lose its cancel window for the rest of the
+    /// session.
+    #[test]
+    fn tool_flight_tracks_calls_and_settles_at_zero() {
+        let mut mapper = Mapper::default();
+        let mut tracker = StatusTracker::default();
+        let mut ever_in_flight = false;
+
+        for line in include_str!("harness/claude_code/fixtures/complex.jsonl")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+        {
+            let Ok(Some(event)) = mapper.map(parser::parse_line(line).unwrap()) else {
+                continue;
+            };
+            // Mirrors `read_stdout`: a subagent's call is not a boundary the CLI
+            // injects a queued prompt at, so it must not count.
+            if event.subagent.is_none() {
+                tracker.note_tool_call(&event.payload);
+            }
+            ever_in_flight |= tracker.tool_in_flight();
+        }
+
+        assert!(ever_in_flight, "the fixture runs main-thread tool calls");
+        assert!(
+            !tracker.tool_in_flight(),
+            "every call is closed by the end of the capture"
+        );
+    }
+
+    /// An interrupt ends a turn with its calls still open, so `turn_completed`
+    /// is what clears them. Without it the count only ever climbs.
+    #[test]
+    fn an_interrupted_turn_clears_its_open_calls() {
+        let mut mapper = Mapper::default();
+        let mut tracker = StatusTracker::default();
+
+        for line in include_str!("harness/claude_code/fixtures/interrupted_tools.jsonl")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+        {
+            let Ok(Some(event)) = mapper.map(parser::parse_line(line).unwrap()) else {
+                continue;
+            };
+            if event.subagent.is_none() {
+                tracker.note_tool_call(&event.payload);
+            }
+        }
+
+        assert!(!tracker.tool_in_flight());
+    }
 
     /// The fixture's second turn spawns a background agent: its `result`
     /// arrives while a task is outstanding, the set drains later, and the CLI

@@ -1,0 +1,254 @@
+import { describe, expect, it } from "vitest";
+
+import { buildTranscript, segmentWork } from "@/lib/transcript";
+import type { AgentEvent, AgentEventPayload } from "@/types/events";
+
+/// Only the envelope fields `buildTranscript` orders and keys by are filled;
+/// the rest has no bearing on the two rules under test.
+function event(seq: number, payload: AgentEventPayload): AgentEvent {
+  return {
+    id: `e-${seq}`,
+    sessionId: "s",
+    harness: "claude_code",
+    seq,
+    ts: "2026-08-13T00:00:00Z",
+    turnId: null,
+    subagent: null,
+    payload,
+    raw: null,
+  } as AgentEvent;
+}
+
+function prompt(seq: number, text: string, queued: boolean): AgentEvent {
+  return event(seq, { type: "user_message", text, images: [], baseline: null, queued });
+}
+
+function callStarted(seq: number, callId: string): AgentEvent {
+  return event(seq, {
+    type: "tool_call_started",
+    callId,
+    name: "Bash",
+    toolType: "other",
+    input: {},
+    rawInput: null,
+    title: null,
+  } as AgentEventPayload);
+}
+
+function completed(seq: number, finalText: string | null = null): AgentEvent {
+  return event(seq, {
+    type: "turn_completed",
+    status: "success",
+    stopReason: null,
+    finalText,
+    usage: null,
+    durationMs: null,
+    head: null,
+  } as AgentEventPayload);
+}
+
+function text(seq: number, body: string): AgentEvent {
+  return event(seq, {
+    type: "assistant_text",
+    block: null,
+    text: body,
+  } as AgentEventPayload);
+}
+
+/// The text `buildTranscript` files into `resultByCallId` for a call nothing can
+/// finish. Matched on rather than imported because it is deliberately private.
+const ABANDONED = /session ended/;
+
+describe("a queued prompt", () => {
+  /// The whole point of the flag. A queued prompt was typed into a turn that was
+  /// already running, so the calls open in front of it are still live — marking
+  /// them abandoned would stop a running tool's row shimmering while it works.
+  it("leaves the tool calls open in front of it running", () => {
+    const { resultByCallId } = buildTranscript(
+      [prompt(0, "go", false), callStarted(1, "c1"), prompt(2, "and also", true)],
+      true,
+    );
+
+    expect(resultByCallId.get("c1")).toBeUndefined();
+  });
+
+  /// The rule it inverts has to keep working, or a queued prompt would be the
+  /// only thing holding it up.
+  it("still abandons them when the prompt is an ordinary one", () => {
+    const { resultByCallId } = buildTranscript(
+      [prompt(0, "go", false), callStarted(1, "c1"), prompt(2, "never mind", false)],
+      true,
+    );
+
+    expect(resultByCallId.get("c1")?.text).toMatch(ABANDONED);
+  });
+
+  /// The CLI folds a queued prompt into the running turn and emits one
+  /// `turn_completed` for the pair. Cutting a turn here would leave the first
+  /// permanently open and hand it the rest of the first turn's work.
+  it("renders inside the running turn rather than opening one", () => {
+    const { turns } = buildTranscript(
+      [
+        prompt(0, "go", false),
+        callStarted(1, "c1"),
+        prompt(2, "and also", true),
+        completed(3),
+      ],
+      false,
+    );
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0].completed).not.toBeNull();
+    // It draws a row where it was typed — the count is what the collapsed
+    // summary reads, so a prompt that rendered but didn't count would misreport.
+    expect(turns[0].work.some((w) => "payload" in w && w.payload.type === "user_message")).toBe(
+      true,
+    );
+  });
+
+  /// It stays on screen through a collapse, so it is not a row the toggle
+  /// promises to reveal. Counting it would offer a toggle over rows already
+  /// visible — and in the one-call case, over nothing at all.
+  it("does not count toward the rows a collapse would hide", () => {
+    const withQueued = buildTranscript(
+      [prompt(0, "go", false), callStarted(1, "c1"), prompt(2, "and also", true), completed(3)],
+      false,
+    );
+    const without = buildTranscript(
+      [prompt(0, "go", false), callStarted(1, "c1"), completed(2)],
+      false,
+    );
+
+    expect(withQueued.turns[0].rows).toBe(without.turns[0].rows);
+  });
+
+  /// It renders, so it breaks a run of same-tool calls rather than being held
+  /// and re-emitted after the group — which would move it away from the point in
+  /// the turn where it was actually typed.
+  it("splits a run of tool calls rather than folding into the group", () => {
+    const { turns } = buildTranscript(
+      [
+        prompt(0, "go", false),
+        callStarted(1, "c1"),
+        callStarted(2, "c2"),
+        prompt(3, "and also", true),
+        callStarted(4, "c3"),
+        callStarted(5, "c4"),
+        completed(6),
+      ],
+      false,
+    );
+
+    const kinds = turns[0].work.map((w) =>
+      "kind" in w ? "group" : w.payload.type,
+    );
+    expect(kinds).toEqual(["group", "user_message", "group"]);
+  });
+
+  /// A log replayed from a truncation can open on one, and it has to have
+  /// somewhere to go rather than being dropped.
+  it("opens a turn when there is none to join", () => {
+    const { turns } = buildTranscript([prompt(0, "orphan", true)], false);
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0].prompt?.payload.type).toBe("user_message");
+  });
+});
+
+describe("a turn that closed without finalText", () => {
+  /// An interrupt closes the turn with `finalText: null`. Falling back to the
+  /// last message keeps the collapsed view ending on what the agent last said,
+  /// instead of filing that message behind the summary with everything else.
+  it("falls back to its last message", () => {
+    const { turns } = buildTranscript(
+      [
+        prompt(0, "go", false),
+        text(1, "partial answer"),
+        callStarted(2, "c1"),
+        completed(3),
+      ],
+      false,
+    );
+
+    expect(turns[0].finalText).toBe("partial answer");
+  });
+
+  /// A turn nothing ever closed shows its work loose — the fallback is for a
+  /// closed turn's collapsed view, and this one never collapses.
+  it("does not fall back while the turn is unclosed", () => {
+    const { turns } = buildTranscript(
+      [prompt(0, "go", false), text(1, "partial answer")],
+      true,
+    );
+
+    expect(turns[0].finalText).toBeNull();
+  });
+});
+
+describe("segmentWork", () => {
+  /// The collapsed view's whole reason: work is cut at each queued prompt so
+  /// the prompt stays after the stretch it interrupted rather than bunching
+  /// with the other prompts once the rows between them are hidden.
+  it("cuts the work at each queued prompt", () => {
+    const { turns } = buildTranscript(
+      [
+        prompt(0, "go", false),
+        callStarted(1, "c1"),
+        callStarted(2, "c2"),
+        prompt(3, "and also", true),
+        callStarted(4, "c3"),
+        completed(5),
+      ],
+      false,
+    );
+
+    const segments = segmentWork(turns[0]);
+    expect(segments).toHaveLength(2);
+    expect(segments[0].toolCalls).toBe(2);
+    expect(segments[0].prompt).not.toBeNull();
+    expect(segments[1].toolCalls).toBe(1);
+    expect(segments[1].prompt).toBeNull();
+  });
+
+  /// `finalText` re-renders the turn's last message, and the turn-level counts
+  /// discount it — the last segment has to agree, or the summary line promises
+  /// a message the collapse isn't hiding.
+  it("mirrors the finalText discount on the last segment", () => {
+    const { turns } = buildTranscript(
+      [
+        prompt(0, "go", false),
+        callStarted(1, "c1"),
+        prompt(2, "and also", true),
+        callStarted(3, "c2"),
+        text(4, "done"),
+        completed(5, "done"),
+      ],
+      false,
+    );
+
+    const segments = segmentWork(turns[0]);
+    const last = segments[segments.length - 1];
+    expect(last.messages).toBe(0);
+    expect(segments.reduce((n, s) => n + s.messages, 0)).toBe(turns[0].messages);
+  });
+
+  /// Two prompts with nothing between them: the empty stretch draws no summary
+  /// line, so `rows` has to say so.
+  it("gives an empty stretch zero rows", () => {
+    const { turns } = buildTranscript(
+      [
+        prompt(0, "go", false),
+        callStarted(1, "c1"),
+        prompt(2, "first", true),
+        prompt(3, "second", true),
+        callStarted(4, "c2"),
+        completed(5),
+      ],
+      false,
+    );
+
+    const segments = segmentWork(turns[0]);
+    expect(segments).toHaveLength(3);
+    expect(segments[1].rows).toBe(0);
+  });
+});

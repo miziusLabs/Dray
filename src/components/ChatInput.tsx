@@ -27,7 +27,7 @@ import {
   slashQuery,
 } from "@/lib/slash";
 import { cn } from "@/lib/utils";
-import type { FileMatch, SlashCommand } from "@/types/events";
+import type { FileMatch, QueuedMessage, SlashCommand } from "@/types/events";
 
 type ChatInputProps = {
   /// `attachmentPaths` is what the tray held, as absolute paths. The backend
@@ -42,9 +42,16 @@ type ChatInputProps = {
   /// worktree session mentions paths inside its tree — the CLI resolves `@path`
   /// against the directory it was spawned in, and those are the same one.
   cwd?: string | null;
-  /// Interrupts the running turn. Only reachable while `busy` — the same
-  /// button is Send otherwise.
+  /// Interrupts the running turn. Reachable while `busy` and the box is empty —
+  /// with something typed the same button sends, since a prompt written during a
+  /// turn is queued onto it rather than refused.
   onStop?: () => void;
+  /// Takes back the newest prompt still waiting on the CLI, resolving to it so
+  /// its text can go back in the box. `null` when the flush got there first.
+  onCancelQueued?: () => Promise<QueuedMessage | null>;
+  /// How many prompts are waiting. Only decides whether Esc is bound — the rows
+  /// themselves are drawn by the transcript, above this component.
+  queuedCount?: number;
   /// Rendered outside the card — below it normally, above it on a new task. A
   /// node rather than the controls' own props, so this component keeps owning
   /// layout and measurement and nothing else.
@@ -102,6 +109,8 @@ export default function ChatInput({
   commands = [],
   cwd = null,
   onStop,
+  onCancelQueued,
+  queuedCount = 0,
   toolbar,
   busy = false,
   sessionId = null,
@@ -325,13 +334,15 @@ export default function ChatInput({
     };
   }, [sessionId, archived]);
 
-  const canSend = (message.trim().length > 0 || attachments.length > 0) && !busy;
+  // `busy` no longer gates this: a prompt typed into a running turn is queued
+  // rather than refused, and the CLI folds it into that turn on its own.
+  const canSend = message.trim().length > 0 || attachments.length > 0;
 
   const submit = () => {
     const trimmed = message.trim();
     // An attachment on its own is a real prompt — dropping a screenshot and
     // pressing Enter is asking about the screenshot.
-    if ((!trimmed && !attachments.length) || busy) return;
+    if (!trimmed && !attachments.length) return;
 
     // Recorded on send rather than on pick: choosing a command from the list
     // and then deleting it is not using it. Taken from the text, so a command
@@ -551,6 +562,24 @@ export default function ChatInput({
                     }
                   }
 
+                  // Takes back the newest prompt still waiting on the CLI and
+                  // puts its text back. Only when the composer is empty of its
+                  // own picker state and there is something to take back, so Esc
+                  // keeps its usual meaning everywhere else.
+                  //
+                  // Appended rather than assigned: whatever is half-typed here
+                  // is the user's too, and replacing it would trade one loss for
+                  // another.
+                  if (e.key === "Escape" && onCancelQueued && queuedCount > 0) {
+                    e.preventDefault();
+                    const before = message;
+                    void onCancelQueued().then((cancelled) => {
+                      if (!cancelled) return;
+                      setMessage(before ? `${before}\n${cancelled.text}` : cancelled.text);
+                    });
+                    return;
+                  }
+
                   // Shift+Enter is the only way to get a newline; plain Enter sends.
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
@@ -621,29 +650,38 @@ export default function ChatInput({
               )}
             </div>
 
-            {/* One button, two jobs. Busy makes it a Stop: `type="button"` so
-                pressing it can't also submit whatever is typed, and it stays
-                enabled where Send would be disabled — stopping needs no text.
+            {/* One button, two jobs, and what is typed decides which. Stopping
+                is what an empty composer during a turn is for; with text in it
+                the prompt is queued onto the running turn instead, so Send has
+                to stay reachable — refusing it is the behaviour this replaced.
+                `type="button"` on Stop so pressing it can't also submit.
+
                 Enter-to-send lives in `onKeyDown`, not in this button being the
                 form's submitter, so the empty state can drop it for the hint
-                below without losing the keyboard path. `busy` is unreachable
-                there too — nothing is running before a session exists. */}
-            {!isNewTask && (
-              <Button
-                type={busy ? "button" : "submit"}
-                size="icon-sm"
-                disabled={busy ? !onStop : !canSend}
-                onClick={busy ? onStop : undefined}
-                title={busy ? "Stop" : "Send"}
-                className="rounded-full"
-              >
-                {busy ? (
-                  <Square className="fill-current" />
-                ) : (
-                  <ArrowUp strokeWidth={2} />
-                )}
-              </Button>
-            )}
+                below without losing the keyboard path. Neither `busy` nor a
+                queue is reachable there — nothing runs before a session
+                exists. */}
+            {!isNewTask &&
+              (() => {
+                const stopping = busy && !canSend;
+
+                return (
+                  <Button
+                    type={stopping ? "button" : "submit"}
+                    size="icon-sm"
+                    disabled={stopping ? !onStop : !canSend}
+                    onClick={stopping ? onStop : undefined}
+                    title={stopping ? "Stop" : busy ? "Send — queued onto this turn" : "Send"}
+                    className="rounded-full"
+                  >
+                    {stopping ? (
+                      <Square className="fill-current" />
+                    ) : (
+                      <ArrowUp strokeWidth={2} />
+                    )}
+                  </Button>
+                );
+              })()}
           </div>
         </div>
 

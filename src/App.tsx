@@ -63,6 +63,8 @@ function App() {
     setUseWorktree,
     handleSendMsg,
     handleInterrupt,
+    queuedMessages,
+    handleCancelQueued,
     handleRespondPermission,
     handleAnswerQuestions,
     handleSelectSessionIndexItem,
@@ -305,6 +307,8 @@ function App() {
           commands={slashCommands}
           cwd={composerCwd}
           onStop={handleInterrupt}
+          onCancelQueued={handleCancelQueued}
+          queuedCount={queuedMessages.length}
           busy={busy}
           sessionId={selectedSessionId}
           isNewTask={!selectedSession}
@@ -355,6 +359,7 @@ function App() {
         busy={busy}
         backgroundTaskCount={backgroundTasks.length}
         compacting={compacting}
+        queuedMessages={queuedMessages}
         working={working}
         crowded={!collapsed && panelOpen}
       />

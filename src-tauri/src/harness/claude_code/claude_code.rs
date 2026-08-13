@@ -1,7 +1,7 @@
 use crate::events::{AgentEvent, AgentEventPayload, ApprovalPolicy};
 use crate::harness::{claude_code, Harness::ClaudeCode};
 use crate::models::{Effort, Model};
-use crate::session::{publish_status, Session, StatusTracker};
+use crate::session::{flush_queued, publish_status, QueuedMessages, Session, StatusTracker};
 use crate::store::{self, append_session_event, next_seq_by_session_id};
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -119,7 +119,17 @@ pub async fn init(
     };
 
     let seq = Arc::new(AtomicU64::new(seq_start));
+    // Two handles on purpose: the mapper takes ownership of one to number the
+    // events it builds, and the flush needs its own to number the prompts it
+    // delivers through the same counter — `seq` is the ordering key, so a
+    // second counter would put gaps in it.
     let stdout_seq = seq.clone();
+    let flush_seq = seq.clone();
+
+    let queued: QueuedMessages = Arc::new(Mutex::new(Vec::new()));
+    let stdout_queued = queued.clone();
+    let flush_events = events.clone();
+    let flush_stdin = stdin.clone();
 
     let stdout_session_id = session_id.to_string();
     let stdout_cwd = session_cwd.to_string();
@@ -136,6 +146,10 @@ pub async fn init(
             stdout_status,
             stdout_pending,
             stdout_stdin,
+            stdout_queued,
+            flush_seq,
+            flush_events,
+            flush_stdin,
             &app,
         )
         .await
@@ -162,6 +176,7 @@ pub async fn init(
         seq,
         status,
         pending_permissions,
+        queued,
     })
 }
 
@@ -176,6 +191,10 @@ async fn read_stdout(
     status: Arc<Mutex<StatusTracker>>,
     pending_permissions: PendingPermissions,
     stdin: Arc<Mutex<ChildStdin>>,
+    queued: QueuedMessages,
+    flush_seq: Arc<AtomicU64>,
+    flush_events: Arc<Mutex<Vec<AgentEvent>>>,
+    flush_stdin: Arc<Mutex<ChildStdin>>,
     app: &AppHandle,
 ) -> Result<()> {
     let reader = BufReader::new(stdout);
@@ -244,11 +263,35 @@ async fn read_stdout(
             *head = crate::git::snapshot_tree(session_cwd).await;
         }
 
+        // Read before the event is moved into the log below. These three are
+        // the turn's boundaries in the sense that matters here: each is a point
+        // where handing the CLI a held prompt costs nothing. A tool starting or
+        // finishing means the next tool result — where the CLI injects a
+        // buffered prompt — is still ahead, and a turn ending means there is no
+        // result left to absorb one, so the prompt opens the next turn instead.
+        let at_boundary = matches!(
+            agent_event.payload,
+            AgentEventPayload::ToolCallStarted { .. }
+                | AgentEventPayload::ToolCallCompleted { .. }
+                | AgentEventPayload::TurnCompleted { .. }
+        );
+
         if let Err(err) = app.emit("agent_event", &agent_event) {
             eprintln!("[claude emit err] {err}");
         }
 
-        if let Some(next) = status.lock().await.on_event(&agent_event.payload) {
+        // One lock for both. The tool count is fed here rather than from inside
+        // `on_event` because the subagent test needs the envelope: a subagent's
+        // tool call runs on its own thread, and its result is not a point where
+        // the CLI injects a queued prompt.
+        let next_status = {
+            let mut tracker = status.lock().await;
+            if agent_event.subagent.is_none() {
+                tracker.note_tool_call(&agent_event.payload);
+            }
+            tracker.on_event(&agent_event.payload)
+        };
+        if let Some(next) = next_status {
             publish_status(session_id, next, app).await;
         }
 
@@ -289,6 +332,22 @@ async fn read_stdout(
 
         if let Err(err) = append_session_event(session_id, agent_event).await {
             eprintln!("[claude write err] {err}");
+        }
+
+        // After the boundary event is logged, so the prompt that follows it
+        // lands behind it in the file as well as by `seq`. Cheap when the queue
+        // is empty, which is nearly always.
+        if at_boundary {
+            flush_queued(
+                session_id,
+                &queued,
+                &flush_seq,
+                &flush_events,
+                &flush_stdin,
+                &status,
+                app,
+            )
+            .await;
         }
     }
 
