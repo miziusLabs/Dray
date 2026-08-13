@@ -1,6 +1,7 @@
 import { Download, RotateCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { UpdateStatus } from "@/types/events";
 
 type UpdateRowProps = {
@@ -35,25 +36,37 @@ export default function UpdateRow({ status, blocked, onInstall }: UpdateRowProps
     );
   }
 
+  // `aria-disabled` rather than `disabled`, because the reason lives in a
+  // tooltip and a disabled button fires no pointer events to open one — it also
+  // leaves the tab order, so a keyboard user would get the dimming and no
+  // explanation at all. The click is guarded instead of the button.
+  const button = (
+    <Button
+      variant="ghost"
+      size="sm"
+      aria-disabled={blocked}
+      onClick={() => !blocked && onInstall()}
+      className="w-full justify-start px-1.5 text-ui aria-disabled:cursor-default aria-disabled:opacity-50"
+    >
+      <RotateCw />
+      Restart to update
+      <span className="ml-auto text-muted-foreground tabular-nums">
+        v{status.version}
+      </span>
+    </Button>
+  );
+
   return (
     <Footer>
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={blocked}
-        onClick={onInstall}
-        className="w-full justify-start px-1.5 text-ui"
-      >
-        <RotateCw />
-        Restart to update
-        <span className="ml-auto text-muted-foreground tabular-nums">
-          v{status.version}
-        </span>
-      </Button>
-      {blocked && (
-        <p className="px-1.5 pt-1 text-ui text-muted-foreground">
-          Waiting for the running task to finish.
-        </p>
+      {blocked ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent side="top">
+            Waiting for the running task to finish.
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        button
       )}
     </Footer>
   );
