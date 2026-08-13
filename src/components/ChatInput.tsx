@@ -96,13 +96,32 @@ const TEXT_BOX = "py-1 text-composer";
 
 // `String.raw` because the glyphs are drawn with backslashes; an ordinary
 // template literal would eat them as escapes.
-const WORDMARK = String.raw` ___    ____    ____  __ __
-|   \  |    \  /    ||  |  |
-|    \ |  D  )|  o  ||  |  |
-|  D  ||    / |     ||  ~  |
-|     ||    \ |  _  ||___, |
-|     ||  .  \|  |  ||     |
-|_____||__|\_||__|__||____/`;
+// const WORDMARK = String.raw` ___    ____    ____  __ __
+// |   \  |    \  /    ||  |  |
+// |    \ |  D  )|  o  ||  |  |
+// |  D  ||    / |     ||  ~  |
+// |     ||    \ |  _  ||___, |
+// |     ||  .  \|  |  ||     |
+// |_____||__|\_||__|__||____/`;
+
+// The file is the source, so editing the logo needs no change here — but an
+// <img> paints the file's own fill and this has to take the page's text color.
+// So it is a mask over a `currentColor` background: the SVG supplies the shape,
+// the CSS supplies the ink. Prefixed as well as not, for the older WebKit a
+// Linux build runs on.
+const WORDMARK_MASK = {
+  maskImage: "url(/assets/dray-logo.svg)",
+  WebkitMaskImage: "url(/assets/dray-logo.svg)",
+  maskSize: "contain",
+  WebkitMaskSize: "contain",
+  maskRepeat: "no-repeat",
+  WebkitMaskRepeat: "no-repeat",
+  // `contain` + `left` is what makes the box tolerant of a redrawn logo: the
+  // mark fits inside it at whatever aspect ratio the file has, rather than
+  // being stretched to a ratio hardcoded here.
+  maskPosition: "left",
+  WebkitMaskPosition: "left",
+} as const;
 
 export default function ChatInput({
   onSend,
@@ -398,16 +417,16 @@ export default function ChatInput({
           submit();
         }}
       >
-        {/* Decoration, so it is hidden from assistive tech rather than read out
-            as punctuation. Sits on the form edge like the toolbar and the text
-            below it, and `whitespace-pre` keeps the drawing from reflowing. */}
+        {/* Decoration, so it is hidden from assistive tech. Sits on the form
+            edge like the toolbar and the text below it. Height-sized so the
+            mark scales with the layout rather than with a viewBox nobody
+            reading this file should have to hold in their head. */}
         {isNewTask && (
-          <pre
+          <div
             aria-hidden
-            className="mb-4 font-mono text-[10px] leading-[1.15] whitespace-pre text-foreground/20 select-none"
-          >
-            {WORDMARK}
-          </pre>
+            style={WORDMARK_MASK}
+            className="mb-4 h-10 w-full max-w-30 bg-current text-foreground/10"
+          />
         )}
 
         {/* Above the toolbar in both states, so the failure reads before the
