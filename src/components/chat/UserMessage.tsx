@@ -57,6 +57,35 @@ export default function UserMessage({
 
   return (
     <div className="flex flex-col items-end gap-1.5">
+      {/* A row that wraps, not a stack. Two screenshots are usually two views of
+          one thing and read as a set; stacked, each pushes the next off the
+          screen and the message becomes a scroll. `justify-end` so the row grows
+          leftwards from the same edge the bubble sits on.
+
+          Above the text, matching the composer's own tray — what was attached is
+          read before the sentence written about it, on the way in and on the way
+          back out. */}
+      {viewable.length > 0 && (
+        <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
+          {shown.map((image, i) => (
+            <SentThumb key={i} src={image.src} onOpen={() => setOpenIndex(i)} />
+          ))}
+
+          {/* Opens on the first picture it is standing in for, not on the first
+              in the set — the reader clicked it to see what they hadn't seen. */}
+          {hidden > 0 && (
+            <button
+              type="button"
+              onClick={() => setOpenIndex(MAX_THUMBS)}
+              aria-label={`Show ${hidden} more image${hidden > 1 ? "s" : ""}`}
+              className="size-20 rounded-md bg-card text-chat text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              +{hidden}
+            </button>
+          )}
+        </div>
+      )}
+
       {text && (
         <div className="max-w-[85%] rounded-xl bg-card px-3 py-2 text-card-foreground">
           <span className="text-chat whitespace-pre-wrap">
@@ -87,31 +116,6 @@ export default function UserMessage({
         </div>
       )}
 
-      {/* A row that wraps, not a stack. Two screenshots are usually two views of
-          one thing and read as a set; stacked, each pushes the next off the
-          screen and the message becomes a scroll. `justify-end` so the row grows
-          leftwards from the same edge the bubble sits on. */}
-      {viewable.length > 0 && (
-        <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
-          {shown.map((image, i) => (
-            <SentThumb key={i} src={image.src} onOpen={() => setOpenIndex(i)} />
-          ))}
-
-          {/* Opens on the first picture it is standing in for, not on the first
-              in the set — the reader clicked it to see what they hadn't seen. */}
-          {hidden > 0 && (
-            <button
-              type="button"
-              onClick={() => setOpenIndex(MAX_THUMBS)}
-              aria-label={`Show ${hidden} more image${hidden > 1 ? "s" : ""}`}
-              className="h-14 w-12 rounded-md bg-card text-chat text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              +{hidden}
-            </button>
-          )}
-        </div>
-      )}
-
       {/* An image whose file is gone. Named rather than drawn as a broken frame,
           which says nothing about what was sent. */}
       {missing.map((image, i) => (
@@ -139,20 +143,20 @@ export default function UserMessage({
 /// again on every visit.
 function SentThumb({ src, onOpen }: { src: string; onOpen: () => void }) {
   return (
-    // One fixed height, width free within a cap: a row of mixed aspect ratios
-    // lines up along one edge, which a max-height alone doesn't give.
-    // `object-cover` crops the odd panorama to keep that alignment — the whole
-    // picture is one click away, and that view contains it.
+    // Square, so a row of mixed aspect ratios is a grid rather than a ragged
+    // strip. `object-cover` crops to hold that; the whole picture is one click
+    // away and that view contains it.
     //
-    // Deliberately small, and the same 56px the composer's tray tile uses. This
-    // is something the reader sent and already knows the contents of; it is a
-    // receipt, not a figure, and at any size worth reading it outweighs the
-    // sentence it was sent with.
+    // 80px against the composer tray's 56px. Bigger than a tray tile because the
+    // transcript is where a picture has to be recognized rather than merely
+    // counted, and small enough that it still reads as a receipt for something
+    // the reader sent — at any size worth studying it outweighs the sentence it
+    // was sent with, which is what the lightbox is for.
     <button type="button" onClick={onOpen} className="cursor-zoom-in">
       <img
         src={src}
         alt=""
-        className="h-14 w-auto max-w-24 rounded-md object-cover transition-opacity hover:opacity-90"
+        className="size-20 rounded-md object-cover transition-opacity hover:opacity-90"
       />
     </button>
   );
