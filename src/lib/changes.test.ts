@@ -6,6 +6,9 @@ import type { AgentEvent } from "@/types/events";
 /// A prompt carrying a snapshot, or one that failed to take one. Only the
 /// fields `changeRange` reads are filled — the rest of the envelope has no
 /// bearing on which prompt gets picked.
+///
+/// `queued` is always false here: a queued prompt never carries a baseline, so
+/// it is exactly the `null` case below under a different name.
 function prompt(baseline: string | null): AgentEvent {
   return {
     id: `e-${baseline ?? "none"}`,
@@ -15,7 +18,7 @@ function prompt(baseline: string | null): AgentEvent {
     ts: "2026-08-11T00:00:00Z",
     turnId: null,
     subagent: null,
-    payload: { type: "user_message", text: "hi", images: [], baseline },
+    payload: { type: "user_message", text: "hi", images: [], baseline, queued: false },
     raw: null,
   } as AgentEvent;
 }

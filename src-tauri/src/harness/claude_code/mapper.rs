@@ -787,6 +787,9 @@ fn user_message(text: String) -> AgentEventPayload {
         // it, taken at the moment it was sent. A user line arriving from the
         // CLI is one this app never issued, so there is no "before" to name.
         baseline: None,
+        // Same reasoning: queuing is a property of how *this app* sent a
+        // prompt, and this one came off the wire.
+        queued: false,
     }
 }
 

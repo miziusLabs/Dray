@@ -6,7 +6,7 @@ use crate::{
     harness::claude_code::commands::SlashCommand,
     models::{Effort, Model, ModelId},
     projects::Project,
-    session::{Harness, SessionManager},
+    session::{Harness, QueuedMessage, SendOutcome, SessionManager},
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot, SessionStatus},
 };
 use std::collections::HashMap;
@@ -43,7 +43,7 @@ async fn send_msg(
     is_new_session: bool,
     app: AppHandle,
     manager: State<'_, SessionManager>,
-) -> Result<Option<SessionSnapshot>, String> {
+) -> Result<SendOutcome, String> {
     let harness = match harness {
         "claude_code" => Harness::ClaudeCode,
         "codex" => Harness::Codex,
@@ -252,6 +252,17 @@ async fn interrupt_session(
         .map_err(|e| e.to_string())
 }
 
+/// Takes back the newest prompt still held for a running turn, returning its
+/// text so the composer can restore it. `None` once the flush has written it —
+/// past that point the CLI owns the prompt and there is no way to retract it.
+#[tauri::command]
+async fn cancel_queued(
+    session_id: &str,
+    manager: State<'_, SessionManager>,
+) -> Result<Option<QueuedMessage>, String> {
+    Ok(manager.cancel_queued(session_id).await)
+}
+
 /// Answers a permission request the agent is blocked on. `option_id` names one
 /// of the options carried on the `permission_requested` event — the standing
 /// rule it may apply never leaves the backend, so the frontend cannot widen a
@@ -342,6 +353,7 @@ pub fn run() {
             delete_session,
             mark_session_idle,
             interrupt_session,
+            cancel_queued,
             respond_permission,
             answer_questions,
         ])

@@ -65,6 +65,82 @@ export function isToolGroup(item: WorkItem): item is ToolGroup {
   return "kind" in item && item.kind === "tool_group";
 }
 
+/// A prompt typed into the running turn, which is the only kind of user message
+/// that lives in a turn's `work` rather than opening one of its own.
+///
+/// It is the reader's own words, so it is the one work item a collapsed turn
+/// keeps on screen — hiding it behind "12 steps" files what someone just typed
+/// under the agent's activity. That exemption is also why it is subtracted from
+/// `rows`: that count is what the toggle promises to reveal, and a row already
+/// visible is not part of the promise.
+export function isQueuedPrompt(item: WorkItem): boolean {
+  return !isToolGroup(item) && item.payload.type === "user_message";
+}
+
+/// A stretch of a turn's work between queued prompts: the items to hide behind
+/// one summary line, and the prompt that ends the stretch (`null` on the last).
+export type TurnSegment = {
+  items: WorkItem[];
+  prompt: AgentEvent | null;
+  toolCalls: number;
+  messages: number;
+  /// Rendered rows in `items` — zero means the segment draws no summary line,
+  /// which happens between two back-to-back queued prompts.
+  rows: number;
+};
+
+/// Cuts a turn's work at each queued prompt, for the collapsed view.
+///
+/// Hiding the work flattens its order: with every row between them gone, the
+/// prompts all bunch together above the final answer, which misplaces the one
+/// thing in the turn the reader wrote — *when* they said it is part of what
+/// they said. Each stretch gets its own summary line instead, so a prompt sits
+/// after the work it interrupted, collapsed or not.
+///
+/// The last segment's counts absorb the same discount `groupTurns` applies to
+/// the turn: `finalText` re-renders the turn's last message, and that message is
+/// always in the last segment — a queued prompt after it would have unset the
+/// discount by being the last rendered row itself.
+export function segmentWork(turn: Turn): TurnSegment[] {
+  const segments: TurnSegment[] = [];
+  let items: WorkItem[] = [];
+
+  const push = (prompt: AgentEvent | null) => {
+    let toolCalls = 0;
+    let messages = 0;
+    let rows = 0;
+    for (const item of items) {
+      if (isToolGroup(item)) {
+        toolCalls += item.calls.length;
+        rows += 1;
+        continue;
+      }
+      if (item.payload.type === "tool_call_started") toolCalls += 1;
+      if (item.payload.type === "assistant_text") messages += 1;
+      if (rendersRow(item)) rows += 1;
+    }
+    segments.push({ items, prompt, toolCalls, messages, rows });
+    items = [];
+  };
+
+  for (const item of turn.work) {
+    if (isQueuedPrompt(item)) {
+      push(item as AgentEvent);
+      continue;
+    }
+    items.push(item);
+  }
+  push(null);
+
+  const raw = segments.reduce((n, s) => n + s.messages, 0);
+  const discount = raw - turn.messages;
+  const last = segments[segments.length - 1];
+  last.messages -= discount;
+  last.rows -= discount;
+
+  return segments;
+}
+
 export type Turn = {
   /// The user's prompt opening this turn, absent only for a transcript that
   /// starts mid-conversation.
@@ -76,7 +152,10 @@ export type Turn = {
   /// The closing `turn_completed`, absent while the turn is still running.
   completed: AgentEvent | null;
   /// `turn_completed.finalText`, which is a verbatim copy of the turn's last
-  /// `assistant_text` — so showing both would print the answer twice.
+  /// `assistant_text` — so showing both would print the answer twice. A turn
+  /// that closed without one (an interrupt) falls back to its last
+  /// `assistant_text` directly, so a collapsed turn always ends on what the
+  /// agent last said; still `null` when the turn produced no text at all.
   finalText: string | null;
   toolCalls: number;
   messages: number;
@@ -95,6 +174,9 @@ export type Turn = {
 /// tool run, and whether `finalText` duplicates the last visible row, so a
 /// missing entry miscounts turns and splits groups on an invisible event.
 const RENDERS = new Set([
+  // Only ever reached by a *queued* prompt. An ordinary one is a turn's header
+  // rather than its work, so it never enters `work` for this to be asked about.
+  "user_message",
   "assistant_text",
   "reasoning",
   "tool_call_started",
@@ -259,18 +341,39 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
   const close = (turn: OpenTurn) => {
     const { lastWasAssistantText, ...rest } = turn;
     const work = groupTools(turn.work, subagentIds);
+    // An interrupted or otherwise cut-short turn closes with no `finalText` —
+    // the CLI only writes one for a turn that ended on its own terms. Fall back
+    // to the turn's last message so the collapsed view still ends on what the
+    // agent last said, instead of filing every row including that message
+    // behind the summary. Only for a *closed* turn: a running one shows its
+    // work anyway, and a turn a dead child never closed does too.
+    let finalText = turn.finalText;
+    if (finalText === null && turn.completed !== null) {
+      for (let i = turn.work.length - 1; i >= 0; i--) {
+        const p = turn.work[i].payload;
+        if (p.type === "assistant_text") {
+          finalText = p.text;
+          break;
+        }
+      }
+    }
     // `finalText` is a verbatim copy of the turn's last `assistant_text`, and
     // the collapsed view renders it in that message's place — so when the last
     // rendered row really is that message, it is on screen either way:
     // collapsing hides one fewer row, and the summary has one fewer message to
     // claim. An interrupted turn has no `finalText`, and a tool call after the
     // last message means the copy is of an earlier one; neither discounts.
-    const duplicated = turn.finalText !== null && lastWasAssistantText ? 1 : 0;
+    const duplicated = finalText !== null && lastWasAssistantText ? 1 : 0;
+    // Queued prompts stay on screen through a collapse, so they are not rows
+    // the toggle has to account for. Without this a turn whose only extra row is
+    // a queued prompt offers a toggle that reveals nothing.
+    const alwaysShown = work.filter(isQueuedPrompt).length;
     turns.push({
       ...rest,
+      finalText,
       work,
       messages: turn.messages - duplicated,
-      rows: work.filter(rendersRow).length - duplicated,
+      rows: work.filter(rendersRow).length - duplicated - alwaysShown,
     });
   };
 
@@ -286,7 +389,18 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
   });
 
   for (const event of events) {
-    if (event.payload.type === "user_message") {
+    // A queued prompt does not open a turn: it was typed into one already
+    // running, and the CLI answers both inside it and emits a single
+    // `turn_completed` for the pair. Cutting here would leave the first turn
+    // permanently open and hand its remaining work to a second one. It falls
+    // through to the bottom instead and renders as a row where it was typed.
+    //
+    // `current` still guards it — a queued prompt is only ever queued onto a
+    // turn, but a log replayed from a truncation could start on one, and it
+    // has to have somewhere to go.
+    const inlineQueued = event.payload.type === "user_message" && event.payload.queued && current;
+
+    if (event.payload.type === "user_message" && !inlineQueued) {
       if (current) close(current);
       current = open(event, event.id);
       continue;
@@ -395,7 +509,12 @@ export function buildTranscript(
     // marks below would be undone by the next send — the session goes live
     // again, and a row abandoned at the last restart would start shimmering a
     // second time.
-    if (event.payload.type === "user_message") {
+    //
+    // A *queued* prompt proves the opposite. It was typed into a turn that was
+    // already running, and the CLI folds it into that turn — so the calls open
+    // in front of it are still live, and marking them here would stop a running
+    // tool's row shimmering while it is genuinely still working.
+    if (event.payload.type === "user_message" && !event.payload.queued) {
       for (const callId of open) abandoned.add(callId);
       open.clear();
     }

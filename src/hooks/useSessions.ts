@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect, useRef } from "react";
 import { useComposerPrefs, type EffortByModel } from "@/hooks/useComposerPrefs";
-import { AgentEvent, ApprovalPolicy, BackgroundTask, BranchList, Effort, Model, ModelId, Project, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
+import { AgentEvent, ApprovalPolicy, BackgroundTask, BranchList, Effort, Model, ModelId, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
 // "unknown". Everything else seeds from the user's stored prefs.
@@ -87,6 +87,12 @@ export function useSessions() {
     // and the thinking deltas that drive it are transient and unpersisted, so
     // this is the only place the state lives.
     const [workingBySession, setWorkingBySession] = useState<Record<string, Working | null>>({});
+    // sessionId → prompts typed during a running turn, oldest first, still
+    // waiting for the backend to hand them to the CLI. Mirrors the queue in
+    // `Session`, which is the authority; this copy exists so the composer can
+    // draw them. Nothing is persisted on either side, so both die with the
+    // process and neither can come back stale.
+    const [queuedBySession, setQueuedBySession] = useState<Record<string, QueuedMessage[]>>({});
     const [error, setError] = useState<string | null>(null);
 
 // What actually gets sent for the current model: its remembered pick, else its
@@ -236,6 +242,10 @@ const handleSendMsg = async (
   }
 
   setError(null);
+  // Read before the optimistic write below overwrites it. A send onto a running
+  // turn must not release that turn's status if it fails — the turn is still
+  // running, and the failure was this prompt's alone.
+  const wasBusy = statusBySession[sessionId] === "in_progress";
   // Optimistic: the backend publishes the same transition once the prompt
   // reaches the child, but the composer must read busy the moment Enter lands.
   setStatusBySession((prev) => ({ ...prev, [sessionId]: "in_progress" }));
@@ -245,7 +255,7 @@ const handleSendMsg = async (
   setWorkingBySession((prev) => ({ ...prev, [sessionId]: { tokens: 0 } }));
 
   try {
-    const snapshot = await invoke<SessionSnapshot | null>("send_msg", {
+    const outcome = await invoke<SendOutcome>("send_msg", {
       sessionId,
       prompt: message,
       attachmentPaths,
@@ -261,6 +271,22 @@ const handleSendMsg = async (
       worktreeName: null,
       isNewSession,
     });
+
+    // A turn was already running, so the prompt is held rather than sent. It
+    // draws as pending until the backend hands it to the CLI, which arrives as
+    // an ordinary `user_message` and retires it below. The status is already
+    // `in_progress` and stays that way — the turn it was queued onto is the one
+    // still running.
+    if (outcome.queued) {
+      const queued = outcome.queued;
+      setQueuedBySession((prev) => ({
+        ...prev,
+        [sessionId]: [...(prev[sessionId] ?? []), queued],
+      }));
+      return;
+    }
+
+    const { snapshot } = outcome;
 
     // Only a new session yields a snapshot. Built by the backend, so the resolved
     // worktree name and truncated title come from disk rather than a guess here.
@@ -286,9 +312,36 @@ const handleSendMsg = async (
   } catch (e) {
     // A rejected invoke means the turn never started, so nothing will arrive to
     // clear the status — release it here rather than leaving the composer stuck.
-    setStatusBySession((prev) => ({ ...prev, [sessionId]: "idle" }));
-    setWorkingBySession((prev) => ({ ...prev, [sessionId]: null }));
+    // Unless a turn was already running: that one is untouched by this prompt
+    // failing, and clearing it would strand a live session as idle.
+    if (!wasBusy) {
+      setStatusBySession((prev) => ({ ...prev, [sessionId]: "idle" }));
+      setWorkingBySession((prev) => ({ ...prev, [sessionId]: null }));
+    }
     setError(String(e));
+  }
+};
+
+// Takes back the newest prompt still waiting on the backend and hands its text
+// to the caller, which is the composer putting it back where it was typed.
+//
+// Newest-first because that is the one just typed. `null` means the flush won —
+// past that the CLI owns the prompt and no channel exists to retract it, so the
+// composer is left alone and the message lands as an ordinary one.
+const handleCancelQueued = async (): Promise<QueuedMessage | null> => {
+  if (!selectedSessionId) return null;
+  const sessionId = selectedSessionId;
+  try {
+    const cancelled = await invoke<QueuedMessage | null>("cancel_queued", { sessionId });
+    if (!cancelled) return null;
+    setQueuedBySession((prev) => ({
+      ...prev,
+      [sessionId]: (prev[sessionId] ?? []).filter((m) => m.id !== cancelled.id),
+    }));
+    return cancelled;
+  } catch (e) {
+    setError(String(e));
+    return null;
   }
 };
 
@@ -461,6 +514,7 @@ const deleteSession = async (sessionId: string) => {
   setStreamingContentBlock(({ [sessionId]: _, ...rest }) => rest);
   setStatusBySession(({ [sessionId]: _, ...rest }) => rest);
   setWorkingBySession(({ [sessionId]: _, ...rest }) => rest);
+  setQueuedBySession(({ [sessionId]: _, ...rest }) => rest);
 
   if (selectedSessionId === sessionId) {
     handleNewSession();
@@ -540,6 +594,22 @@ useEffect(() => {
                 : s,
             ),
             );
+
+            // A held prompt reached the CLI, so the pending row it was drawn as
+            // gives way to the real one now in the transcript. Matched by
+            // position rather than by id — the flush delivers oldest-first and
+            // the event carries the event's own id, not the queue entry's — so
+            // dropping the head is exact.
+            if (
+              agentEvent.payload.type === "user_message" &&
+              agentEvent.payload.queued
+            ) {
+              setQueuedBySession((prev) => {
+                const cur = prev[agentEvent.sessionId];
+                if (!cur?.length) return prev;
+                return { ...prev, [agentEvent.sessionId]: cur.slice(1) };
+              });
+            }
 
             // The committed event supersedes its preview, and it arrives one
             // line *before* `block_stop` — so waiting for the stop leaves both
@@ -775,6 +845,11 @@ const selectedStatus: SessionStatus = selectedSessionId
   : "idle";
 const busy = selectedStatus === "in_progress";
 
+// Prompts typed into the running turn and not yet handed to the CLI. Not gated
+// on `busy` like the live state below: a queue only exists while a turn runs,
+// and the flush that empties it is the thing that clears these.
+const queuedMessages = selectedSessionId ? queuedBySession[selectedSessionId] ?? [] : [];
+
 // Gated on `busy` for the same reason the background-task set is: this is live
 // state, and a session that ended while it was unmounted has no event left to
 // arrive and clear it.
@@ -849,6 +924,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
 
 }
