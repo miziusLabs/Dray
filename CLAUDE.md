@@ -6,6 +6,8 @@ File give Claude Code (claude.ai/code) guidance for work with code in this repo.
 
 **Don't commit unprompted.** Stage + describe change, then wait — even when finished and passing. Being asked = approval for that commit only, not ones after. Same for `git push`, branches, anything else rewriting history.
 
+**Always write commit message with `caveman-commit` skill.** Invoke it, don't imitate it — skill carry the format and it can change under you. Applies to every commit here, amend included.
+
 **Comment sparingly.** Aim ~10% of lines, only where code cannot speak for itself:
 
 - Write _why_, not _what_. `// bump seq` on `self.seq += 1` = noise; "the session layer must number synthesized events through this same counter or seq develops gaps" = not noise.
