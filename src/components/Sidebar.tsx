@@ -129,12 +129,10 @@ export function SidebarToggle({
 export function DevBadge({ className }: { className?: string }) {
   return (
     <span
-      // Drag region is opted out of so the label never swallows a window drag.
       className={cn(
         "rounded bg-orange-500/15 px-1.5 py-0.5 font-mono text-[10px] leading-none font-medium tracking-wide text-orange-500 uppercase",
         className,
       )}
-      data-tauri-drag-region={false}
     >
       Dev
     </span>
@@ -193,7 +191,7 @@ export default function Sidebar({
           // buttons below it; nudge it out so every icon shares one edge.
           fullscreen ? "justify-start pl-2" : "justify-end",
         )}
-        data-tauri-drag-region
+        data-tauri-drag-region="deep"
       >
         {import.meta.env.DEV && <DevBadge className="mr-auto" />}
         <SidebarToggle onToggle={onToggleCollapsed} />

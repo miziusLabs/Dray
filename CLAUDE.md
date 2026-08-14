@@ -40,6 +40,12 @@ File give Claude Code (claude.ai/code) guidance for work with code in this repo.
 
 **Shortcut belong in real tooltip, not on `title`.** System tooltip can't hold keycap, appear after OS-controlled delay rest of chrome don't share, look like OS not app. Use `Tooltip`/`TooltipContent` with `Kbd`/`KbdGroup` (see `ModelSelector`, `ComposerToolbar`), put plain name on `aria-label` so control still announce itself. Reserve `title` for text app is _truncating_ — shortened path, clipped name — where tooltip restore information layout removed, not add information reader already have.
 
+**Window drag need permission _and_ `deep`, and both fail silently.** `titleBarStyle: "Overlay"` mean app draw own titlebar, so `h-(--titlebar-h)` row in `App`, `Sidebar` and `RightPanel` = whole of what user can drag window by.
+
+Permission first: `core:default` grant `allow-internal-toggle-maximize` but **not** `core:window:allow-start-dragging`, so it named explicitly in [capabilities/default.json](src-tauri/capabilities/default.json). Without it ACL reject every `start_dragging` call and nothing report it — drag simply do nothing, while double-click-to-maximize keep working, which read as "drag region wrong" not "permission missing". Capability compiled into binary, so change need Rust rebuild; frontend HMR alone show old behaviour.
+
+Then value: bare `data-tauri-drag-region` = **self only**, drag start only where pointer hit that exact element ([drag.js](https://github.com/tauri-apps/tauri) walk composed path). Every label inside row therefore dead strip in titlebar that look uniform. Use `"deep"` on row and put attribute nowhere else — Tauri stop walk at any clickable element (`A`, `BUTTON`, `INPUT`, `role`, `tabindex`) carrying no attribute of own, so toggles and tabs still block on their own and need no opt-out. `="false"` = hard block, for element that must not drag even though nothing clickable in it; adding it to plain label only make dead zone back.
+
 ## Commands
 
 Use **pnpm**, not npm. `tauri.conf.json` hardcode `pnpm dev` / `pnpm build` as before-commands. Stale `package-lock.json` sit next to `pnpm-lock.yaml` — ignore it; `npm install` desync tree.

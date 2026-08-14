@@ -264,7 +264,11 @@ function App() {
       header={
         <header
           className="flex h-(--titlebar-h) shrink-0 items-center gap-2 px-3"
-          data-tauri-drag-region
+          // `deep`, not bare: bare drags only on direct hits, so every label
+          // inside this row was a dead strip in a titlebar that looks uniform.
+          // Buttons still block on their own — Tauri stops walking up at any
+          // clickable element that carries no attribute of its own.
+          data-tauri-drag-region="deep"
         >
           {/* Only when collapsed — expanded, the sidebar owns the toggle. This
               header reaches the window edge in that state, so it has to clear

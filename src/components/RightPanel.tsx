@@ -134,7 +134,7 @@ export default function RightPanel({
     >
       <div
         className="flex h-(--titlebar-h) shrink-0 items-center gap-0.5 border-b border-border px-2"
-        data-tauri-drag-region
+        data-tauri-drag-region="deep"
       >
         {PANEL_TABS.map((value) => (
           <button
