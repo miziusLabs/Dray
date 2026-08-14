@@ -16,6 +16,7 @@ use tokio::{
 pub mod parser;
 pub use parser::ClaudeCodeEvent;
 pub mod commands;
+pub mod control;
 pub mod mapper;
 pub mod permissions;
 use permissions::PendingPermissions;

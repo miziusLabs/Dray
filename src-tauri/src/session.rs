@@ -7,6 +7,7 @@ use crate::{
     harness::{
         claude_code::{
             self,
+            control::{ControlLine, ControlRequest},
             permissions::{answer_response, decision_response, PendingPermissions},
         },
         Harness::ClaudeCode,
@@ -719,13 +720,13 @@ impl Session {
     /// There is no `set_effort` counterpart — the CLI rejects that subtype, and
     /// an `effort` field on this request is accepted but ignored.
     pub async fn set_model(&mut self, model: &Model) -> Result<()> {
-        let request = json!({
-            "type": "control_request",
-            "request_id": Uuid::now_v7().to_string(),
-            "request": {"subtype": "set_model", "model": model.id.as_arg()},
-        });
+        let model_arg = model.id.as_arg().context("model has no CLI alias")?;
 
-        write_line(&self.stdin, &request).await?;
+        write_line(
+            &self.stdin,
+            &ControlLine::new(ControlRequest::SetModel { model: model_arg }),
+        )
+        .await?;
         self.model = model.id;
 
         Ok(())
@@ -738,13 +739,7 @@ impl Session {
     /// usually opens a follow-up turn to narrate the abort — so the status
     /// machine needs nothing special here, the resulting events drive it.
     pub async fn interrupt(&mut self) -> Result<()> {
-        let request = json!({
-            "type": "control_request",
-            "request_id": Uuid::now_v7().to_string(),
-            "request": {"subtype": "interrupt"},
-        });
-
-        write_line(&self.stdin, &request).await?;
+        write_line(&self.stdin, &ControlLine::new(ControlRequest::Interrupt)).await?;
 
         Ok(())
     }
@@ -752,15 +747,13 @@ impl Session {
     /// Switches the permission stance of a running child. Unlike effort, the CLI
     /// does have a `set_permission_mode` subtype, so this needs no respawn.
     pub async fn set_permission_mode(&mut self, mode: ApprovalPolicy) -> Result<()> {
-        let arg = mode.as_arg();
-
-        let request = json!({
-            "type": "control_request",
-            "request_id": Uuid::now_v7().to_string(),
-            "request": {"subtype": "set_permission_mode", "mode": arg},
-        });
-
-        write_line(&self.stdin, &request).await?;
+        write_line(
+            &self.stdin,
+            &ControlLine::new(ControlRequest::SetPermissionMode {
+                mode: mode.as_arg(),
+            }),
+        )
+        .await?;
         self.permission_mode = mode;
 
         Ok(())
@@ -905,9 +898,15 @@ impl Session {
 /// Writes one JSON line to a child's stdin. The CLI's input format is
 /// line-delimited, so the newline and the flush are part of the message rather
 /// than tidiness.
-pub async fn write_line(stdin: &Arc<Mutex<ChildStdin>>, value: &serde_json::Value) -> Result<()> {
+///
+/// Takes anything serializable rather than a built [`Value`](serde_json::Value),
+/// so a typed line goes out without being rendered into one first.
+pub async fn write_line(stdin: &Arc<Mutex<ChildStdin>>, value: &impl Serialize) -> Result<()> {
+    let mut line = serde_json::to_string(value)?;
+    line.push('\n');
+
     let mut guard = stdin.lock().await;
-    guard.write_all(format!("{value}\n").as_bytes()).await?;
+    guard.write_all(line.as_bytes()).await?;
     guard.flush().await?;
     Ok(())
 }
