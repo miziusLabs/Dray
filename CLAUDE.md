@@ -234,6 +234,8 @@ Asymmetry = point: appending to private file atomic, rewriting shared one not.
 
 **Update row drawn only when there something to say.** Sidebar have no permanent footer; row reading "up to date" = chrome for fact nobody asked about. Show nothing while sidebar collapsed, deliberate — next check keep offer alive, and update not urgent enough to earn second home in header way changes indicator did.
 
+**Except when user ask.** App menu's "Check for Updates…" = question, so it answered either way — "Up to date" and "Couldn't check" both drawn, both retire themselves after 4s. Same fact, opposite call, and difference = who asked: scheduled check say nothing because nobody asked it, hand-triggered one leave menu item looking broken if it do same. Menu item **emit to frontend** rather than check in Rust, because channel live in frontend's local storage and Rust handed one per call — emitting also mean manual check reuse scheduled path, in-flight guard included. Verdict read off `check_update` resolving with no `update_status` having arrived: command emit nothing when nothing newer, so absence = whole of signal. Still nothing while sidebar collapsed, so manual check there answer into void — real gap, see _Known issues_.
+
 ## Parser conventions
 
 [parser.rs](src-tauri/src/harness/claude_code/parser.rs) file most likely to need extending, and it have firm conventions:
@@ -396,6 +398,7 @@ Several things deliberately unfinished — don't mistake for bugs:
 
 Diagnosed defects, not yet fixed. Unlike _Current state_ above, these broken rather than unbuilt. Delete entry when you fix it.
 
+- **"Check for Updates…" answer into void when sidebar collapsed.** Verdict draw in `UpdateRow`, which live inside `<aside>` and show nothing collapsed — right for scheduled check, wrong for one user just asked for, and menu item give no hint it need sidebar open. Fix = surface not tied to sidebar (toast, or menu item's own state), not special-case in row.
 - **Quit from Dock's context menu unguarded.** Bypass menu bar, so custom Quit item never see it and confirmation never appear. Nothing in Tauri API reach it today — `applicationShouldTerminate` = hook and not exposed. Only route out skipping dialog.
 - **Blocked install have no way to say when it unblock.** Wait on any session being mid-turn but name none, so on busy app "waiting for the running task to finish" = whole of what reader get. That sentence sit in button's tooltip not under it — standing line of prose below row read as permanent second row, where reason belong to button and only wanted on approach. Which why button carry `aria-disabled` and guard own click instead of taking `disabled`: disabled button fire no pointer events to open tooltip and leave tab order, so dimming = whole of explanation. Naming session, or offering to install once it settle, still fix.
 - **Changing effort respawn child.** CLI have no `set_effort` control request (`set_model` exist and work), so session killed and resumed by id. Harmless today — respawn happen inside `send_msg`, which only run when user type, so no turn in flight. Revisit when queued/mid-turn messages land.

@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { burstConfetti } from "@/lib/confetti";
+import type { ManualCheck } from "@/hooks/useUpdater";
 import { isToday, relativeTime } from "@/lib/format";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -74,6 +75,7 @@ type SidebarProps = {
   // Any session mid-turn, not just the open one — installing relaunches the
   // whole app.
   updateBlocked: boolean;
+  updateManual: ManualCheck;
   onInstallUpdate: () => void;
 };
 
@@ -156,6 +158,7 @@ export default function Sidebar({
   onProjectFilterChange,
   updateStatus,
   updateBlocked,
+  updateManual,
   onInstallUpdate,
 }: SidebarProps) {
   const fullscreen = useFullscreen();
@@ -289,6 +292,7 @@ export default function Sidebar({
       <UpdateRow
         status={updateStatus}
         blocked={updateBlocked}
+        manual={updateManual}
         onInstall={onInstallUpdate}
       />
     </aside>

@@ -43,12 +43,26 @@ pub const QUIT_REQUESTED: &str = "quit_requested";
 pub fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit Dray", true, Some("CmdOrCtrl+Q"))?;
 
+    // No accelerator: it is reached rarely and on purpose, and every key this
+    // could take is one the webview wants.
+    let check_update = MenuItem::with_id(
+        app,
+        crate::updater::CHECK_UPDATE_ID,
+        "Check for Updates…",
+        true,
+        None::<&str>,
+    )?;
+
     let app_menu = Submenu::with_items(
         app,
         "Dray",
         true,
         &[
             &PredefinedMenuItem::about(app, None, Some(AboutMetadata::default()))?,
+            // Directly under About, where macOS apps have put this since
+            // Sparkle — it answers the same question the About box opens with.
+            &PredefinedMenuItem::separator(app)?,
+            &check_update,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::services(app, None)?,
             &PredefinedMenuItem::separator(app)?,

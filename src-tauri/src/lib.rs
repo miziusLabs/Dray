@@ -10,7 +10,7 @@ use crate::{
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot, SessionStatus},
 };
 use std::collections::HashMap;
-use tauri::{AppHandle, Manager, State, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 pub mod attachments;
 pub mod binpath;
@@ -347,6 +347,10 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if event.id() == quit::QUIT_ID {
                 quit::request(app);
+            } else if event.id() == updater::CHECK_UPDATE_ID {
+                if let Err(e) = app.emit(updater::CHECK_UPDATE_REQUESTED, ()) {
+                    eprintln!("[check update emit err] {e}");
+                }
             }
         })
         .on_window_event(|window, event| {

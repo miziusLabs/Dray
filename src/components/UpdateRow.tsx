@@ -1,7 +1,8 @@
-import { Download, RotateCw } from "lucide-react";
+import { Check, Download, RotateCw, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { ManualCheck } from "@/hooks/useUpdater";
 import type { UpdateStatus } from "@/types/events";
 
 type UpdateRowProps = {
@@ -9,6 +10,9 @@ type UpdateRowProps = {
   /// A turn is in flight somewhere. Installing swaps the bundle and relaunches,
   /// which kills the child mid-turn, so the button waits rather than warning.
   blocked: boolean;
+  /// Where a check the user asked for has got to. Only ever drawn when there is
+  /// no `status` — a real update outranks any verdict about not finding one.
+  manual: ManualCheck;
   onInstall: () => void;
 };
 
@@ -19,8 +23,42 @@ type UpdateRowProps = {
 /// about. Nothing shows while the sidebar is collapsed; the next check keeps
 /// the offer alive, and an update is not urgent enough to earn a second home in
 /// the header.
-export default function UpdateRow({ status, blocked, onInstall }: UpdateRowProps) {
-  if (!status) return null;
+export default function UpdateRow({
+  status,
+  blocked,
+  manual,
+  onInstall,
+}: UpdateRowProps) {
+  // Nothing found, and a hand-triggered check waiting on or reporting that.
+  // Still nothing at all for the scheduled check, which is the common case and
+  // asked no question.
+  if (!status) {
+    if (manual === "idle") return null;
+    return (
+      <Footer>
+        <Note>
+          {manual === "checking" && (
+            <>
+              <RotateCw className="size-4 shrink-0 animate-spin" />
+              Checking for updates…
+            </>
+          )}
+          {manual === "up_to_date" && (
+            <>
+              <Check className="size-4 shrink-0" />
+              Up to date
+            </>
+          )}
+          {manual === "failed" && (
+            <>
+              <TriangleAlert className="size-4 shrink-0" />
+              Couldn't check for updates
+            </>
+          )}
+        </Note>
+      </Footer>
+    );
+  }
 
   if (status.state === "downloading") {
     return (
@@ -74,4 +112,14 @@ export default function UpdateRow({ status, blocked, onInstall }: UpdateRowProps
 
 function Footer({ children }: { children: React.ReactNode }) {
   return <div className="shrink-0 px-2 py-2">{children}</div>;
+}
+
+/// A line the row states rather than offers — same metrics as the downloading
+/// line, so the footer doesn't change height as a check moves through it.
+function Note({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 px-1.5 py-1 text-ui text-muted-foreground">
+      {children}
+    </div>
+  );
 }

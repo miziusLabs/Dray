@@ -15,6 +15,15 @@ use ts_rs::TS;
 const STABLE_MANIFEST: &str = "https://monorepo-labs.github.io/dray/stable.json";
 const BETA_MANIFEST: &str = "https://monorepo-labs.github.io/dray/beta.json";
 
+/// The app menu's "Check for Updates…" item.
+pub const CHECK_UPDATE_ID: &str = "check_update";
+
+/// What that item emits. It asks the frontend to check rather than checking
+/// here, because the channel is the frontend's — it lives in local storage, and
+/// this side is handed one per call. Emitting also means the manual check runs
+/// the same path as the scheduled one, in-flight guard included.
+pub const CHECK_UPDATE_REQUESTED: &str = "check_update_requested";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]

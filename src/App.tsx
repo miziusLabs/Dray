@@ -84,7 +84,11 @@ function App() {
     "ade.projectFilter",
     null,
   );
-  const { status: updateStatus, install: installUpdate } = useUpdater();
+  const {
+    status: updateStatus,
+    manual: updateManual,
+    install: installUpdate,
+  } = useUpdater();
 
   // Every session the app has started this run, not the open one: the install
   // relaunches the app, so any live child is one this would kill mid-turn. A
@@ -253,6 +257,7 @@ function App() {
           onToggleArchived={() => setShowArchived((v) => !v)}
           updateStatus={updateStatus}
           updateBlocked={anyRunning}
+          updateManual={updateManual}
           onInstallUpdate={() => void installUpdate()}
         />
       }
