@@ -40,6 +40,35 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # The release notes are read from CHANGELOG.md rather than written a
+      # second time here. GitHub appends its generated commit list underneath,
+      # so the hand-written part stays a summary and the file stays the source.
+      - id: notes
+        run: |
+          V="$(jq -r .version src-tauri/tauri.conf.json)"
+          BODY="$(awk -v want="## $V" '
+            $0 == want { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md)"
+
+          # A stable release with no section would publish notes saying nothing,
+          # which is worth stopping for — same reason the version guard above
+          # is fatal. A prerelease is allowed to ship without one.
+          if [ -z "$(printf '%s' "$BODY" | tr -d '[:space:]')" ]; then
+            if [ "${{ steps.channel.outputs.channel }}" = "stable" ]; then
+              echo "CHANGELOG.md has no '## $V' section" >&2
+              exit 1
+            fi
+            BODY=""
+          fi
+
+          {
+            echo "body<<CHANGELOG_EOF"
+            printf '%s\n' "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -80,6 +109,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           prerelease: ${{ steps.channel.outputs.prerelease }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           generateReleaseNotes: true
           # One bundle for both architectures. The action expands the universal
           # entry into per-arch keys in `latest.json`, so a client asking for
