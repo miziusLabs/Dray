@@ -254,6 +254,24 @@ async fn interrupt_session(
         .map_err(|e| e.to_string())
 }
 
+/// Stops one background task without touching the rest of the session.
+///
+/// Not reachable through `interrupt_session`: an interrupt with no turn in
+/// flight acks and leaves running tasks alone, which is exactly the state a
+/// background task holds a session in. Idempotent — the CLI answers success for
+/// a task it no longer holds.
+#[tauri::command]
+async fn stop_task(
+    session_id: &str,
+    task_id: &str,
+    manager: State<'_, SessionManager>,
+) -> Result<(), String> {
+    manager
+        .stop_task(session_id, task_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Takes back the newest prompt still held for a running turn, returning its
 /// text so the composer can restore it. `None` once the flush has written it —
 /// past that point the CLI owns the prompt and there is no way to retract it.
@@ -372,6 +390,7 @@ pub fn run() {
             delete_session,
             mark_session_idle,
             interrupt_session,
+            stop_task,
             cancel_queued,
             respond_permission,
             answer_questions,

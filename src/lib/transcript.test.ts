@@ -252,3 +252,78 @@ describe("segmentWork", () => {
     expect(segments[1].rows).toBe(0);
   });
 });
+
+describe("subagent runs", () => {
+  /// The envelope's `id` is the spawning call, the payload's `agentId` is the
+  /// harness's task handle, and `stop_task` names the second. Confusing them is
+  /// silent — the CLI answers success for an id it does not hold — so the panel
+  /// has to read it off the lifecycle events rather than off the key.
+  function lifecycle(
+    seq: number,
+    toolUseId: string,
+    payload: AgentEventPayload,
+  ): AgentEvent {
+    return {
+      ...event(seq, payload),
+      subagent: { id: toolUseId, label: "general-purpose" },
+    } as AgentEvent;
+  }
+
+  function started(seq: number, toolUseId: string, taskId: string): AgentEvent {
+    return lifecycle(seq, toolUseId, {
+      type: "subagent_started",
+      agentId: taskId,
+      label: "general-purpose",
+      description: `run ${taskId}`,
+      prompt: null,
+    } as AgentEventPayload);
+  }
+
+  it("carries the task id the stop control needs, not the spawning call's", () => {
+    const { subagents } = buildTranscript(
+      [callStarted(0, "toolu_1"), started(1, "toolu_1", "a34397eb")],
+      true,
+    );
+
+    expect(subagents).toHaveLength(1);
+    expect(subagents[0].id).toBe("toolu_1");
+    expect(subagents[0].taskId).toBe("a34397eb");
+  });
+
+  /// Newest first. The list only grows, and the run worth acting on is the one
+  /// that just started — at the bottom it sat below every finished run in the
+  /// session.
+  it("lists the newest run first", () => {
+    const { subagents, subagentById } = buildTranscript(
+      [
+        callStarted(0, "toolu_1"),
+        started(1, "toolu_1", "task-a"),
+        callStarted(2, "toolu_2"),
+        started(3, "toolu_2", "task-b"),
+      ],
+      true,
+    );
+
+    expect(subagents.map((r) => r.taskId)).toEqual(["task-b", "task-a"]);
+    // Lookups by id must be unaffected — the chat opens a run from its own row.
+    expect(subagentById.get("toolu_1")?.taskId).toBe("task-a");
+  });
+
+  /// A run with no lifecycle event yet has nothing to stop by, and the panel
+  /// reads null as "not stoppable" rather than falling back to the call id.
+  it("leaves the task id null until a lifecycle event names it", () => {
+    const { subagents } = buildTranscript(
+      [
+        callStarted(0, "toolu_1"),
+        lifecycle(1, "toolu_1", {
+          type: "assistant_text",
+          block: null,
+          text: "working",
+        } as AgentEventPayload),
+      ],
+      true,
+    );
+
+    expect(subagents[0].taskId).toBeNull();
+  });
+});

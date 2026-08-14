@@ -65,6 +65,7 @@ function App() {
     setUseWorktree,
     handleSendMsg,
     handleInterrupt,
+    handleStopTask,
     queuedMessages,
     handleCancelQueued,
     handleRespondPermission,
@@ -111,10 +112,16 @@ function App() {
 
   const togglePanel = () => setPanelOpen((prev) => !prev);
 
-  const openSubagent = (id: string) => {
-    setSelectedSubagentId(id);
+  // Opens the tab without touching the selection, so a run the reader already
+  // had expanded is still expanded when they come back to it.
+  const openSubagentPanel = () => {
     setPanelTab("subagents");
     setPanelOpen(true);
+  };
+
+  const openSubagent = (id: string) => {
+    setSelectedSubagentId(id);
+    openSubagentPanel();
   };
 
   // An open session's own directory, since project- and local-scoped commands
@@ -308,7 +315,9 @@ function App() {
                 runs={subagents}
                 selectedId={selectedSubagentId}
                 resultByCallId={resultByCallId}
+                live={busy}
                 onSelect={setSelectedSubagentId}
+                onStopTask={handleStopTask}
               />
             </TabBody>
           </RightPanel>
@@ -367,6 +376,7 @@ function App() {
           selectedSessionId ? streamingContentBlock[selectedSessionId] ?? null : null
         }
         onOpenSubagent={openSubagent}
+        onOpenSubagentPanel={openSubagentPanel}
         onRespondPermission={handleRespondPermission}
         onAnswerQuestions={handleAnswerQuestions}
         busy={busy}

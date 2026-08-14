@@ -20,6 +20,9 @@ type ChatProps = {
   session: SessionSnapshot | null;
   streamingBlock: StreamingBlock | null;
   onOpenSubagent: (id: string) => void;
+  /// Opens the subagent panel on no particular run — what the background-task
+  /// notice needs, since it stands for the whole set rather than for one of them.
+  onOpenSubagentPanel: () => void;
   /// Answers a permission request. The agent is blocked until this fires, so it
   /// is the one callback here whose absence stalls a session rather than
   /// degrading a view.
@@ -110,6 +113,7 @@ export default function Chat({
   session,
   streamingBlock,
   onOpenSubagent,
+  onOpenSubagentPanel,
   onRespondPermission,
   onAnswerQuestions,
   busy = false,
@@ -443,7 +447,10 @@ export default function Chat({
           <QueuedMessages messages={queuedMessages} />
 
           {backgroundTaskCount > 0 && (
-            <BackgroundTasksIndicator count={backgroundTaskCount} />
+            <BackgroundTasksIndicator
+              count={backgroundTaskCount}
+              onOpen={onOpenSubagentPanel}
+            />
           )}
 
           {compacting && <CompactingIndicator />}

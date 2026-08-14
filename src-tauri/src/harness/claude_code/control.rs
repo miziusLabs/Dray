@@ -28,6 +28,18 @@ pub enum ControlRequest<'a> {
         mode: &'a str,
     },
     Interrupt,
+    /// Stops one background task by the id `background_tasks_changed` and the
+    /// task lifecycle events carry.
+    ///
+    /// Not what `Interrupt` does, and the gap is why this exists: an interrupt
+    /// with no turn in flight acks and leaves every running task alone, which
+    /// strands the session in-progress until the task finishes on its own.
+    /// Verified against v2.1.232 on both task types — the reply is `{}` and the
+    /// set republishes empty within the same millisecond. `not_found` and
+    /// `not_running` also answer success, so a second click cannot error.
+    StopTask {
+        task_id: &'a str,
+    },
     /// Asked of a throwaway child rather than a session's, and answered without
     /// a model call. See [`commands`](super::commands).
     Initialize,
@@ -72,6 +84,21 @@ mod tests {
         assert_eq!(
             value["request"],
             json!({"subtype": "set_model", "model": "opus"})
+        );
+    }
+
+    /// Pins the field name against the capture. `task_id`, not the
+    /// `tool_use_id` the subagent envelope is keyed by — the CLI answers
+    /// success for an id it doesn't hold, so sending the wrong one looks like
+    /// a stop that silently did nothing.
+    #[test]
+    fn stop_task_names_the_task_not_its_spawning_call() {
+        let line = ControlLine::new(ControlRequest::StopTask { task_id: "bhkk97xab" });
+        let value = serde_json::to_value(&line).unwrap();
+
+        assert_eq!(
+            value["request"],
+            json!({"subtype": "stop_task", "task_id": "bhkk97xab"})
         );
     }
 

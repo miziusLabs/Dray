@@ -357,6 +357,22 @@ const handleInterrupt = async () => {
   }
 };
 
+// Stops one background task. Nothing is written to local state: the CLI
+// republishes the task set and files a `task_notification` of its own, which is
+// what settles the panel row and lets the status machine finish the session.
+//
+// Not covered by `handleInterrupt` — an interrupt with no turn in flight is
+// acked and changes nothing, which is precisely the state a background task
+// leaves a session in.
+const handleStopTask = async (taskId: string) => {
+  if (!selectedSessionId) return;
+  try {
+    await invoke("stop_task", { sessionId: selectedSessionId, taskId });
+  } catch (e) {
+    setError(String(e));
+  }
+};
+
 // Answers a permission request the agent is blocked on. The decision comes back
 // as an event like any other, so nothing is written to local state here — the
 // card learns it was answered from the transcript, the same way a reload does.
@@ -924,6 +940,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
 
 }
