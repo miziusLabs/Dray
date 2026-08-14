@@ -36,6 +36,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { burstConfetti } from "@/lib/confetti";
 import { isToday, relativeTime } from "@/lib/format";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -556,7 +557,7 @@ function RowAction({
 }: {
   label: string;
   active: boolean;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
 }) {
   return (
@@ -569,7 +570,7 @@ function RowAction({
           aria-pressed={active}
           onClick={(e) => {
             e.stopPropagation();
-            onClick();
+            onClick(e);
           }}
           // Set here rather than inherited from the row: the UA stylesheet's own
           // `button { cursor: default }` wins over an inherited value.
@@ -810,9 +811,14 @@ function SessionRow({
             <RowAction
               label={item.archived ? "Unsettle" : "Settle"}
               active={item.archived}
-              onClick={() =>
-                onSetFlags(item.sessionId, { archived: !item.archived })
-              }
+              onClick={(e) => {
+                // Fired on the click, not after the write lands: the burst is
+                // the button's own answer, and the row is gone from this list a
+                // frame later. The celebration sound stays with the write in
+                // `App`, where the flag is confirmed.
+                if (!item.archived) burstConfetti(e.currentTarget);
+                onSetFlags(item.sessionId, { archived: !item.archived });
+              }}
             >
               {/* Settle reads as "check this off"; unsettle isn't a second
                   checkmark, it's undoing the first one. */}
