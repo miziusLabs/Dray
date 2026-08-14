@@ -52,15 +52,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # tauri-build embeds `frontendDist` at compile time, so the Rust build
-      # cannot start without it.
-      - run: pnpm build
-
-      # Both targets: the release bundles universal, and each arch compiles its
-      # own copy of every dependency. No bundling, signing or notarizing —
-      # those need the release's secrets and produce nothing worth keeping here.
-      - run: cargo build --release --target aarch64-apple-darwin
-        working-directory: src-tauri
-
-      - run: cargo build --release --target x86_64-apple-darwin
-        working-directory: src-tauri
+      # Compiled the way the release compiles it, rather than with a bare
+      # `cargo build --release`. `tauri build` turns on production features —
+      # `custom-protocol` among them — which change the feature set of `tauri`
+      # and of everything depending on it, so artifacts built without them are
+      # unusable to the release. Measured on v0.1.1: the cache restored a full
+      # match and the release still rebuilt 79 crates, tauri, ring and
+      # libgit2-sys included, for 15 of its 17 minutes.
+      #
+      # `--no-bundle` stops before bundling, so this needs no signing key and no
+      # Apple credentials, and produces nothing but the cache. It runs
+      # `beforeBuildCommand` itself, which is why there is no separate frontend
+      # build step.
+      - run: pnpm tauri build --no-bundle --target universal-apple-darwin
