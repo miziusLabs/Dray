@@ -315,6 +315,55 @@ export default function ChatInput({
   // ⌥ as well as ⌘, so the chord can't collide with the webview's own ⌘O.
   useHotkey("o", () => void pickAttachments(sessionId), { alt: true });
 
+  // What Esc does, wherever focus is. Held in a ref so the listener below can
+  // register once and still read current state. Returns whether it consumed the
+  // key, which is what decides if the webview ever sees it.
+  //
+  // Appended rather than assigned: whatever is half-typed here is the user's
+  // too, and replacing it would trade one loss for another. Focus follows the
+  // text back, since taking a prompt back is the start of editing it.
+  const escapeRef = useRef<() => boolean>(() => false);
+  escapeRef.current = () => {
+    // Shuts the picker without clearing what was typed.
+    if (menuOpen) {
+      setDismissed(true);
+      return true;
+    }
+
+    // Takes back the newest prompt still waiting on the CLI.
+    if (onCancelQueued && queuedCount > 0) {
+      const before = message;
+      void onCancelQueued().then((cancelled) => {
+        if (!cancelled) return;
+        setMessage(before ? `${before}\n${cancelled.text}` : cancelled.text);
+        textareaRef.current?.focus();
+      });
+      return true;
+    }
+
+    return false;
+  };
+
+  // Bound on the document, not on the textarea: on the textarea it only fired
+  // while the box held focus, and every other press fell through to the webview,
+  // where macOS reads a bare Esc as "leave fullscreen" — so the window resized
+  // instead of cancelling. Swallowed only when it did something, or fullscreen
+  // would lose its own exit for nothing.
+  //
+  // Bubble phase and skipped once handled, because Radix's layers listen in
+  // capture and preventDefault when they dismiss — so an open dialog, menu or
+  // lightbox spends the key before this sees it.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (escapeRef.current()) e.preventDefault();
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   // The drop target is the whole window, not the card: a file aimed at the
   // composer while the transcript fills the screen would otherwise have to be
   // dropped on a 60px strip. The card is where the affordance is drawn, because
@@ -574,30 +623,10 @@ export default function ChatInput({
                       pickRow(active);
                       return;
                     }
-                    if (e.key === "Escape") {
-                      e.preventDefault();
-                      setDismissed(true);
-                      return;
-                    }
                   }
 
-                  // Takes back the newest prompt still waiting on the CLI and
-                  // puts its text back. Only when the composer is empty of its
-                  // own picker state and there is something to take back, so Esc
-                  // keeps its usual meaning everywhere else.
-                  //
-                  // Appended rather than assigned: whatever is half-typed here
-                  // is the user's too, and replacing it would trade one loss for
-                  // another.
-                  if (e.key === "Escape" && onCancelQueued && queuedCount > 0) {
-                    e.preventDefault();
-                    const before = message;
-                    void onCancelQueued().then((cancelled) => {
-                      if (!cancelled) return;
-                      setMessage(before ? `${before}\n${cancelled.text}` : cancelled.text);
-                    });
-                    return;
-                  }
+                  // Esc is not read here — it is the document listener's, so it
+                  // works with the composer unfocused too.
 
                   // Shift+Enter is the only way to get a newline; plain Enter sends.
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
