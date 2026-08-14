@@ -1,0 +1,66 @@
+name: Warm cache
+
+# Exists for the cache it leaves behind, nothing else.
+#
+# The release workflow only ever runs on a tag, and GitHub scopes cache *reads*
+# to the ref that wrote them plus the default branch. So each release wrote a
+# 668 MiB cache under its own `refs/tags/…` scope that no later release could
+# ever read — three identical keys, three separate scopes, `No cache found.`
+# every time — and every build compiled the dependency tree from cold. That was
+# ~19 of the ~20 minutes. `main` is the one scope a tag build can read.
+#
+# `shared-key` is what makes the two halves meet: with none set, rust-cache
+# derives the key from the job name, so `build` and `warm` would write
+# different keys and the tag build would miss again for a new reason.
+
+on:
+  push:
+    branches: [main]
+    # The cache turns over on the Rust dependency graph, so frontend-only
+    # commits have nothing to warm.
+    paths:
+      - "src-tauri/**"
+      - ".github/workflows/warm-cache.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: warm-cache
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Runner, toolchain and target list all feed the cache key, so they have
+      # to match the release job or the entry is unreadable there.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: release-darwin
+
+      - run: pnpm install --frozen-lockfile
+
+      # tauri-build embeds `frontendDist` at compile time, so the Rust build
+      # cannot start without it.
+      - run: pnpm build
+
+      # Both targets: the release bundles universal, and each arch compiles its
+      # own copy of every dependency. No bundling, signing or notarizing —
+      # those need the release's secrets and produce nothing worth keeping here.
+      - run: cargo build --release --target aarch64-apple-darwin
+        working-directory: src-tauri
+
+      - run: cargo build --release --target x86_64-apple-darwin
+        working-directory: src-tauri

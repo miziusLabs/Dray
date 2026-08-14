@@ -50,9 +50,14 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      # Restores only. The cache is written by warm-cache.yml on `main`, which
+      # is the one scope a tag build can read from — saving here would write an
+      # entry under this tag's own ref that nothing will ever read again.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: release-darwin
+          save-if: "false"
 
       - run: pnpm install --frozen-lockfile
 
