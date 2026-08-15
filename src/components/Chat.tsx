@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown } from "lucide-react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import BackgroundTasksIndicator from "@/components/chat/BackgroundTasksIndicator";
@@ -11,6 +12,7 @@ import Reasoning from "@/components/chat/Reasoning";
 import WorkingIndicator from "@/components/chat/WorkingIndicator";
 import StreamingToolCall from "@/components/chat/StreamingToolCall";
 import TurnBlock from "@/components/chat/TurnBlock";
+import { Button } from "@/components/ui/button";
 import type { StreamingBlock, Working } from "@/hooks/useSessions";
 import { toolArgument } from "@/lib/tools";
 import { buildTranscript, type PendingAsk } from "@/lib/transcript";
@@ -82,6 +84,11 @@ const JUMP_PAD_PX = 12;
 /// which is chrome for nothing.
 const RAIL_MIN = 2;
 
+/// How close to the end counts as being at it. One threshold for two questions —
+/// whether to keep pinning, and whether to offer the jump button — so the button
+/// cannot appear while the transcript is still following its own bottom.
+const AT_BOTTOM_PX = 40;
+
 /// The cards to draw: the live set, but one beat behind when it empties.
 function useLingeringCards(pending: PendingAsk[]): PendingAsk[] {
   const [shown, setShown] = useState(pending);
@@ -128,6 +135,16 @@ export default function Chat({
   // Whether to keep pinning to the bottom. Cleared once the user scrolls up, so
   // reading back through a transcript isn't yanked forward by incoming deltas.
   const followRef = useRef(true);
+
+  // The same fact as the pin, but as state because the button renders from it.
+  // Written from a scroll, a resize and a session switch alike: the transcript
+  // growing under a reader who sat still fires no scroll event, and that is
+  // exactly when there is newly something below to go to.
+  const [atBottom, setAtBottom] = useState(true);
+  const syncAtBottom = () => {
+    const el = scrollRef.current;
+    if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX);
+  };
 
   const { events, turns, subagentById, resultByCallId, pendingAsks } = useMemo(
     () => buildTranscript(session?.events ?? [], busy),
@@ -247,6 +264,7 @@ export default function Chat({
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && followRef.current) el.scrollTop = el.scrollHeight;
+    syncAtBottom();
     syncActive();
   }, [session?.sessionId, events.length, streamingAny]);
 
@@ -343,6 +361,7 @@ export default function Chat({
     if (!scroller || !content) return;
     const ro = new ResizeObserver(() => {
       if (followRef.current) scroller.scrollTop = scroller.scrollHeight;
+      syncAtBottom();
       // A turn that grew or collapsed moves every turn under it, with no scroll
       // event to notice it by.
       syncActive();
@@ -363,8 +382,24 @@ export default function Chat({
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX;
+    setAtBottom(followRef.current);
     syncActive();
+  };
+
+  // Re-arms the pin as well as scrolling: pressing this is the reader saying they
+  // want the live end, so the next delta must not leave them behind again.
+  //
+  // Smooth only while nothing is arriving. The pin writes `scrollTop` directly on
+  // every delta and on every resize, and a direct write cancels an animation
+  // mid-glide — so during a turn the smooth scroll would be cut short and land
+  // somewhere above the bottom, which is the one place this button must not
+  // leave you.
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    followRef.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: busy ? "auto" : "smooth" });
   };
 
   // With no session there is no transcript to draw; AppShell centers the
@@ -456,6 +491,27 @@ export default function Chat({
           {compacting && <CompactingIndicator />}
         </div>
       </div>
+
+      {/* Centred on the pane and outside the scroller, so it holds its place
+          while the transcript moves under it — the rail's own arrangement. Sits
+          low enough to read as belonging to the composer's edge rather than
+          floating over the last message. */}
+      {!atBottom && (
+        <Button
+          // `secondary` for its fill, not its emphasis: this floats over moving
+          // text, so it needs an opaque surface the way a menu does. `outline`'s
+          // is `--input` at 30% — 4.5% white — which the transcript scrolls
+          // straight through, and the vibrancy block veils `--card` and
+          // `--muted` but deliberately leaves `--secondary` alone.
+          variant="secondary"
+          size="icon-sm"
+          aria-label="Scroll to bottom"
+          onClick={scrollToBottom}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border-border shadow-sm"
+        >
+          <ArrowDown />
+        </Button>
+      )}
 
       {showRail && (
         <CheckpointRail
