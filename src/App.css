@@ -252,6 +252,19 @@
        The `/50` hover survives it: Tailwind compiles the modifier to a
        `color-mix`, which multiplies the alpha rather than replacing it. */
     --sidebar-accent: oklch(1 0 0 / 11.5%);
+    /* The rest of the scale, by the same arithmetic — 4% white is
+       `oklch(0.19 0 0)` over an opaque page and 11.5% is `oklch(0.269 0 0)`.
+       `--surface-raised` fills the tool-call argument and output boxes;
+       `--muted` fills keycaps, Streamdown's inline code, and every ghost
+       button's hover, so it was putting a slab under a word mid-sentence.
+
+       Opacity modifiers come through these unharmed: `a` of a veil over the
+       page composites to exactly `a` of the flat colour over the same page, so
+       `bg-muted/40` in the sidebar's shortcut hint is the colour it always was.
+       Only a surface with a different base underneath it — a keycap inside an
+       opaque tooltip — lands a shade lighter than before. */
+    --surface-raised: oklch(1 0 0 / 4%);
+    --muted: oklch(1 0 0 / 11.5%);
   }
 
   /* The app owns every scroll container, so the webview must never add its own. */

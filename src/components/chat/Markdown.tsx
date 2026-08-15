@@ -104,10 +104,14 @@ function MarkdownImpl({ children, streaming = false, className }: MarkdownProps)
         // the code block itself, not this whole message.
 
         // Table: no enclosing box. The outline lives on an unnamed div between
-        // the wrapper and the table, so all three layers have to be cleared.
+        // the wrapper and the table, so all three layers have to be cleared —
+        // including that div's own `bg-background`, which cost nothing to leave
+        // while the page was that exact colour and became a slab behind every
+        // table the moment the page was glass.
         "[&_[data-streamdown=table-wrapper]]:border-0 [&_[data-streamdown=table-wrapper]]:bg-transparent [&_[data-streamdown=table-wrapper]]:p-0",
         "[&_[data-streamdown=table-wrapper]]:rounded-none",
         "[&_[data-streamdown=table-wrapper]>div]:rounded-none [&_[data-streamdown=table-wrapper]>div]:border-0",
+        "[&_[data-streamdown=table-wrapper]>div]:bg-transparent",
         "[&_[data-streamdown=table-header]]:bg-transparent",
         "[&_table]:rounded-none [&_table]:border-0",
         // Cells carry no rules of their own, so removing the outline would leave
