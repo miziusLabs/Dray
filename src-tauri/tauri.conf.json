@@ -18,9 +18,15 @@
         "minWidth": 720,
         "minHeight": 480,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["sidebar"],
+          "state": "followsWindowActiveState"
+        }
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": null,
       "assetProtocol": {

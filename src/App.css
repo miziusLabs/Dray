@@ -53,6 +53,14 @@
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.556 0 0);
 
+  /* `--background` with the desktop let through, for the one surface that
+     reaches the window edge. The alpha is the whole of the vibrancy dial: the
+     material behind it already blurs and dims what it shows, so this is what
+     decides how much of the wallpaper survives. Everything stacked above it —
+     cards, menus, the composer — keeps its opaque fill, so the glass reads as
+     the room the app sits in rather than as a wash over the text. */
+  --background-vibrant: oklch(0.145 0 0 / 80%);
+
   /* Not part of the shadcn set. `--surface-raised` sits between `--background`
      and `--card` for tool-call and code chrome that must read as inset rather
      than as a floating card. */
@@ -214,6 +222,21 @@
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* The desktop is behind the window, not inside it: the native material does
+     the blurring and the webview only has to get out of its way. So the body's
+     own fill is the single hole punched through the app, and it works only
+     because nothing else paints edge to edge — the sidebar has no fill of its
+     own, and the right panel's is `--background` under another name, so it has
+     to drop out entirely rather than tint the same pixels a second time.
+
+     Stamped on `<html>` in index.html, before first paint and only on macOS;
+     `useVibrancy` takes it away for the length of a fullscreen session. Kept on
+     `body` because the palette blocks above out-specify any `html[…]` selector. */
+  html[data-vibrancy] body {
+    background-color: var(--background-vibrant);
+    --sidebar: transparent;
   }
 
   /* The app owns every scroll container, so the webview must never add its own. */

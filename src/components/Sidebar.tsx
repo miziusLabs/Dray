@@ -49,7 +49,7 @@ import type {
 } from "@/types/events";
 
 type SidebarProps = {
-  // Already scoped to `projectFilter` by the caller, so the list and the ⌘⌥↑/↓
+  // Already scoped to `projectFilter` by the caller, so the list and the ⌘⇧↑/↓
   // walk step through exactly the same rows.
   items: SessionIndexItem[];
   // The live status of every session the app has heard about this run. Wins over
@@ -79,7 +79,7 @@ type SidebarProps = {
   onInstallUpdate: () => void;
 };
 
-/// The order the list is drawn in. Exported because the ⌘⌥↑/↓ shortcut steps
+/// The order the list is drawn in. Exported because the ⌘⇧↑/↓ shortcut steps
 /// through the same sequence, and a second comparator would let the two disagree
 /// about which row is "next" — worse when the sidebar is collapsed and nothing
 /// on screen shows the order being walked.
@@ -297,7 +297,7 @@ export default function Sidebar({
   );
 }
 
-/// The ⌘⌥↑/↓ hint, laid out on the session rows' own edges so it reads as the
+/// The ⌘⇧↑/↓ hint, laid out on the session rows' own edges so it reads as the
 /// last row rather than as a caption under the list.
 ///
 /// With nothing selected both arrows land on the same place — the newest session
@@ -312,7 +312,7 @@ function ShortcutHint({ selected }: { selected: boolean }) {
           fill makes a hint the loudest thing in the list. */}
       <KbdGroup className="[&_kbd]:bg-muted/40 [&_kbd]:text-muted-foreground/60">
         <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
-        <Kbd>{IS_MAC ? "⌥" : "Alt"}</Kbd>
+        <Kbd>⇧</Kbd>
         <Kbd>{selected ? "↑↓" : "↓"}</Kbd>
       </KbdGroup>
     </div>

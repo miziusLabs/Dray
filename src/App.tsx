@@ -18,6 +18,7 @@ import { pickAttachments } from "@/hooks/useAttachments";
 import { useCodeTheme } from "@/hooks/useCodeTheme";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { useVibrancy } from "@/hooks/useVibrancy";
 import { warmHighlighter } from "@/hooks/useHighlighter";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
@@ -159,7 +160,7 @@ function App() {
   // final file write and the closing event can arrive in either order.
   const revision = `${selectedSession?.events.length ?? 0}:${busy}`;
 
-  // Filtered here rather than inside the sidebar, so the list and the ⌘⌥↑/↓ walk
+  // Filtered here rather than inside the sidebar, so the list and the ⌘⇧↑/↓ walk
   // read one array. `projectPath` on the item is the repo root, so a worktree
   // session stays under the project it forked from.
   const visibleSessions = useMemo(
@@ -197,10 +198,10 @@ function App() {
   const toggleSidebar = () => setCollapsed((prev) => !prev);
   useHotkey("b", toggleSidebar);
   useHotkey("n", handleNewSession);
-  // ⌘⌥ rather than plain ⌘: the composer is focused most of the time, where
+  // ⌘⇧ rather than plain ⌘: the composer is focused most of the time, where
   // ⌘↑/↓ is the webview's own jump-to-start/end of the input.
-  useHotkey("ArrowUp", () => stepSession(-1), { alt: true });
-  useHotkey("ArrowDown", () => stepSession(1), { alt: true });
+  useHotkey("ArrowUp", () => stepSession(-1), { shift: true });
+  useHotkey("ArrowDown", () => stepSession(1), { shift: true });
   // ⌘E for the right pane against ⌘B for the left.
   useHotkey("e", togglePanel);
   // No accelerator: Shift+Tab on its own, matching the CLI's own chord for this.
@@ -217,6 +218,7 @@ function App() {
     handleModelChange(next.id, null);
   });
   const fullscreen = useFullscreen();
+  useVibrancy(fullscreen);
 
   return (
     <TooltipProvider>
