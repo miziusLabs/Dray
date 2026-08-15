@@ -59,7 +59,7 @@
      decides how much of the wallpaper survives. Everything stacked above it —
      cards, menus, the composer — keeps its opaque fill, so the glass reads as
      the room the app sits in rather than as a wash over the text. */
-  --background-vibrant: oklch(0.145 0 0 / 80%);
+  --background-vibrant: oklch(0.145 0 0 / 90%);
 
   /* Not part of the shadcn set. `--surface-raised` sits between `--background`
      and `--card` for tool-call and code chrome that must read as inset rather

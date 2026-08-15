@@ -312,7 +312,10 @@ function ShortcutHint({ selected }: { selected: boolean }) {
           fill makes a hint the loudest thing in the list. */}
       <KbdGroup className="[&_kbd]:bg-muted/40 [&_kbd]:text-muted-foreground/60">
         <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
-        <Kbd>⇧</Kbd>
+        {/* Spelled out on every platform, unlike the ⌘ beside it. ⇧ is the one
+            modifier glyph that doesn't read as itself — an arrow, in a hint
+            that ends in arrow keys — so no keycap in the app draws it. */}
+        <Kbd>Shift</Kbd>
         <Kbd>{selected ? "↑↓" : "↓"}</Kbd>
       </KbdGroup>
     </div>

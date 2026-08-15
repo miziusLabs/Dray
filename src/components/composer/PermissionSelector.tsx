@@ -69,7 +69,7 @@ export default function PermissionSelector({
         <TooltipContent side="top">
           Switch Permission
           <KbdGroup>
-            <Kbd>⇧</Kbd>
+            <Kbd>Shift</Kbd>
             <Kbd>Tab</Kbd>
           </KbdGroup>
         </TooltipContent>
