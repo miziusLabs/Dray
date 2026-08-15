@@ -214,7 +214,7 @@ export default function PickerMenu<T>({
           // border there is nothing for the rows to be held away from, and the
           // gap only reads as the list sitting oddly short of its own edge.
           className={cn(
-            "overflow-y-auto overscroll-contain",
+            "overflow-x-hidden overflow-y-auto overscroll-contain",
             bare ? "max-h-[14rem]" : "max-h-[15rem] px-1 py-2",
           )}
         >
