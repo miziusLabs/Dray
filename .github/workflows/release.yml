@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # Part of the cache key's environment, so it has to match warm-cache.yml.
+  CARGO_INCREMENTAL: 0
+
 jobs:
   build:
     runs-on: macos-latest
@@ -75,18 +79,26 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - id: rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      # Restores only. The cache is written by warm-cache.yml on `main`, which
-      # is the one scope a tag build can read from — saving here would write an
-      # entry under this tag's own ref that nothing will ever read again.
-      - uses: swatinem/rust-cache@v2
+      # Restores only — `cache/restore`, not `cache`. The entry is written by
+      # warm-cache.yml on `main`, the one scope a tag build can read from;
+      # saving here would write one under this tag's own ref that nothing will
+      # ever read again. Key and paths have to stay in step with that file,
+      # `registry/src` above all — see the note there for what it costs to drop.
+      - uses: actions/cache/restore@v4
         with:
-          workspaces: src-tauri
-          shared-key: release-darwin
-          save-if: "false"
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            src-tauri/target
+          key: darwin-cargo-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: darwin-cargo-${{ steps.rust.outputs.cachekey }}-
 
       - run: pnpm install --frozen-lockfile
 
