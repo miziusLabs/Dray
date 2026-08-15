@@ -2,12 +2,16 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ApprovalPolicy } from "@/types/events";
 
@@ -48,28 +52,30 @@ export default function PermissionSelector({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="px-1.5 text-ui text-muted-foreground"
-        >
-          {selected?.label ?? "Permissions"}
-        </Button>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent align="start" className="min-w-44">
-        {/* In the menu rather than a tooltip on the trigger: the trigger opens
-            on hover, so a tooltip there could never be seen without the menu
-            covering it. Here the hint appears exactly when the modes do. */}
-        <DropdownMenuLabel className="flex py-1 font-normal">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="px-1.5 text-ui text-muted-foreground"
+              aria-label="Switch permission"
+            >
+              {selected?.label ?? "Permissions"}
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          Switch Permission
           <KbdGroup>
             <Kbd>⇧</Kbd>
             <Kbd>Tab</Kbd>
           </KbdGroup>
-        </DropdownMenuLabel>
+        </TooltipContent>
+      </Tooltip>
 
+      <DropdownMenuContent align="start" className="min-w-44">
         <DropdownMenuRadioGroup
           value={value}
           onValueChange={(v) => onChange(v as ApprovalPolicy)}
