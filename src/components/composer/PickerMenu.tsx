@@ -249,10 +249,20 @@ export default function PickerMenu<T>({
                     onMouseDown={(e) => e.preventDefault()}
                     onMouseMove={(e) => handleMove(e, index)}
                     onClick={() => onPick(item)}
+                    // The highlight is a veil in the bare state and a fill in
+                    // the framed one, for the same reason the box around it is:
+                    // bare has no surface, so this lands straight on the page,
+                    // and `--accent`'s flat grey is a slab there once that page
+                    // is glass. 11.5% white composites to `--accent`'s own
+                    // colour over an opaque page, so the two states match
+                    // outside vibrancy. Framed keeps the fill — it sits on the
+                    // popover, which is opaque by design.
                     className={cn(
                       "flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-ui",
                       index === activeIndex
-                        ? "bg-accent text-accent-foreground"
+                        ? bare
+                          ? "bg-[oklch(1_0_0/11.5%)] text-accent-foreground"
+                          : "bg-accent text-accent-foreground"
                         : "text-foreground",
                     )}
                   >
