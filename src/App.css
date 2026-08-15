@@ -237,6 +237,14 @@
   html[data-vibrancy] body {
     background-color: var(--background-vibrant);
     --sidebar: transparent;
+    /* On glass a raised surface is a veil, not a fill — a flat opaque grey laid
+       over a live material reads as a hole punched in it. 5.5% white composites
+       to `--card`'s own `oklch(0.205 0 0)` when the page underneath is opaque,
+       so message bubbles, the composer card and attachment tiles look exactly
+       as they did and only stop being slabs. One thing does change: two of
+       these nested now stack, so a tile inside the composer card reads a step
+       lighter than the card instead of vanishing into it. */
+    --card: oklch(1 0 0 / 5.5%);
   }
 
   /* The app owns every scroll container, so the webview must never add its own. */

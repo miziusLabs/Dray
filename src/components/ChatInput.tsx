@@ -734,9 +734,15 @@ export default function ChatInput({
         </div>
 
         {isNewTask ? (
-          <div className="flex items-center gap-1 pt-2 text-ui text-muted-foreground/60">
-            Press <CornerDownLeft className="size-3" strokeWidth={2} /> to send
-          </div>
+          // Gone while a picker is open, and the list sitting over this row is
+          // the smaller half of why: Enter completes the highlighted row there
+          // rather than sending, and the picker draws its own ↵ hint saying so.
+          // Two Enter legends at once, one of them untrue.
+          !menuOpen && (
+            <div className="flex items-center gap-1 pt-2 text-ui text-muted-foreground/60">
+              Press <CornerDownLeft className="size-3" strokeWidth={2} /> to send
+            </div>
+          )
         ) : (
           <div className="pt-1.5">{toolbar}</div>
         )}

@@ -128,15 +128,16 @@ export default function PickerMenu<T>({
      navigable, but the hint is chrome about the list rather than part of it.
      Escape is left out — it's the one key everyone already tries.
 
-     `bg-background` rather than transparent, because the row floats over the
-     transcript and without a fill the text sat on whatever happened to be
-     scrolled behind it. Body's own colour, so it reads as a gap in the page
-     rather than as another surface. The padding is the row's own — the fill has
-     to cover the text, not just sit under the box. */
+     The fill masks the transcript scrolled behind the row — without it the text
+     sat on whatever happened to be there. Body's own colour, so it reads as a
+     gap in the page rather than as another surface, and the padding is the
+     row's own, since the fill has to cover the text and not just sit under the
+     box. Dropped with `bare` for the same reason the list drops its own. */
   const hint = (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-lg bg-background px-1.5 py-1 text-ui text-muted-foreground/50",
+        "flex items-center gap-3 rounded-lg px-1.5 py-1 text-ui text-muted-foreground/50",
+        !bare && "bg-background",
         below ? "mt-1.5" : "mb-1.5",
       )}
     >
@@ -180,18 +181,22 @@ export default function PickerMenu<T>({
           clips the scrollbar to the curve, so it stops short of the corners the
           way the rows do.
 
-          `bare` drops the border, the radius and the shadow together, and they
-          do go together: with no border and the page's own fill there is no
-          edge for a radius to round or a shadow to lift, so the shadow would be
-          a soft halo around nothing and the radius would only be back to
-          clipping a scrollbar that no longer needs it. The selected row is what
-          marks the list there. Rows keep their own radius either way — that one
-          is the shape of the highlight, not of the box. */}
+          `bare` drops the fill along with the border, the radius and the
+          shadow, and they do go together: it is only ever the empty state,
+          where the composer stands alone and the transcript is not rendered at
+          all, so there is nothing behind the list to mask and a fill can only
+          be a slab of colour laid on the page. That read as free once the page
+          was opaque and the slab was its exact colour — under vibrancy the page
+          is glass and no fill can match it, since painting one only stacks a
+          second layer over the body's own. So the list has no surface here: the
+          selected row is what marks it, and with no edge there is nothing for a
+          radius to round or a shadow to lift. Rows keep their own radius either
+          way — that one is the shape of the highlight, not of the box. */}
       <div
         className={cn(
           "overflow-hidden",
           bare
-            ? "bg-background text-foreground"
+            ? "text-foreground"
             : "rounded-xl border border-[oklch(1_0_0/8%)] bg-popover text-popover-foreground shadow-md",
         )}
       >
