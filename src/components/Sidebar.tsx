@@ -47,6 +47,11 @@ type SidebarProps = {
   // The live status of every session the app has heard about this run. Wins over
   // the item's own field, which is only as fresh as the last list fetch.
   statusBySession: Record<string, SessionStatus>;
+  // Sessions standing still behind a permission request or a question. Kept
+  // apart from `statusBySession` rather than folded into it: the backend's
+  // status machine still reads these as `in_progress`, and it is right to —
+  // the turn is open, it is only the agent that has stopped.
+  askingSessions: Set<string>;
   selectedSessionId: string | null;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -130,6 +135,7 @@ export function DevBadge({ className }: { className?: string }) {
 export default function Sidebar({
   items,
   statusBySession,
+  askingSessions,
   selectedSessionId,
   collapsed,
   onToggleCollapsed,
@@ -247,6 +253,7 @@ export default function Sidebar({
               key={item.sessionId}
               item={item}
               status={statusBySession[item.sessionId] ?? item.status}
+              asking={askingSessions.has(item.sessionId)}
               active={item.sessionId === selectedSessionId}
               // The settled list is a history, and the question asked of it is
               // "what did I finish today" — so everything older is held back
@@ -647,6 +654,7 @@ function RowMenu({
 function SessionRow({
   item,
   status,
+  asking,
   active,
   faded = false,
   onSelect,
@@ -655,6 +663,7 @@ function SessionRow({
 }: {
   item: SessionIndexItem;
   status: SessionStatus;
+  asking: boolean;
   active: boolean;
   faded?: boolean;
   onSelect: (sessionId: string) => Promise<void>;
@@ -719,20 +728,31 @@ function SessionRow({
             : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50 data-[state=open]:bg-sidebar-accent/50",
         )}
       >
-        {/* Finished and unread. Working is shown on the right instead, in place
-            of the timestamp — this rail is the unread mark alone, so it keeps
-            the left edge it can be scanned down.
+        {/* Two things put a mark here, and both are the reader's to clear: the
+            session finished and hasn't been read, or it has stopped and is
+            waiting on an answer. Working is shown on the right instead, in place
+            of the timestamp — this rail is the "over to you" mark alone, so it
+            keeps the left edge it can be scanned down.
+
+            Waiting wins where both could apply, and it is the command yellow
+            against the finished green: one is news that will keep, the other is
+            an agent standing still until it is dealt with. `--accent-command`
+            rather than a fresh amber, so the app keeps to one yellow — it
+            already means "this is for you" wherever a slash command is drawn.
 
             The slot is always here and the rail inside it is what comes and
             goes: a mark that reflows the title would shift the text of a row
             just because its agent finished. A fixed height rather than the row's
             own, so the rail reads the same length whatever the row grows to. */}
         <span className="flex w-2 shrink-0 items-center self-stretch">
-          {status === "completed" && (
+          {(asking || status === "completed") && (
             <span
               role="img"
-              aria-label="Unread"
-              className="h-3 w-0.5 rounded-[1px] bg-emerald-500"
+              aria-label={asking ? "Waiting for you" : "Unread"}
+              className={cn(
+                "h-3 w-0.5 rounded-[1px]",
+                asking ? "bg-accent-command" : "bg-emerald-500",
+              )}
             />
           )}
         </span>

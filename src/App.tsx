@@ -5,6 +5,7 @@ import Chat from "@/components/Chat";
 import ChangesPanel from "@/components/ChangesPanel";
 import ChatInput from "@/components/ChatInput";
 import DiffWorkerPool from "@/components/DiffWorkerPool";
+import NoticeStack from "@/components/NoticeStack";
 import RightPanel, { PanelToggle, TabBody, type PanelTab } from "@/components/RightPanel";
 import Sidebar, { DevBadge, SidebarToggle, sortSessions } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
@@ -34,6 +35,7 @@ function App() {
     streamingContentBlock,
     sessionIndexItems,
     statusBySession,
+    askingSessions,
     showArchived,
     setShowArchived,
     models,
@@ -209,6 +211,7 @@ function App() {
           projectFilter={projectFilter}
           onProjectFilterChange={setProjectFilter}
           statusBySession={statusBySession}
+          askingSessions={askingSessions}
           selectedSessionId={selectedSessionId}
           collapsed={collapsed}
           onToggleCollapsed={toggleSidebar}
@@ -364,6 +367,9 @@ function App() {
         crowded={!collapsed && panelOpen}
       />
     </AppShell>
+    {/* Outside `AppShell` on purpose: it is fixed to the window rather than
+        placed in the layout, and the shell has no slot that isn't a pane. */}
+    <NoticeStack onSelect={(id) => void handleSelectSessionIndexItem(id)} />
     </DiffWorkerPool>
     </TooltipProvider>
   );

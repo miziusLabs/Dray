@@ -1,8 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useComposerPrefs, type EffortByModel } from "@/hooks/useComposerPrefs";
+import { dismissNotice, pushNotice, type NoticeKind } from "@/hooks/useNotices";
+import { isWindowFocused, onFocusChange } from "@/lib/focus";
+import { notifyOS } from "@/lib/notify";
+import { playNotification } from "@/lib/sound";
 import { AgentEvent, ApprovalPolicy, BackgroundTask, BranchList, Effort, Model, ModelId, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
@@ -93,6 +97,13 @@ export function useSessions() {
     // draw them. Nothing is persisted on either side, so both die with the
     // process and neither can come back stale.
     const [queuedBySession, setQueuedBySession] = useState<Record<string, QueuedMessage[]>>({});
+    // sessionId → the request ids of the consent cards and questionnaires the
+    // agent is standing still behind. Ids rather than a count, so the
+    // `permission_decided` that retires one clears the right one when two are
+    // open. Frontend-only and unpersisted for the same reason the requests
+    // themselves are: no child survives a restart, so a request that outlived
+    // one could never be answered.
+    const [asksBySession, setAsksBySession] = useState<Record<string, string[]>>({});
     const [error, setError] = useState<string | null>(null);
 
 // What actually gets sent for the current model: its remembered pick, else its
@@ -412,6 +423,10 @@ const handleNewSession = () => {
 const handleSelectSessionIndexItem = async (sessionId: string) => {
   setSelectedSessionId(sessionId);
 
+  // Opening the session is answering the notice about it, whatever it said —
+  // an unread completion is read, and a pending request is now on screen.
+  dismissNotice(sessionId);
+
   // Opening a finished session is reading it.
   const clicked = sessionIndexItems.find((i) => i.sessionId === sessionId);
   if ((statusBySession[sessionId] ?? clicked?.status) === "completed") {
@@ -680,6 +695,43 @@ useEffect(() => {
               setWorkingBySession((prev) => ({ ...prev, [agentEvent.sessionId]: null }));
             }
 
+            // The agent has stopped and is waiting on the reader. Announced like
+            // a completion because it is the same kind of news — the difference
+            // is that this one holds the turn until it is answered, which is why
+            // its notice does not time out.
+            if (
+              agentEvent.payload.type === "permission_requested" ||
+              agentEvent.payload.type === "questions_asked"
+            ) {
+              const { requestId } = agentEvent.payload;
+              const asking =
+                agentEvent.payload.type === "questions_asked"
+                  ? "Needs an answer"
+                  : "Needs permission";
+
+              setAsksBySession((prev) => {
+                const cur = prev[agentEvent.sessionId] ?? [];
+                if (cur.includes(requestId)) return prev;
+                return { ...prev, [agentEvent.sessionId]: [...cur, requestId] };
+              });
+              announce(agentEvent.sessionId, "asking", asking);
+            }
+
+            // The card is answered, so both the rail mark and the notice
+            // pointing at it have nothing left to point at.
+            if (agentEvent.payload.type === "permission_decided") {
+              const { requestId } = agentEvent.payload;
+              setAsksBySession((prev) => {
+                const cur = prev[agentEvent.sessionId];
+                if (!cur?.length) return prev;
+                return {
+                  ...prev,
+                  [agentEvent.sessionId]: cur.filter((id) => id !== requestId),
+                };
+              });
+              dismissNotice(agentEvent.sessionId);
+            }
+
             // Busy is no longer inferred from `turn_completed` here: a result
             // can land while a background subagent is still running, so the
             // backend's status machine owns the call and reports it on the
@@ -769,15 +821,96 @@ useEffect(() => {
 const selectedSessionIdRef = useRef(selectedSessionId);
 selectedSessionIdRef.current = selectedSessionId;
 
-// `completed` means finished *and unread*. Reading is what retires it, so both
-// paths to a read funnel through here: the status landing on the session
-// already on screen, and the user clicking a finished one in the sidebar.
+// Same reason as the selection ref above: the status listener is registered
+// once, so it needs the live index to name the session that just finished, and
+// the live statuses to answer "is the one on screen still unread".
+const sessionIndexItemsRef = useRef(sessionIndexItems);
+sessionIndexItemsRef.current = sessionIndexItems;
+const statusBySessionRef = useRef(statusBySession);
+statusBySessionRef.current = statusBySession;
+
+// `completed` means finished *and unread*. Reading is what retires it, so every
+// path to a read funnels through here: the status landing on the session already
+// on screen, the user clicking a finished one in the sidebar, and coming back to
+// a window that finished its turn while it was in the background.
 const markSessionRead = (sessionId: string) => {
   setStatusBySession((prev) => ({ ...prev, [sessionId]: "idle" }));
+  // The notice and the unread dot report the same thing, so the read that
+  // retires one retires the other.
+  dismissNotice(sessionId);
   // Cleared locally first — the click must feel instant. Losing the write
   // costs one stale unread dot after a restart, so a failure isn't surfaced.
   void invoke("mark_session_idle", { sessionId }).catch(() => {});
 };
+
+/// Tell the reader about something that happened in a session, on exactly one
+/// channel, chosen by where they are. Returns whether they were already looking
+/// at it — the one case nothing is raised, since the transcript itself is the
+/// notification.
+///
+/// Shared by every announcement rather than repeated per event: a desktop banner
+/// in front of someone looking at the window is an interruption, and an in-app
+/// card is invisible from another app, so the split has to be made the same way
+/// everywhere or one event ends up on two channels.
+/// The two channels are told apart on purpose. A desktop banner lands in a
+/// stack beside every other app's, so it has to name the session and the
+/// project or it says nothing; the in-app card is the only card on screen next
+/// to a sidebar already marking the row, so it needs the verb and nothing else.
+const announce = (sessionId: string, kind: NoticeKind, label: string): boolean => {
+  if (!isWindowFocused()) {
+    const item = sessionIndexItemsRef.current.find((i) => i.sessionId === sessionId);
+
+    // Same order as the card: the verb first, because *what is wanted* is the
+    // one thing not on screen anywhere else. The session title follows as the
+    // body — a banner lands in a stack beside every other app's, so it has to
+    // say which session, where the card can lean on the sidebar rail for that.
+    notifyOS(sessionId, label, item?.title ?? "");
+    return false;
+  }
+  if (sessionId === selectedSessionIdRef.current) return true;
+
+  // The sound is the signal; the card is a thing to click. Fired side by side
+  // rather than one from the other, so dropping either leaves the other
+  // working.
+  playNotification();
+  pushNotice({ sessionId, kind, label });
+  return false;
+};
+
+// Reading requires *looking*, which an unfocused window rules out however
+// selected the session is. So the completion below only counts as read when the
+// app has focus, and this covers the other half: the reader coming back to a
+// window that finished while they were away.
+useEffect(
+  () =>
+    onFocusChange((focused) => {
+      const sessionId = selectedSessionIdRef.current;
+      if (!focused || !sessionId) return;
+      if (statusBySessionRef.current[sessionId] === "completed") {
+        markSessionRead(sessionId);
+      }
+    }),
+  [],
+);
+
+// A ref rather than a dep, unlike the two above: this handler closes over the
+// index and the status map to restore what the session was started with, so a
+// listener registered once would go on selecting sessions with the state the
+// app had at mount.
+const selectSessionRef = useRef(handleSelectSessionIndexItem);
+selectSessionRef.current = handleSelectSessionIndexItem;
+
+// The reader clicked a desktop banner. Rust has already raised the window; the
+// only thing left is to go to the session it was about.
+useEffect(() => {
+  const listenerPromise = listen<string>("notification_activated", (event) => {
+    void selectSessionRef.current(event.payload);
+  });
+
+  return () => {
+    listenerPromise.then((unlisten) => unlisten());
+  };
+}, []);
 
 useEffect(() => {
   const listenerPromise = listen<SessionStatusEvent>("session_status", (event) => {
@@ -799,10 +932,16 @@ useEffect(() => {
     // cleared from here rather than from each of them.
     if (status !== "in_progress") {
       setWorkingBySession((prev) => ({ ...prev, [sessionId]: null }));
+      // A request can only be answered by the child that asked, so one still
+      // open when the turn ends is stranded rather than pending — see the
+      // stranded-request note in CLAUDE.md. Dropping it here is what stops the
+      // sidebar marking a dead session as waiting on the reader forever.
+      setAsksBySession((prev) => (prev[sessionId]?.length ? { ...prev, [sessionId]: [] } : prev));
     }
 
-    // A session finishing on screen is read the moment it finishes.
-    if (status === "completed" && sessionId === selectedSessionIdRef.current) {
+    // Finishing in front of the reader is read the moment it does; everything
+    // else is announced.
+    if (status === "completed" && announce(sessionId, "completed", "Task finished")) {
       markSessionRead(sessionId);
       return;
     }
@@ -844,6 +983,19 @@ const selectedStatus: SessionStatus = selectedSessionId
     ?? "idle"
   : "idle";
 const busy = selectedStatus === "in_progress";
+
+// The sessions standing still behind a card the reader has to answer. A set
+// rather than the id lists themselves: the sidebar only asks whether a row is
+// waiting, and passing the lists would re-render every row on each request.
+const askingSessions = useMemo(
+  () =>
+    new Set(
+      Object.entries(asksBySession)
+        .filter(([, ids]) => ids.length > 0)
+        .map(([sessionId]) => sessionId),
+    ),
+  [asksBySession],
+);
 
 // Prompts typed into the running turn and not yet handed to the CLI. Not gated
 // on `busy` like the live state below: a queue only exists while a turn runs,
@@ -924,6 +1076,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
 
 }

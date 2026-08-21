@@ -22,6 +22,7 @@ pub mod git;
 pub mod harness;
 #[path = "models/models.rs"]
 pub mod models;
+pub mod notifications;
 pub mod projects;
 pub mod session;
 pub mod store;
@@ -356,6 +357,7 @@ pub fn run() {
             cancel_queued,
             respond_permission,
             answer_questions,
+            notifications::notify_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
