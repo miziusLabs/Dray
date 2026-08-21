@@ -10,7 +10,7 @@ use crate::{
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot, SessionStatus},
 };
 use std::collections::HashMap;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 pub mod attachments;
 pub mod binpath;
@@ -24,9 +24,11 @@ pub mod harness;
 pub mod models;
 pub mod notifications;
 pub mod projects;
+pub mod quit;
 pub mod session;
 pub mod store;
 pub mod title;
+pub mod updater;
 
 #[tauri::command]
 async fn send_msg(
@@ -253,6 +255,24 @@ async fn interrupt_session(
         .map_err(|e| e.to_string())
 }
 
+/// Stops one background task without touching the rest of the session.
+///
+/// Not reachable through `interrupt_session`: an interrupt with no turn in
+/// flight acks and leaves running tasks alone, which is exactly the state a
+/// background task holds a session in. Idempotent — the CLI answers success for
+/// a task it no longer holds.
+#[tauri::command]
+async fn stop_task(
+    session_id: &str,
+    task_id: &str,
+    manager: State<'_, SessionManager>,
+) -> Result<(), String> {
+    manager
+        .stop_task(session_id, task_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Takes back the newest prompt still held for a running turn, returning its
 /// text so the composer can restore it. `None` once the flush has written it —
 /// past that point the CLI owns the prompt and there is no way to retract it.
@@ -320,7 +340,28 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
+        .manage(updater::PendingUpdate::default())
+        .manage(quit::PendingQuit::default())
+        .menu(quit::menu)
+        .on_menu_event(|app, event| {
+            if event.id() == quit::QUIT_ID {
+                quit::request(app);
+            } else if event.id() == updater::CHECK_UPDATE_ID {
+                if let Err(e) = app.emit(updater::CHECK_UPDATE_REQUESTED, ()) {
+                    eprintln!("[check update emit err] {e}");
+                }
+            }
+        })
+        .on_window_event(|window, event| {
+            // The dialog answers with `confirm_quit`, which exits outright — so
+            // this arm never has to let a close through.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                quit::request(window.app_handle());
+            }
+        })
         .setup(|_app| {
             // A persisted `in_progress` can't be true anymore — no child
             // survived the restart. Spawned, not awaited: the reset needs no
@@ -354,10 +395,15 @@ pub fn run() {
             delete_session,
             mark_session_idle,
             interrupt_session,
+            stop_task,
             cancel_queued,
             respond_permission,
             answer_questions,
             notifications::notify_session,
+            updater::check_update,
+            updater::install_update,
+            quit::confirm_quit,
+            quit::dismiss_quit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

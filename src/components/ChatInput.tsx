@@ -96,13 +96,32 @@ const TEXT_BOX = "py-1 text-composer";
 
 // `String.raw` because the glyphs are drawn with backslashes; an ordinary
 // template literal would eat them as escapes.
-const WORDMARK = String.raw` ___    ____    ____  __ __
-|   \  |    \  /    ||  |  |
-|    \ |  D  )|  o  ||  |  |
-|  D  ||    / |     ||  ~  |
-|     ||    \ |  _  ||___, |
-|     ||  .  \|  |  ||     |
-|_____||__|\_||__|__||____/`;
+// const WORDMARK = String.raw` ___    ____    ____  __ __
+// |   \  |    \  /    ||  |  |
+// |    \ |  D  )|  o  ||  |  |
+// |  D  ||    / |     ||  ~  |
+// |     ||    \ |  _  ||___, |
+// |     ||  .  \|  |  ||     |
+// |_____||__|\_||__|__||____/`;
+
+// The file is the source, so editing the logo needs no change here — but an
+// <img> paints the file's own fill and this has to take the page's text color.
+// So it is a mask over a `currentColor` background: the SVG supplies the shape,
+// the CSS supplies the ink. Prefixed as well as not, for the older WebKit a
+// Linux build runs on.
+const WORDMARK_MASK = {
+  maskImage: "url(/assets/dray-logo.svg)",
+  WebkitMaskImage: "url(/assets/dray-logo.svg)",
+  maskSize: "contain",
+  WebkitMaskSize: "contain",
+  maskRepeat: "no-repeat",
+  WebkitMaskRepeat: "no-repeat",
+  // `contain` + `left` is what makes the box tolerant of a redrawn logo: the
+  // mark fits inside it at whatever aspect ratio the file has, rather than
+  // being stretched to a ratio hardcoded here.
+  maskPosition: "left",
+  WebkitMaskPosition: "left",
+} as const;
 
 export default function ChatInput({
   onSend,
@@ -296,6 +315,55 @@ export default function ChatInput({
   // ⌥ as well as ⌘, so the chord can't collide with the webview's own ⌘O.
   useHotkey("o", () => void pickAttachments(sessionId), { alt: true });
 
+  // What Esc does, wherever focus is. Held in a ref so the listener below can
+  // register once and still read current state. Returns whether it consumed the
+  // key, which is what decides if the webview ever sees it.
+  //
+  // Appended rather than assigned: whatever is half-typed here is the user's
+  // too, and replacing it would trade one loss for another. Focus follows the
+  // text back, since taking a prompt back is the start of editing it.
+  const escapeRef = useRef<() => boolean>(() => false);
+  escapeRef.current = () => {
+    // Shuts the picker without clearing what was typed.
+    if (menuOpen) {
+      setDismissed(true);
+      return true;
+    }
+
+    // Takes back the newest prompt still waiting on the CLI.
+    if (onCancelQueued && queuedCount > 0) {
+      const before = message;
+      void onCancelQueued().then((cancelled) => {
+        if (!cancelled) return;
+        setMessage(before ? `${before}\n${cancelled.text}` : cancelled.text);
+        textareaRef.current?.focus();
+      });
+      return true;
+    }
+
+    return false;
+  };
+
+  // Bound on the document, not on the textarea: on the textarea it only fired
+  // while the box held focus, and every other press fell through to the webview,
+  // where macOS reads a bare Esc as "leave fullscreen" — so the window resized
+  // instead of cancelling. Swallowed only when it did something, or fullscreen
+  // would lose its own exit for nothing.
+  //
+  // Bubble phase and skipped once handled, because Radix's layers listen in
+  // capture and preventDefault when they dismiss — so an open dialog, menu or
+  // lightbox spends the key before this sees it.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (escapeRef.current()) e.preventDefault();
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   // The drop target is the whole window, not the card: a file aimed at the
   // composer while the transcript fills the screen would otherwise have to be
   // dropped on a 60px strip. The card is where the affordance is drawn, because
@@ -398,16 +466,16 @@ export default function ChatInput({
           submit();
         }}
       >
-        {/* Decoration, so it is hidden from assistive tech rather than read out
-            as punctuation. Sits on the form edge like the toolbar and the text
-            below it, and `whitespace-pre` keeps the drawing from reflowing. */}
+        {/* Decoration, so it is hidden from assistive tech. Sits on the form
+            edge like the toolbar and the text below it. Height-sized so the
+            mark scales with the layout rather than with a viewBox nobody
+            reading this file should have to hold in their head. */}
         {isNewTask && (
-          <pre
+          <div
             aria-hidden
-            className="mb-4 font-mono text-[10px] leading-[1.15] whitespace-pre text-foreground/20 select-none"
-          >
-            {WORDMARK}
-          </pre>
+            style={WORDMARK_MASK}
+            className="mb-4 h-10 w-full max-w-30 bg-current text-foreground/10"
+          />
         )}
 
         {/* Above the toolbar in both states, so the failure reads before the
@@ -555,30 +623,10 @@ export default function ChatInput({
                       pickRow(active);
                       return;
                     }
-                    if (e.key === "Escape") {
-                      e.preventDefault();
-                      setDismissed(true);
-                      return;
-                    }
                   }
 
-                  // Takes back the newest prompt still waiting on the CLI and
-                  // puts its text back. Only when the composer is empty of its
-                  // own picker state and there is something to take back, so Esc
-                  // keeps its usual meaning everywhere else.
-                  //
-                  // Appended rather than assigned: whatever is half-typed here
-                  // is the user's too, and replacing it would trade one loss for
-                  // another.
-                  if (e.key === "Escape" && onCancelQueued && queuedCount > 0) {
-                    e.preventDefault();
-                    const before = message;
-                    void onCancelQueued().then((cancelled) => {
-                      if (!cancelled) return;
-                      setMessage(before ? `${before}\n${cancelled.text}` : cancelled.text);
-                    });
-                    return;
-                  }
+                  // Esc is not read here — it is the document listener's, so it
+                  // works with the composer unfocused too.
 
                   // Shift+Enter is the only way to get a newline; plain Enter sends.
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -686,9 +734,15 @@ export default function ChatInput({
         </div>
 
         {isNewTask ? (
-          <div className="flex items-center gap-1 pt-2 text-ui text-muted-foreground/60">
-            Press <CornerDownLeft className="size-3" strokeWidth={2} /> to send
-          </div>
+          // Gone while a picker is open, and the list sitting over this row is
+          // the smaller half of why: Enter completes the highlighted row there
+          // rather than sending, and the picker draws its own ↵ hint saying so.
+          // Two Enter legends at once, one of them untrue.
+          !menuOpen && (
+            <div className="flex items-center gap-1 pt-2 text-ui text-muted-foreground/60">
+              Press <CornerDownLeft className="size-3" strokeWidth={2} /> to send
+            </div>
+          )
         ) : (
           <div className="pt-1.5">{toolbar}</div>
         )}

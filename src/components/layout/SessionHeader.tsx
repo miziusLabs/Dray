@@ -15,7 +15,7 @@ type SessionHeaderProps = {
 export default function SessionHeader({ session, className }: SessionHeaderProps) {
   if (!session) {
     return (
-      <div className={cn("min-w-0", className)} data-tauri-drag-region>
+      <div className={cn("min-w-0", className)}>
         <span className="text-ui text-muted-foreground">New session</span>
       </div>
     );
@@ -29,10 +29,7 @@ export default function SessionHeader({ session, className }: SessionHeaderProps
     : session.branch;
 
   return (
-    <div
-      className={cn("flex min-w-0 items-center gap-3 text-ui", className)}
-      data-tauri-drag-region
-    >
+    <div className={cn("flex min-w-0 items-center gap-3 text-ui", className)}>
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="shrink-0 text-muted-foreground">{project}</span>
         <span aria-hidden className="shrink-0 text-muted-foreground/50">

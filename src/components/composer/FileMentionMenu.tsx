@@ -50,7 +50,7 @@ export default function FileMentionMenu({
               the app: `dir="rtl"` would keep the more informative deep end, but
               it reorders neutral characters at the edges, so it is a bidi bug
               waiting on the first path this app doesn't expect. */}
-          {file.dir && <span className="truncate text-muted-foreground">{file.dir}</span>}
+          {file.dir && <span className="min-w-0 truncate text-muted-foreground">{file.dir}</span>}
         </>
       )}
     />

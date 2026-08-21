@@ -16,6 +16,7 @@ use tokio::{
 pub mod parser;
 pub use parser::ClaudeCodeEvent;
 pub mod commands;
+pub mod control;
 pub mod mapper;
 pub mod permissions;
 use permissions::PendingPermissions;
@@ -269,6 +270,14 @@ async fn read_stdout(
         // finishing means the next tool result — where the CLI injects a
         // buffered prompt — is still ahead, and a turn ending means there is no
         // result left to absorb one, so the prompt opens the next turn instead.
+        //
+        // A subagent's call counts here and deliberately does not in
+        // `note_tool_call` below, because the two ask different questions.
+        // That one asks whether a main-thread result is close enough ahead to
+        // write straight through; this asks only whether handing over now is
+        // safe, and it is at any point inside a turn — a prompt written early
+        // waits in the CLI's own buffer for the same main-thread result it
+        // would have waited here for.
         let at_boundary = matches!(
             agent_event.payload,
             AgentEventPayload::ToolCallStarted { .. }

@@ -7,6 +7,7 @@ use crate::{
     harness::{
         claude_code::{
             self,
+            control::{ControlLine, ControlRequest},
             permissions::{answer_response, decision_response, PendingPermissions},
         },
         Harness::ClaudeCode,
@@ -109,7 +110,10 @@ pub struct StatusTracker {
     status: SessionStatus,
     /// An `init` opened a model call that no `result` has closed yet.
     model_call_open: bool,
-    background_tasks: usize,
+    /// Ids of the outstanding background tasks, not just how many. The count is
+    /// all the status machine needs, but Stop has to name each one to the CLI —
+    /// an interrupt does not touch them.
+    background_tasks: Vec<String>,
     /// Main-thread tool calls started and not yet finished. Not a status input —
     /// it decides whether an arriving prompt is written now or held.
     open_tool_calls: usize,
@@ -136,12 +140,12 @@ impl StatusTracker {
             }
             AgentEventPayload::TurnCompleted { .. } => {
                 self.model_call_open = false;
-                (self.background_tasks == 0)
+                (self.background_tasks.is_empty())
                     .then(|| self.set(SessionStatus::Completed))
                     .flatten()
             }
             AgentEventPayload::BackgroundTasksChanged { tasks } => {
-                self.background_tasks = tasks.len();
+                self.background_tasks = tasks.iter().map(|t| t.task_id.clone()).collect();
                 (tasks.is_empty() && !self.model_call_open)
                     .then(|| self.set(SessionStatus::Completed))
                     .flatten()
@@ -150,11 +154,37 @@ impl StatusTracker {
         }
     }
 
-    /// Whether a turn is running right now, which is what decides that an
-    /// arriving prompt is queued rather than sent. Read *before* `on_send`,
-    /// which marks in-progress unconditionally and would answer for itself.
+    /// Whether anything at all is still working, background tasks included.
+    ///
+    /// The safe-to-replace-the-child question, and nothing else: a session whose
+    /// turn ended while a background task runs is still `InProgress` here, and
+    /// killing that child would take the task with it.
     pub fn is_busy(&self) -> bool {
         self.status == SessionStatus::InProgress
+    }
+
+    /// Whether a model call is open right now, which is what decides that an
+    /// arriving prompt is queued rather than sent. Read *before* `on_send`,
+    /// which opens one unconditionally and would answer for itself.
+    ///
+    /// Deliberately narrower than [`is_busy`](Self::is_busy). A background task
+    /// holds the session in-progress long after its turn ended, but the CLI's
+    /// main thread is idle and answers a prompt straight away — verified
+    /// against v2.1.232, where a prompt written with a background `sleep 300`
+    /// outstanding was answered in 1.8s. Queueing on status instead held that
+    /// prompt until the task drained, and since a `local_bash` task emits none
+    /// of the boundaries `read_stdout` flushes at, "until it drained" was the
+    /// whole wait.
+    pub fn turn_in_flight(&self) -> bool {
+        self.model_call_open
+    }
+
+    /// The outstanding background tasks, for a Stop that has to name each one.
+    ///
+    /// The set is republished whole on every change, so this is simply the
+    /// latest reading rather than anything accumulated.
+    pub fn background_task_ids(&self) -> Vec<String> {
+        self.background_tasks.clone()
     }
 
     /// Counts main-thread tool calls in and out. Fed separately from
@@ -360,21 +390,30 @@ impl SessionManager {
         // Decided here rather than by the caller: the frontend's own `busy` is
         // optimistic, and this is the only reading taken on the same lock the
         // write goes out under.
-        let (busy, tool_in_flight) = match sessions_guard.get(session_id) {
+        // Three readings, not one, because the questions below differ: whether
+        // anything is working at all decides that the child must not be
+        // replaced, while only an open model call means this prompt has a turn
+        // to be folded into.
+        let (busy, turn_in_flight, tool_in_flight) = match sessions_guard.get(session_id) {
             Some(s) => {
                 let tracker = s.status.lock().await;
-                (tracker.is_busy(), tracker.tool_in_flight())
+                (
+                    tracker.is_busy(),
+                    tracker.turn_in_flight(),
+                    tracker.tool_in_flight(),
+                )
             }
-            None => (false, false),
+            None => (false, false, false),
         };
 
         // Effort is fixed at spawn — the CLI has no `set_effort` control request
         // — so changing it means replacing the child. Resuming by id keeps the
         // conversation, and the log continues from the persisted seq.
         //
-        // Never while a turn runs: the kill would destroy the very turn the
-        // prompt is being queued onto. The index still records the pick below,
-        // so the next idle send is what respawns.
+        // Never while anything runs, which is the *wider* reading on purpose:
+        // the kill would destroy not just a turn in flight but every background
+        // task the child is still carrying. The index still records the pick
+        // below, so the next idle send is what respawns.
         let effort_changed = !busy
             && sessions_guard
                 .get(session_id)
@@ -401,13 +440,17 @@ impl SessionManager {
             // the child fails — the prompt event is persisted ahead of stdin too.
             touch_session_index_item(session_id, model, effort, permission_mode).await?;
 
-            // A turn is running, so this prompt is held rather than sent, and
+            // A model call is open, so this prompt is held rather than sent, and
             // none of the live controls below fire with it. `set_model` and
             // `set_permission_mode` were verified switching an *idle* child;
             // what they do to a turn mid-flight is unknown, and a queued prompt
             // is not worth finding out on. The index above has the user's pick
             // either way, so the next idle send applies it.
-            if busy {
+            //
+            // Gated on the turn, not on `busy`: a session holding a background
+            // task reads busy with its main thread idle, and queueing there left
+            // the prompt waiting on a boundary that task would never produce.
+            if turn_in_flight {
                 // A tool is running, so the CLI's next injection point — that
                 // tool's result — is still ahead, and writing now is what lands
                 // the prompt on it. Holding for the `tool_call_completed` this
@@ -473,14 +516,48 @@ impl SessionManager {
         Ok(SendOutcome::default())
     }
 
-    /// Interrupts a session's in-flight turn. Errors when no live child holds
-    /// the id — nothing is running, so there is nothing to stop.
+    /// Stops everything the session is doing: the turn in flight, and every
+    /// background task still outstanding. Errors when no live child holds the
+    /// id — nothing is running, so there is nothing to stop.
+    ///
+    /// The second half is not something the CLI's own interrupt does. Verified
+    /// against v2.1.232: an interrupt aborts the turn's tools and streaming and
+    /// leaves backgrounded tasks running, which is what backgrounding one means
+    /// — so a session held open by a task alone had a Stop button that acked and
+    /// changed nothing. Naming the tasks here is what makes one Stop mean stop.
+    /// Per-task stops stay available in the subagent panel for the narrower ask.
     pub async fn interrupt(&self, session_id: &str) -> Result<()> {
         let mut sessions_guard = self.sessions.lock().await;
         let Some(session) = sessions_guard.get_mut(session_id) else {
             bail!("no running session {session_id}");
         };
-        session.interrupt().await
+
+        session.interrupt().await?;
+
+        // Read after the interrupt, so a task the CLI did stop on its own is
+        // already gone from the set rather than stopped twice. Harmless either
+        // way — the CLI answers success for a task it no longer holds.
+        let task_ids = session.status.lock().await.background_task_ids();
+        for task_id in task_ids {
+            // Logged, not propagated: the interrupt above already went out, and
+            // one task refusing to stop must not hide that from the caller or
+            // stop the tasks behind it in the list from being asked.
+            if let Err(err) = session.stop_task(&task_id).await {
+                eprintln!("[stop task err] {task_id}: {err}");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Stops one of a session's background tasks. Errors for a dead child like
+    /// the rest of these: the task ran inside that process and died with it.
+    pub async fn stop_task(&self, session_id: &str, task_id: &str) -> Result<()> {
+        let mut sessions_guard = self.sessions.lock().await;
+        let Some(session) = sessions_guard.get_mut(session_id) else {
+            bail!("no running session {session_id}");
+        };
+        session.stop_task(task_id).await
     }
 
     /// Takes back the newest prompt still waiting on a boundary, returning it
@@ -719,13 +796,13 @@ impl Session {
     /// There is no `set_effort` counterpart — the CLI rejects that subtype, and
     /// an `effort` field on this request is accepted but ignored.
     pub async fn set_model(&mut self, model: &Model) -> Result<()> {
-        let request = json!({
-            "type": "control_request",
-            "request_id": Uuid::now_v7().to_string(),
-            "request": {"subtype": "set_model", "model": model.id.as_arg()},
-        });
+        let model_arg = model.id.as_arg().context("model has no CLI alias")?;
 
-        write_line(&self.stdin, &request).await?;
+        write_line(
+            &self.stdin,
+            &ControlLine::new(ControlRequest::SetModel { model: model_arg }),
+        )
+        .await?;
         self.model = model.id;
 
         Ok(())
@@ -738,13 +815,36 @@ impl Session {
     /// usually opens a follow-up turn to narrate the abort — so the status
     /// machine needs nothing special here, the resulting events drive it.
     pub async fn interrupt(&mut self) -> Result<()> {
-        let request = json!({
-            "type": "control_request",
-            "request_id": Uuid::now_v7().to_string(),
-            "request": {"subtype": "interrupt"},
-        });
+        write_line(&self.stdin, &ControlLine::new(ControlRequest::Interrupt)).await?;
 
-        write_line(&self.stdin, &request).await?;
+        Ok(())
+    }
+
+    /// Stops one background task by id.
+    ///
+    /// Separate from [`interrupt`](Self::interrupt) because the CLI keeps them
+    /// separate: an interrupt with no turn in flight acks and leaves every
+    /// running task alone, so it is no answer at all to the one state where the
+    /// user is stuck — main thread idle, a task still holding the session open.
+    ///
+    /// Nothing is emitted here. The CLI republishes the task set and files a
+    /// `task_notification` with `status: "stopped"` on its own, which is what
+    /// settles the panel row and drives the status machine to completion — so
+    /// minting anything would be a second source for what already arrives.
+    ///
+    /// The model is not told, and that is Claude Code's own behaviour rather
+    /// than a gap left here. It notifies on a task *completing* — a
+    /// `<task-notification>` user line naming the task and its exit — and says
+    /// of stops in its own orphan-scan text that those made "via the UI, Monitor
+    /// timeout, or agent teardown … leave no transcript marker". Synthesizing
+    /// one would mean waking the model for a turn to announce something the
+    /// harness deliberately keeps quiet.
+    pub async fn stop_task(&mut self, task_id: &str) -> Result<()> {
+        write_line(
+            &self.stdin,
+            &ControlLine::new(ControlRequest::StopTask { task_id }),
+        )
+        .await?;
 
         Ok(())
     }
@@ -752,15 +852,13 @@ impl Session {
     /// Switches the permission stance of a running child. Unlike effort, the CLI
     /// does have a `set_permission_mode` subtype, so this needs no respawn.
     pub async fn set_permission_mode(&mut self, mode: ApprovalPolicy) -> Result<()> {
-        let arg = mode.as_arg();
-
-        let request = json!({
-            "type": "control_request",
-            "request_id": Uuid::now_v7().to_string(),
-            "request": {"subtype": "set_permission_mode", "mode": arg},
-        });
-
-        write_line(&self.stdin, &request).await?;
+        write_line(
+            &self.stdin,
+            &ControlLine::new(ControlRequest::SetPermissionMode {
+                mode: mode.as_arg(),
+            }),
+        )
+        .await?;
         self.permission_mode = mode;
 
         Ok(())
@@ -905,9 +1003,15 @@ impl Session {
 /// Writes one JSON line to a child's stdin. The CLI's input format is
 /// line-delimited, so the newline and the flush are part of the message rather
 /// than tidiness.
-pub async fn write_line(stdin: &Arc<Mutex<ChildStdin>>, value: &serde_json::Value) -> Result<()> {
+///
+/// Takes anything serializable rather than a built [`Value`](serde_json::Value),
+/// so a typed line goes out without being rendered into one first.
+pub async fn write_line(stdin: &Arc<Mutex<ChildStdin>>, value: &impl Serialize) -> Result<()> {
+    let mut line = serde_json::to_string(value)?;
+    line.push('\n');
+
     let mut guard = stdin.lock().await;
-    guard.write_all(format!("{value}\n").as_bytes()).await?;
+    guard.write_all(line.as_bytes()).await?;
     guard.flush().await?;
     Ok(())
 }
@@ -1165,6 +1269,60 @@ mod tests {
         );
     }
 
+    fn turn_completed() -> AgentEventPayload {
+        AgentEventPayload::TurnCompleted {
+            status: crate::events::TurnStatus::Success,
+            stop_reason: None,
+            final_text: None,
+            usage: None,
+            duration_ms: None,
+            head: None,
+        }
+    }
+
+    /// The reason the two readings exist separately. A background task holds the
+    /// session in-progress after its turn ended, and deciding to queue on *that*
+    /// left the prompt waiting on a boundary a `local_bash` task never produces
+    /// — so it sat there until the task drained, which the CLI itself never
+    /// asked for: verified against v2.1.232, a prompt written in this state is
+    /// answered in under two seconds.
+    #[test]
+    fn a_background_task_holds_the_session_busy_but_not_the_turn() {
+        let mut tracker = StatusTracker::default();
+        tracker.on_send();
+
+        tracker.on_event(&AgentEventPayload::BackgroundTasksChanged {
+            tasks: vec![crate::events::BackgroundTask {
+                task_id: "b0n57ez9b".to_string(),
+                task_type: "local_bash".to_string(),
+                description: "sleep 300".to_string(),
+            }],
+        });
+        assert!(tracker.turn_in_flight(), "the turn that spawned it is open");
+        assert_eq!(
+            tracker.background_task_ids(),
+            vec!["b0n57ez9b".to_string()],
+            "Stop has to name it — the CLI's interrupt leaves it running"
+        );
+
+        assert_eq!(
+            tracker.on_event(&turn_completed()),
+            None,
+            "the task keeps the session from completing"
+        );
+        assert!(tracker.is_busy(), "so the child must not be replaced");
+        assert!(
+            !tracker.turn_in_flight(),
+            "but the main thread is idle, so a prompt goes straight out"
+        );
+
+        // Stopping it drains the set, which is what the CLI republishes.
+        assert_eq!(
+            tracker.on_event(&AgentEventPayload::BackgroundTasksChanged { tasks: vec![] }),
+            Some(SessionStatus::Completed)
+        );
+    }
+
     /// Only a finished-and-unread session clears on read; selecting a running
     /// one must not stop it reading as busy.
     #[test]
@@ -1175,14 +1333,7 @@ mod tests {
         tracker.on_send();
         assert_eq!(tracker.mark_seen(), None, "a running session stays busy");
 
-        tracker.on_event(&AgentEventPayload::TurnCompleted {
-            status: crate::events::TurnStatus::Success,
-            stop_reason: None,
-            final_text: None,
-            usage: None,
-            duration_ms: None,
-            head: None,
-        });
+        tracker.on_event(&turn_completed());
         assert_eq!(tracker.mark_seen(), Some(SessionStatus::Idle));
         assert_eq!(tracker.mark_seen(), None, "already read");
     }

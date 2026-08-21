@@ -746,6 +746,20 @@ export type TurnStatus = "success" | "error";
 
 export type Unreadable = "binary" | "too_large";
 
+export type UpdateChannel = "stable" | "beta";
+
+/**
+ * What the sidebar row draws. There is no idle variant: nothing is emitted
+ * until an update exists, so the frontend's own `null` is the resting state
+ * and a failed check leaves the UI exactly as it was.
+ */
+export type UpdateStatus = { "state": "downloading", version: string, 
+/**
+ * `None` until the server sends a content length, which not every
+ * CDN does — the row shows an indeterminate state rather than 0%.
+ */
+percent: number | null, } | { "state": "ready", version: string, notes: string | null, };
+
 export type Usage = { inputTokens: number | null, outputTokens: number | null, cachedInputTokens: number | null, cacheWriteTokens: number | null, 
 /**
  * Broken out only by harnesses that report it separately; others fold

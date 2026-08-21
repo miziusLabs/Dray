@@ -5,6 +5,14 @@ export type SubagentRun = {
   /// The spawning tool call's id — what the envelope correlates on, and the key
   /// the panel selects by.
   id: string;
+  /// The harness's own handle on the run, which is what `stop_task` names.
+  ///
+  /// Not the same id as `id` above, and the difference is silent if confused:
+  /// the CLI answers success for a task it does not hold, so stopping by the
+  /// spawning call's id looks like a stop that did nothing. Null until a
+  /// lifecycle event carries it, which is also the honest reading — a run with
+  /// no `agentId` yet is one the harness has not registered as stoppable.
+  taskId: string | null;
   label: string | null;
   description: string | null;
   /// Latest `subagent_progress.description`, rewritten per event by the harness.
@@ -551,6 +559,7 @@ export function buildTranscript(
     if (!run) {
       run = {
         id: ref.id,
+        taskId: null,
         label: ref.label,
         description: null,
         status: null,
@@ -569,14 +578,17 @@ export function buildTranscript(
 
     switch (event.payload.type) {
       case "subagent_started":
+        run.taskId = event.payload.agentId;
         run.label ??= event.payload.label;
         run.description = event.payload.description;
         break;
       case "subagent_progress":
+        run.taskId = event.payload.agentId;
         run.status = event.payload.description;
         run.lastTool = event.payload.lastTool;
         break;
       case "subagent_completed":
+        run.taskId = event.payload.agentId;
         run.done = true;
         run.usage = event.payload.usage;
         break;
@@ -601,7 +613,12 @@ export function buildTranscript(
     // `subagentById` is keyed by the spawning call's id, so its key set is
     // exactly the calls that render as a `SubagentRow` and must not group.
     turns: groupTurns(mainThread, new Set(subagentById.keys())),
-    subagents: [...subagentById.values()],
+    // Newest first. The map is keyed in spawn order, which put the run the
+    // reader is waiting on at the bottom of a list that only ever grows — and
+    // the panel keeps its scroll position, so a long session opened the tab on
+    // whatever was running an hour ago. `subagentById` keeps insertion order for
+    // everything that looks a run up by id.
+    subagents: [...subagentById.values()].reverse(),
     subagentById,
     resultByCallId,
     pendingAsks,

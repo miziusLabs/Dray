@@ -30,7 +30,7 @@ export default function SubagentRow({
     <button
       type="button"
       onClick={() => onOpen(run.id)}
-      className="group flex w-full items-center gap-2 text-left text-chat"
+      className="group flex w-full cursor-pointer items-center gap-2 text-left text-chat"
     >
       {/* The orb *is* the running state, so it goes when the run ends rather
           than settling into a resting pose — a still orb next to a finished run

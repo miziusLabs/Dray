@@ -6,6 +6,7 @@ import ChangesPanel from "@/components/ChangesPanel";
 import ChatInput from "@/components/ChatInput";
 import DiffWorkerPool from "@/components/DiffWorkerPool";
 import NoticeStack from "@/components/NoticeStack";
+import QuitDialog from "@/components/QuitDialog";
 import RightPanel, { PanelToggle, TabBody, type PanelTab } from "@/components/RightPanel";
 import Sidebar, { DevBadge, SidebarToggle, sortSessions } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
@@ -18,11 +19,13 @@ import { pickAttachments } from "@/hooks/useAttachments";
 import { useCodeTheme } from "@/hooks/useCodeTheme";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { useVibrancy } from "@/hooks/useVibrancy";
 import { warmHighlighter } from "@/hooks/useHighlighter";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSessions } from "@/hooks/useSessions";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
+import { useUpdater } from "@/hooks/useUpdater";
 import { changeRange, turnChangedTree } from "@/lib/changes";
 import { playCelebration } from "@/lib/sound";
 import { buildTranscript } from "@/lib/transcript";
@@ -65,6 +68,7 @@ function App() {
     setUseWorktree,
     handleSendMsg,
     handleInterrupt,
+    handleStopTask,
     queuedMessages,
     handleCancelQueued,
     handleRespondPermission,
@@ -83,6 +87,18 @@ function App() {
     "ade.projectFilter",
     null,
   );
+  const {
+    status: updateStatus,
+    manual: updateManual,
+    install: installUpdate,
+  } = useUpdater();
+
+  // Every session the app has started this run, not the open one: the install
+  // relaunches the app, so any live child is one this would kill mid-turn. A
+  // session from a previous run cannot still be running — no child survives a
+  // restart — so the live map answers this on its own.
+  const anyRunning = Object.values(statusBySession).some((s) => s === "in_progress");
+
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useLocalStorage<PanelTab>("ade.panelTab", "changes");
   const [selectedSubagentId, setSelectedSubagentId] = useState<string | null>(null);
@@ -103,10 +119,16 @@ function App() {
 
   const togglePanel = () => setPanelOpen((prev) => !prev);
 
-  const openSubagent = (id: string) => {
-    setSelectedSubagentId(id);
+  // Opens the tab without touching the selection, so a run the reader already
+  // had expanded is still expanded when they come back to it.
+  const openSubagentPanel = () => {
     setPanelTab("subagents");
     setPanelOpen(true);
+  };
+
+  const openSubagent = (id: string) => {
+    setSelectedSubagentId(id);
+    openSubagentPanel();
   };
 
   // An open session's own directory, since project- and local-scoped commands
@@ -140,7 +162,7 @@ function App() {
   // final file write and the closing event can arrive in either order.
   const revision = `${selectedSession?.events.length ?? 0}:${busy}`;
 
-  // Filtered here rather than inside the sidebar, so the list and the ⌘⌥↑/↓ walk
+  // Filtered here rather than inside the sidebar, so the list and the ⌘⇧↑/↓ walk
   // read one array. `projectPath` on the item is the repo root, so a worktree
   // session stays under the project it forked from.
   const visibleSessions = useMemo(
@@ -178,10 +200,10 @@ function App() {
   const toggleSidebar = () => setCollapsed((prev) => !prev);
   useHotkey("b", toggleSidebar);
   useHotkey("n", handleNewSession);
-  // ⌘⌥ rather than plain ⌘: the composer is focused most of the time, where
+  // ⌘⇧ rather than plain ⌘: the composer is focused most of the time, where
   // ⌘↑/↓ is the webview's own jump-to-start/end of the input.
-  useHotkey("ArrowUp", () => stepSession(-1), { alt: true });
-  useHotkey("ArrowDown", () => stepSession(1), { alt: true });
+  useHotkey("ArrowUp", () => stepSession(-1), { shift: true });
+  useHotkey("ArrowDown", () => stepSession(1), { shift: true });
   // ⌘E for the right pane against ⌘B for the left.
   useHotkey("e", togglePanel);
   // No accelerator: Shift+Tab on its own, matching the CLI's own chord for this.
@@ -198,6 +220,7 @@ function App() {
     handleModelChange(next.id, null);
   });
   const fullscreen = useFullscreen();
+  useVibrancy(fullscreen);
 
   return (
     <TooltipProvider>
@@ -237,12 +260,20 @@ function App() {
           onDelete={deleteSession}
           showArchived={showArchived}
           onToggleArchived={() => setShowArchived((v) => !v)}
+          updateStatus={updateStatus}
+          updateBlocked={anyRunning}
+          updateManual={updateManual}
+          onInstallUpdate={() => void installUpdate()}
         />
       }
       header={
         <header
           className="flex h-(--titlebar-h) shrink-0 items-center gap-2 px-3"
-          data-tauri-drag-region
+          // `deep`, not bare: bare drags only on direct hits, so every label
+          // inside this row was a dead strip in a titlebar that looks uniform.
+          // Buttons still block on their own — Tauri stops walking up at any
+          // clickable element that carries no attribute of its own.
+          data-tauri-drag-region="deep"
         >
           {/* Only when collapsed — expanded, the sidebar owns the toggle. This
               header reaches the window edge in that state, so it has to clear
@@ -298,7 +329,9 @@ function App() {
                 runs={subagents}
                 selectedId={selectedSubagentId}
                 resultByCallId={resultByCallId}
+                live={busy}
                 onSelect={setSelectedSubagentId}
+                onStopTask={handleStopTask}
               />
             </TabBody>
           </RightPanel>
@@ -357,6 +390,7 @@ function App() {
           selectedSessionId ? streamingContentBlock[selectedSessionId] ?? null : null
         }
         onOpenSubagent={openSubagent}
+        onOpenSubagentPanel={openSubagentPanel}
         onRespondPermission={handleRespondPermission}
         onAnswerQuestions={handleAnswerQuestions}
         busy={busy}
@@ -370,6 +404,7 @@ function App() {
     {/* Outside `AppShell` on purpose: it is fixed to the window rather than
         placed in the layout, and the shell has no slot that isn't a pane. */}
     <NoticeStack onSelect={(id) => void handleSelectSessionIndexItem(id)} />
+    <QuitDialog />
     </DiffWorkerPool>
     </TooltipProvider>
   );

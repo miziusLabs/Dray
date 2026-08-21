@@ -13,6 +13,15 @@ DEST="$DEST_DIR/$NAME.app"
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# `createUpdaterArtifacts` makes the bundler sign the update package, and it
+# refuses to build at all when the config carries a public key with no private
+# one to match. CI passes the key as a secret; locally it is the file the
+# keypair was generated into.
+UPDATER_KEY="${TAURI_SIGNING_PRIVATE_KEY:-$HOME/.tauri/dray_updater.key}"
+[ -f "$UPDATER_KEY" ] || die "no updater signing key at $UPDATER_KEY — generate one with \`pnpm tauri signer generate\` or set TAURI_SIGNING_PRIVATE_KEY"
+export TAURI_SIGNING_PRIVATE_KEY="$UPDATER_KEY"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+
 say "Building $NAME"
 cd "$ROOT"
 pnpm tauri build "$@"

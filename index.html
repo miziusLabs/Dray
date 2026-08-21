@@ -18,6 +18,12 @@
         el.dataset.mode = dark ? "dark" : "light";
         el.classList.toggle("dark", dark);
         el.style.colorScheme = dark ? "dark" : "light";
+        // The window's material is macOS-only, so the translucency that reveals
+        // it is too — anywhere else it would punch a hole through to nothing.
+        // Set here rather than on mount because React lands a frame or two in,
+        // which is long enough to see the app open opaque and then turn to
+        // glass. `useVibrancy` clears it while fullscreen.
+        if (/Mac/.test(navigator.platform)) el.dataset.vibrancy = "";
       } catch (e) {}
     </script>
   </head>

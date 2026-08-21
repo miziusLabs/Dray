@@ -13,9 +13,10 @@
 //! reproduces internals that are free to change and answers differently from the
 //! CLI the moment they do.
 
+use super::control::{ControlLine, ControlRequest};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::{collections::HashMap, process::Stdio, sync::OnceLock, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -142,18 +143,15 @@ async fn probe(cwd: &str) -> Result<Vec<SlashCommand>> {
     let mut stdin = child.stdin.take().context("failed to take stdin")?;
     let stdout = child.stdout.take().context("failed to take stdout")?;
 
-    let request_id = uuid::Uuid::now_v7().to_string();
-    let request = json!({
-        "type": "control_request",
-        "request_id": request_id,
-        "request": {"subtype": "initialize"},
-    });
-    stdin.write_all(format!("{request}\n").as_bytes()).await?;
+    let request = ControlLine::new(ControlRequest::Initialize);
+    stdin
+        .write_all(format!("{}\n", serde_json::to_string(&request)?).as_bytes())
+        .await?;
     stdin.flush().await?;
 
     let mut lines = BufReader::new(stdout).lines();
     while let Some(line) = lines.next_line().await? {
-        let Some(response) = matching_response(&line, &request_id) else {
+        let Some(response) = matching_response(&line, &request.request_id) else {
             continue;
         };
 

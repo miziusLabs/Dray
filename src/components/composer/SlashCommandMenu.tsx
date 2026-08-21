@@ -43,7 +43,7 @@ export default function SlashCommandMenu({
               is one line that gives way to the name rather than wrapping the row
               to three. */}
           {command.description && (
-            <span className="truncate text-muted-foreground">{command.description}</span>
+            <span className="min-w-0 truncate text-muted-foreground">{command.description}</span>
           )}
         </>
       )}

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 
+import UpdateRow from "@/components/UpdateRow";
 import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,13 +36,20 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { burstConfetti } from "@/lib/confetti";
+import type { ManualCheck } from "@/hooks/useUpdater";
 import { isToday, relativeTime } from "@/lib/format";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import type { Project, SessionIndexItem, SessionStatus } from "@/types/events";
+import type {
+  Project,
+  SessionIndexItem,
+  SessionStatus,
+  UpdateStatus,
+} from "@/types/events";
 
 type SidebarProps = {
-  // Already scoped to `projectFilter` by the caller, so the list and the ⌘⌥↑/↓
+  // Already scoped to `projectFilter` by the caller, so the list and the ⌘⇧↑/↓
   // walk step through exactly the same rows.
   items: SessionIndexItem[];
   // The live status of every session the app has heard about this run. Wins over
@@ -68,9 +76,15 @@ type SidebarProps = {
   // `null` is every project, and it is the entry the filter opens on.
   projectFilter: string | null;
   onProjectFilterChange: (path: string | null) => void;
+  updateStatus: UpdateStatus | null;
+  // Any session mid-turn, not just the open one — installing relaunches the
+  // whole app.
+  updateBlocked: boolean;
+  updateManual: ManualCheck;
+  onInstallUpdate: () => void;
 };
 
-/// The order the list is drawn in. Exported because the ⌘⌥↑/↓ shortcut steps
+/// The order the list is drawn in. Exported because the ⌘⇧↑/↓ shortcut steps
 /// through the same sequence, and a second comparator would let the two disagree
 /// about which row is "next" — worse when the sidebar is collapsed and nothing
 /// on screen shows the order being walked.
@@ -120,12 +134,10 @@ export function SidebarToggle({
 export function DevBadge({ className }: { className?: string }) {
   return (
     <span
-      // Drag region is opted out of so the label never swallows a window drag.
       className={cn(
         "rounded bg-orange-500/15 px-1.5 py-0.5 font-mono text-[10px] leading-none font-medium tracking-wide text-orange-500 uppercase",
         className,
       )}
-      data-tauri-drag-region={false}
     >
       Dev
     </span>
@@ -148,6 +160,10 @@ export default function Sidebar({
   projects,
   projectFilter,
   onProjectFilterChange,
+  updateStatus,
+  updateBlocked,
+  updateManual,
+  onInstallUpdate,
 }: SidebarProps) {
   const fullscreen = useFullscreen();
 
@@ -181,7 +197,7 @@ export default function Sidebar({
           // buttons below it; nudge it out so every icon shares one edge.
           fullscreen ? "justify-start pl-2" : "justify-end",
         )}
-        data-tauri-drag-region
+        data-tauri-drag-region="deep"
       >
         {import.meta.env.DEV && <DevBadge className="mr-auto" />}
         <SidebarToggle onToggle={onToggleCollapsed} />
@@ -274,11 +290,21 @@ export default function Sidebar({
             Hidden with only one row: there's nothing to jump or switch to. */}
         {sorted.length > 1 && <ShortcutHint selected={selectedSessionId !== null} />}
       </div>
+
+      {/* Outside the scroll container, unlike the shortcut hint above it: that
+          is a one-time tip that has earned its way off screen, and this is an
+          offer that has to still be there when the list is long. */}
+      <UpdateRow
+        status={updateStatus}
+        blocked={updateBlocked}
+        manual={updateManual}
+        onInstall={onInstallUpdate}
+      />
     </aside>
   );
 }
 
-/// The ⌘⌥↑/↓ hint, laid out on the session rows' own edges so it reads as the
+/// The ⌘⇧↑/↓ hint, laid out on the session rows' own edges so it reads as the
 /// last row rather than as a caption under the list.
 ///
 /// With nothing selected both arrows land on the same place — the newest session
@@ -293,7 +319,10 @@ function ShortcutHint({ selected }: { selected: boolean }) {
           fill makes a hint the loudest thing in the list. */}
       <KbdGroup className="[&_kbd]:bg-muted/40 [&_kbd]:text-muted-foreground/60">
         <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
-        <Kbd>{IS_MAC ? "⌥" : "Alt"}</Kbd>
+        {/* Spelled out on every platform, unlike the ⌘ beside it. ⇧ is the one
+            modifier glyph that doesn't read as itself — an arrow, in a hint
+            that ends in arrow keys — so no keycap in the app draws it. */}
+        <Kbd>Shift</Kbd>
         <Kbd>{selected ? "↑↓" : "↓"}</Kbd>
       </KbdGroup>
     </div>
@@ -540,7 +569,7 @@ function RowAction({
 }: {
   label: string;
   active: boolean;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
 }) {
   return (
@@ -553,7 +582,7 @@ function RowAction({
           aria-pressed={active}
           onClick={(e) => {
             e.stopPropagation();
-            onClick();
+            onClick(e);
           }}
           // Set here rather than inherited from the row: the UA stylesheet's own
           // `button { cursor: default }` wins over an inherited value.
@@ -807,9 +836,14 @@ function SessionRow({
             <RowAction
               label={item.archived ? "Unsettle" : "Settle"}
               active={item.archived}
-              onClick={() =>
-                onSetFlags(item.sessionId, { archived: !item.archived })
-              }
+              onClick={(e) => {
+                // Fired on the click, not after the write lands: the burst is
+                // the button's own answer, and the row is gone from this list a
+                // frame later. The celebration sound stays with the write in
+                // `App`, where the flag is confirmed.
+                if (!item.archived) burstConfetti(e.currentTarget);
+                onSetFlags(item.sessionId, { archived: !item.archived });
+              }}
             >
               {/* Settle reads as "check this off"; unsettle isn't a second
                   checkmark, it's undoing the first one. */}
