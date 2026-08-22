@@ -5,6 +5,43 @@ The release job reads the matching section into the GitHub release notes and the
 updater carries it, so this file is what a release says about itself — not a
 second description of it. GitHub's generated commit list is appended below it.
 
+## 0.4.0
+
+### Added
+
+- **The main column has tabs now, and Chat is one of them.** Beside it sits
+  **Changes** — a read-only view of the session's whole repository: the files
+  you have uncommitted against HEAD, the branch's history, and the selected
+  file's diff in its own pane. ⌘1 and ⌘2 switch between them, and the
+  transcript is hidden rather than torn down, so scroll position and every
+  diff you had open survive the flip.
+- **Split or unified diffs**, toggled in the pane and remembered. Split is the
+  default — it's what you get in every other git client.
+- **A face on every commit**, resolved from the author's email.
+
+### Changed
+
+- **The right pane's Changes tab still answers the older question** — what did
+  *this turn* do. The new view follows the branch instead. Two surfaces, not a
+  duplicate.
+
+### Fixed
+
+- **A review that left only file comments showed nothing.** Inline comments
+  live in their own list and the review holding them comes back with an empty
+  body, so the panel dropped the envelope and the whole conversation with it.
+  A review row now opens onto its file comments, and each of those onto its
+  replies.
+- **One long file path in a bot's table pushed every other column off the
+  pane.** Table cells wrap anywhere now.
+- **A fresh `git init` with nothing committed** said it wasn't a repository and
+  hid its files. It now reads as what it is: every file an addition.
+
+### Note
+
+The repo view reads and never writes. Committing and pushing stay with the
+conversation next door, which is where the work is being made.
+
 ## 0.3.0
 
 ### Added
