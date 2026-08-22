@@ -329,7 +329,7 @@ Asymmetry = point: appending to private file atomic, rewriting shared one not.
 
 ## Updates
 
-**Shipping one = [RELEASING.md](apps/desktop/RELEASING.md), and follow it rather than reconstruct it from here.** This section say why pipeline built way it is; that file say what to type and, more important, what to _check_ after — green tick alone prove nothing, since bundler only warn when notarization fail. Section below stay the reasoning.
+**Shipping one = `apps/desktop/RELEASING.md` (gitignored, local only), and follow it rather than reconstruct it from here.** This section say why pipeline built way it is; that file say what to type and, more important, what to _check_ after — green tick alone prove nothing, since bundler only warn when notarization fail. Section below stay the reasoning.
 
 **Two signatures, conflating them first mistake to avoid.** Minisign keypair (`pnpm tauri signer generate`) = updater's own integrity check: public half sit in `plugins.updater.pubkey` and private half build-time env var, and bundle built without it refused by every client. Apple's Developer ID signature different question entirely — it what stop macOS blocking download, and say nothing about whether payload one this app published. Both set in [release.yml](.github/workflows/release.yml); only first needed for local build, why [install.sh](apps/desktop/scripts/install.sh) export key itself and fail early with readable message rather than let bundler complain about public key with no private one.
 
