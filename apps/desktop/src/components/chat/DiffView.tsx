@@ -13,9 +13,34 @@ import { cn } from "@/lib/utils";
 export default function DiffView({
   sides,
   className,
+  diffStyle = "unified",
+  overflow = "wrap",
+  fill = false,
+  unsafeCSS,
 }: {
   sides: EditSides;
   className?: string;
+  /// Side by side, or one column. Only the repo view's own pane asks for
+  /// `split`, and it must pass `overflow: "scroll"` with it — the library only
+  /// wires the two columns' scrolling together when lines can overflow, so a
+  /// wrapping split view scrolls its halves independently.
+  ///
+  /// A prop rather than a second component: the highlighter gate below is the
+  /// part that is easy to get wrong, and it should exist once. Changing it
+  /// repaints the same instance and never re-tokenizes — the layout is the
+  /// client's, while the worker pool's cache is keyed on the text.
+  diffStyle?: "unified" | "split";
+  overflow?: "wrap" | "scroll";
+  /// Let the **loading stand-in** grow to its container instead of capping at
+  /// 96. For a pane whose whole job is this one diff, where the transcript's
+  /// cap leaves a short box floating in an empty window until the grammar
+  /// lands. Only the stand-in: the frame itself clips what overflows it, so a
+  /// full height there would cut long diffs off at the fold.
+  fill?: boolean;
+  /// Rules injected into the viewer's shadow root, in the library's own
+  /// `unsafe` layer. Its escape hatch for the handful of things it styles but
+  /// exposes no variable for — see `DIFF_CSS` in `DiffPane`.
+  unsafeCSS?: string;
 }) {
   // Read here rather than threaded down from the transcript: nothing else
   // between here and the app root cares about either value, and props for them
@@ -38,17 +63,19 @@ export default function DiffView({
     () => ({
       theme: pair,
       themeType: resolvedMode,
-      // Unified: the transcript column is far too narrow for two gutters plus
-      // two code columns, and a side-by-side view there wraps into noise.
-      diffStyle: "unified" as const,
+      // Unified by default: the transcript column is far too narrow for two
+      // gutters plus two code columns, and a side-by-side view there wraps into
+      // noise. A dedicated pane has the width and asks for `split`.
+      diffStyle,
       // The row above already names the file, so a second header would repeat
       // it directly under itself.
       disableFileHeader: true,
-      // Long lines wrap instead of scrolling. A horizontal scrollbar inside a
-      // vertically scrolling transcript traps the wheel and is easy to miss.
-      overflow: "wrap" as const,
+      // Wrapping by default: a horizontal scrollbar inside a vertically
+      // scrolling transcript traps the wheel and is easy to miss.
+      overflow,
+      unsafeCSS,
     }),
-    [pair, resolvedMode],
+    [pair, resolvedMode, diffStyle, overflow, unsafeCSS],
   );
 
   const frame = cn("overflow-hidden rounded-md border border-border/60 text-code", className);
@@ -59,7 +86,13 @@ export default function DiffView({
   // line is on — legible before any syntax color arrives.
   if (!ready) {
     return (
-      <pre className={cn(frame, "max-h-96 overflow-auto px-2.5 py-2 font-mono")}>
+      <pre
+        className={cn(
+          frame,
+          "overflow-auto px-2.5 py-2 font-mono",
+          fill ? "h-full" : "max-h-96",
+        )}
+      >
         {sides.oldText !== null &&
           sides.oldText.split("\n").map((line, i) => (
             <div key={`-${i}`} className="text-destructive">
