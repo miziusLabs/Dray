@@ -5,6 +5,33 @@ The release job reads the matching section into the GitHub release notes and the
 updater carries it, so this file is what a release says about itself — not a
 second description of it. GitHub's generated commit list is appended below it.
 
+## 0.3.0
+
+### Added
+
+- **A PR tab in the right pane**, beside Changes and Subagents. It shows merge
+  readiness, the checks on the tip commit, and the review and bot comments as
+  one timeline. When a session's branch has an open PR the tab leads the row
+  and the panel toggle turns green — at that point the work is about landing,
+  not about the last turn.
+- **Merging, from the app.** The button names the method — merge, squash or
+  rebase — in its own menu, and arms a confirm before it does anything. A draft
+  can be marked ready and a closed PR reopened.
+- **A dock badge for what's waiting**, counting the same rows the sidebar rail
+  marks: turns you haven't read, and sessions blocked on an answer.
+
+### Fixed
+
+- **Desktop notifications were silent.** They fire only when you're in another
+  app, which is exactly where the in-app sound can't reach you. A question now
+  sounds different from a finished turn.
+
+### Note
+
+The PR tab runs on the `gh` CLI, so it uses the login and enterprise host you
+already have. Without `gh`, or on a checkout with no GitHub remote, the tab
+stays hidden; logged out, it says so rather than erroring.
+
 ## 0.2.0
 
 ### Added
