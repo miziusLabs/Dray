@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import CommitMessage from "@/components/changes/CommitMessage";
 import DiffPane from "@/components/changes/DiffPane";
 import FileList from "@/components/changes/FileList";
 import HistoryList from "@/components/changes/HistoryList";
@@ -165,17 +166,23 @@ export default function ChangesView({
         )}
       </div>
 
-      <DiffPane
-        cwd={cwd}
-        base={showing.changes?.base ?? ""}
-        head={showing.changes?.head ?? ""}
-        file={showing.changes ? selectedFile : null}
-        empty={
-          subTab === "history" && !commit
-            ? "Open a commit to see what it changed."
-            : "Select a file to see what changed."
-        }
-      />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Keyed on the sha so opening another commit arrives collapsed: the
+            expanded state belongs to the message being read, not to the pane. */}
+        {subTab === "history" && commit && <CommitMessage key={commit.sha} commit={commit} />}
+
+        <DiffPane
+          cwd={cwd}
+          base={showing.changes?.base ?? ""}
+          head={showing.changes?.head ?? ""}
+          file={showing.changes ? selectedFile : null}
+          empty={
+            subTab === "history" && !commit
+              ? "Open a commit to see what it changed."
+              : "Select a file to see what changed."
+          }
+        />
+      </div>
     </div>
   );
 }
