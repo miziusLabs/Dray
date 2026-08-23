@@ -5,7 +5,7 @@ import {
   ChevronDown,
   GitBranchPlus,
   Inbox,
-  Pin,
+  // Pin,
   Plus,
   Search,
   Trash2,
@@ -220,7 +220,12 @@ export default function Sidebar({
           </KbdGroup>
         </Button>
 
-        <Button variant="ghost" size="sm" className="w-full justify-start px-1.5 text-ui">
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled
+          className="w-full justify-start px-1.5 text-ui"
+        >
           <Search />
           Search
         </Button>
@@ -825,13 +830,14 @@ function SessionRow({
               specificity, so a `display` utility here silently loses.
               `pointer-events-none` keeps the invisible buttons unclickable. */}
           <div className="pointer-events-none relative flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-data-[state=open]:pointer-events-auto group-data-[state=open]:opacity-100">
-            <RowAction
+            {/* Pin hidden for now; the flag and its write path stay live. */}
+            {/* <RowAction
               label={item.pinned ? "Unpin" : "Pin"}
               active={item.pinned}
               onClick={() => onSetFlags(item.sessionId, { pinned: !item.pinned })}
             >
               <Pin />
-            </RowAction>
+            </RowAction> */}
 
             <RowAction
               label={item.archived ? "Unsettle" : "Settle"}
