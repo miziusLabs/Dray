@@ -5,6 +5,36 @@ The release job reads the matching section into the GitHub release notes and the
 updater carries it, so this file is what a release says about itself — not a
 second description of it. GitHub's generated commit list is appended below it.
 
+## 0.5.0
+
+### Added
+
+- **A session's worktree can be deleted, and the chat survives it.** Nothing
+  else cleans these up — the CLI never sweeps a tree it made with
+  `--worktree` — so every one Dray spawned sat there after the work landed.
+  Settling a task now offers removal on a card that expires into keeping it,
+  the settled bar carries a button for later, and deleting a session takes its
+  worktree with it. The transcript, the log and the session itself stay; only
+  the directory goes.
+- **The dialog counts what would be lost first** — commits no other branch or
+  remote holds, and uncommitted files — so a tree with work still in it says
+  so before you answer. A tree another session is working in right now is
+  refused outright.
+- **A commit's own message, above its diff.** The history row holds the subject
+  alone, so a commit whose reasoning is in its body read as a bare headline.
+  Clamped to two lines, with "Show more" only where two genuinely don't hold
+  it.
+
+### Changed
+
+- **⇧⇥ cycles effort now, not permission mode.** Permission gets set once and
+  left; effort is the dial you reach for mid-work, so it takes the cheapest
+  chord. `low` stays out of the cycle and pickable from the menu — a blind
+  chord shouldn't make the model worse at the job. The toolbar is reordered to
+  match: model first, permission last.
+- **The sidebar's pin action and search are parked.** Neither was wired to
+  anything you could use, so neither is drawn.
+
 ## 0.4.0
 
 ### Added
