@@ -25,6 +25,22 @@ const EFFORT_LABELS: Record<Effort, string> = {
   max: "Max",
 };
 
+/// Next effort level for `model`, wrapping — what Shift+Tab lands on. `null`
+/// where the model offers nothing to cycle, so the chord no-ops rather than
+/// inventing an effort the CLI would ignore.
+///
+/// `low` is left out of the cycle and stays pickable from the menu: a blind
+/// chord landing on it makes the model worse at the work, which is not
+/// something anyone reaches for a shortcut to do. An effort outside the
+/// remaining list — `low` itself included — enters at the start.
+export function nextEffort(model: Model | undefined, current: Effort | null): Effort | null {
+  const cycle: Effort[] = model?.efforts.filter((e) => e !== "low") ?? [];
+  if (cycle.length === 0) return null;
+  const from = current ?? model?.defaultEffort ?? null;
+  const i = from ? cycle.indexOf(from) : -1;
+  return cycle[(i + 1) % cycle.length];
+}
+
 export default function ModelSelector({
   models,
   modelId,
@@ -70,11 +86,18 @@ export default function ModelSelector({
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top">
+        {/* One line, so it stays a tooltip rather than a menu of shortcuts —
+            hence `max-w-none`, which the default `max-w-xs` would wrap. */}
+        <TooltipContent side="top" className="max-w-none whitespace-nowrap">
           Switch model
           <KbdGroup>
             <Kbd>Shift</Kbd>
             <Kbd>Shift</Kbd>
+          </KbdGroup>
+          <span className="text-muted-foreground">Effort</span>
+          <KbdGroup>
+            <Kbd>Shift</Kbd>
+            <Kbd>Tab</Kbd>
           </KbdGroup>
         </TooltipContent>
       </Tooltip>

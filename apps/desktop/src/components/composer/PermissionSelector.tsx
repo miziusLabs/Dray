@@ -6,7 +6,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import {
   Tooltip,
   TooltipContent,
@@ -28,18 +27,6 @@ const MODES: { id: ApprovalPolicy; label: string }[] = [
   { id: "plan", label: "Plan" },
   { id: "auto", label: "Auto" },
 ];
-
-/// What Shift+Tab cycles through, low to high autonomy. A deliberate subset of
-/// [`MODES`]: a blind chord shouldn't be able to land on bypass-permissions, and
-/// "ask every time" is a deliberate choice rather than somewhere to pass through.
-export const CYCLE: ApprovalPolicy[] = ["plan", "acceptEdits", "auto"];
-
-/// Next mode in the Shift+Tab cycle. A mode outside the cycle enters it at the
-/// start rather than being stuck.
-export function nextPermissionMode(current: ApprovalPolicy): ApprovalPolicy {
-  const i = CYCLE.indexOf(current);
-  return i === -1 ? CYCLE[0] : CYCLE[(i + 1) % CYCLE.length];
-}
 
 export default function PermissionSelector({
   value,
@@ -66,13 +53,9 @@ export default function PermissionSelector({
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top">
-          Switch Permission
-          <KbdGroup>
-            <Kbd>Shift</Kbd>
-            <Kbd>Tab</Kbd>
-          </KbdGroup>
-        </TooltipContent>
+        {/* No chord: Shift+Tab now cycles effort, which gets reached for far
+            more often than a mode most sessions set once and leave. */}
+        <TooltipContent side="top">Switch permission</TooltipContent>
       </Tooltip>
 
       <DropdownMenuContent align="start" className="min-w-44">

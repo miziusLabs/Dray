@@ -15,9 +15,9 @@ import RightPanel, { PanelToggle, TabBody, type PanelTab } from "@/components/Ri
 import Sidebar, { DevBadge, SidebarToggle, sortSessions } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
-import { nextPermissionMode } from "@/components/composer/PermissionSelector";
 import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
+import { nextEffort } from "@/components/composer/ModelSelector";
 import ViewTabs, { type ViewTab } from "@/components/layout/ViewTabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { pickAttachments } from "@/hooks/useAttachments";
@@ -277,11 +277,17 @@ function App() {
   // No-ops without a session, where there is no row to switch.
   useHotkey("1", () => setViewTab("chat"));
   useHotkey("2", () => setViewTab("changes"));
-  // No accelerator: Shift+Tab on its own, matching the CLI's own chord for this.
-  useHotkey("Tab", () => setPermissionMode(nextPermissionMode(permissionMode)), {
-    meta: false,
-    shift: true,
-  });
+  // No accelerator: Shift+Tab on its own. The CLI spends this chord on
+  // permission mode, which in practice gets set once and left; effort is the
+  // dial actually reached for mid-work, so it takes the cheapest key here.
+  useHotkey(
+    "Tab",
+    () => {
+      const next = nextEffort(models.find((m) => m.id === modelId), effort);
+      if (next) handleModelChange(modelId, next);
+    },
+    { meta: false, shift: true },
+  );
   // Double-tap Shift cycles the model, JetBrains-search style — leaves each
   // model's own remembered effort alone, same as picking it from the menu.
   useDoubleTap("Shift", () => {
