@@ -418,6 +418,43 @@ pub async fn set_session_status(
     Ok(Some(updated))
 }
 
+/// Moves a session out of the worktree it was running in and back to its
+/// project root, which is what makes it survive the directory being deleted.
+///
+/// `cwd` is the load-bearing field: `send_msg` reads it off the index rather
+/// than trusting its caller, so a session left pointing at a deleted directory
+/// would fail to spawn on the next prompt. The CLI meets us here — it resumes
+/// a session whose worktree is gone in the launch directory and clears its own
+/// worktree binding — so after this write both sides agree the session lives
+/// at the project root.
+///
+/// `worktree_name` and `branch` are cleared together, and clearing `branch` is
+/// the less obvious half. `sessionBranch` falls back to it when there is no
+/// worktree name, and for a worktree session that field holds the *base*
+/// branch it forked from — so leaving it would point the PR tab at whatever
+/// PRs happen to be open against `main`.
+///
+/// Returns the entry as written, or `None` for an id the index doesn't hold.
+pub async fn relocate_session_to_project(
+    session_id: &str,
+) -> Result<Option<SessionIndexItem>> {
+    let _guard = INDEX_LOCK.lock().await;
+
+    let mut sessions = list_session_index_items().await?;
+    let Some(item) = sessions.iter_mut().find(|i| i.session_id == session_id) else {
+        return Ok(None);
+    };
+
+    item.cwd = item.project_path.clone();
+    item.worktree_name = None;
+    item.branch = None;
+    let updated = item.clone();
+
+    write_session_index(&sessions).await?;
+
+    Ok(Some(updated))
+}
+
 /// A persisted `in_progress` is a lie after a restart — no child survives the
 /// process — so every one resets to `idle` at startup. `completed` survives:
 /// unread is still unread.

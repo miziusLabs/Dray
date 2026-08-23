@@ -77,6 +77,10 @@ type ChatInputProps = {
   /// bar inherits the form's column and sits exactly where the card would.
   archived?: boolean;
   onUnarchive?: () => void;
+  /// Only set while the session still has a worktree on disk, which is what
+  /// retires the button: the removal clears `worktreeName`, so the control
+  /// goes away because the thing it acted on did.
+  onRemoveWorktree?: () => void;
 };
 
 const MAX_ROWS = 10;
@@ -138,6 +142,7 @@ export default function ChatInput({
   onDismissError,
   archived = false,
   onUnarchive,
+  onRemoveWorktree,
 }: ChatInputProps) {
   const [message, setMessage] = useDraft(sessionId);
   const [resizeTick, setResizeTick] = useState(0);
@@ -449,9 +454,21 @@ export default function ChatInput({
             Unsettle this task to send a follow-up.
           </span>
 
-          <Button variant="secondary" size="sm" onClick={onUnarchive}>
-            Unsettle
-          </Button>
+          {/* Unsettle keeps the right edge it has always had. Cleanup is the
+              rarer of the two and reads as an aside to it, so it takes the
+              ghost variant and sits inboard — the same "chrome doesn't lift"
+              rule the toolbar's buttons follow. */}
+          <span className="flex shrink-0 items-center gap-1">
+            {onRemoveWorktree && (
+              <Button variant="ghost" size="sm" onClick={onRemoveWorktree}>
+                Delete worktree
+              </Button>
+            )}
+
+            <Button variant="secondary" size="sm" onClick={onUnarchive}>
+              Unsettle
+            </Button>
+          </span>
         </div>
       </div>
     );

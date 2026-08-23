@@ -50,11 +50,14 @@ export default function QuitDialog() {
             Running tasks will stop. They pick up where they left off next time.
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {/* Cancel first, so the confirm lands on the right edge where the eye
+            finishes. The footer is a plain `justify-end` row on desktop, so
+            source order is the order on screen. */}
         <AlertDialogFooter>
-          <AlertDialogAction onClick={() => void invoke("confirm_quit")}>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction destructive onClick={() => void invoke("confirm_quit")}>
             Quit
           </AlertDialogAction>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

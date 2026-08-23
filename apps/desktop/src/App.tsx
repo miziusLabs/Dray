@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { invoke } from "@tauri-apps/api/core";
+
 import "./App.css";
 import Chat from "@/components/Chat";
 import ChangesPanel from "@/components/ChangesPanel";
@@ -8,6 +10,7 @@ import ChatInput from "@/components/ChatInput";
 import DiffWorkerPool from "@/components/DiffWorkerPool";
 import NoticeStack from "@/components/NoticeStack";
 import QuitDialog from "@/components/QuitDialog";
+import WorktreeDialog, { type WorktreePrompt } from "@/components/WorktreeDialog";
 import PrPanel from "@/components/PrPanel";
 import { useChanges } from "@/hooks/useChanges";
 import { prTabVisible, usePullRequest } from "@/hooks/usePullRequest";
@@ -28,12 +31,15 @@ import { useVibrancy } from "@/hooks/useVibrancy";
 import { warmHighlighter } from "@/hooks/useHighlighter";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
+import { pushNotice } from "@/hooks/useNotices";
 import { useSessions } from "@/hooks/useSessions";
+import type { WorktreeDisposition } from "@/types/events";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
 import { useUpdater } from "@/hooks/useUpdater";
 import { changeRange, turnChangedTree } from "@/lib/changes";
 import { prBadgeCount, sessionBranch } from "@/lib/pr";
 import { playCelebration } from "@/lib/sound";
+import { worktreeNoticeDetail } from "@/lib/worktree";
 import { buildTranscript } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 
@@ -83,6 +89,7 @@ function App() {
     handleNewSession,
     setSessionFlags,
     deleteSession,
+    removeWorktree,
   } = useSessions();
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
@@ -114,6 +121,60 @@ function App() {
   // standing preference, and reopening the app onto a repo view for every
   // session would be wrong more often than right.
   const [viewTabs, setViewTabs] = useState<Record<string, ViewTab>>({});
+
+  const [worktreePrompt, setWorktreePrompt] = useState<WorktreePrompt | null>(null);
+
+  // Reads what the removal would cost *before* deciding whether to ask, so a
+  // worktree that isn't there any more — deleted by hand, or by a `claude` run
+  // that had an exit prompt of its own — is tidied up silently. Asking about a
+  // directory the reader can no longer see is a question with one answer.
+  //
+  // `ask` is the whole difference between the two routes in. Settling raises a
+  // notice that expires into "keep it", because the reader was doing something
+  // else and this is an offer. The settled bar's own button raises the dialog,
+  // because there the reader asked for the deletion and is owed a confirm
+  // naming what it costs.
+  const askAboutWorktree = async (
+    sessionId: string,
+    worktreeName: string,
+    title: string,
+    ask: "notice" | "dialog",
+  ) => {
+    let disposition: WorktreeDisposition;
+    try {
+      disposition = await invoke<WorktreeDisposition>("worktree_disposition", { sessionId });
+    } catch {
+      // An offer, not a step: a session whose state can't be read keeps its
+      // worktree and says nothing. The button on the settled bar is still
+      // there to try again.
+      return;
+    }
+
+    if (!disposition.exists) {
+      void removeWorktree(sessionId);
+      return;
+    }
+
+    if (ask === "dialog") {
+      setWorktreePrompt({ sessionId, worktreeName, disposition });
+      return;
+    }
+
+    pushNotice({
+      sessionId,
+      kind: "worktree",
+      // The action leads. This card arrives unasked-for while the reader is
+      // doing something else, so the first line has to be what it wants rather
+      // than what happened — "Settled …" reads as a receipt, and a receipt is
+      // something you look away from.
+      label: "Delete worktree?",
+      detail: worktreeNoticeDetail(disposition),
+      // Which task, named by its own title rather than the generated worktree
+      // name: `calm-navy-beacon` names a directory the reader never chose,
+      // where the title is the work they just settled.
+      subject: title,
+    });
+  };
   const viewTab: ViewTab = selectedSessionId ? viewTabs[selectedSessionId] ?? "chat" : "chat";
   const setViewTab = (tab: ViewTab) => {
     if (selectedSessionId) setViewTabs((prev) => ({ ...prev, [selectedSessionId]: tab }));
@@ -321,6 +382,15 @@ function App() {
             await setSessionFlags(sessionId, flags);
             if (flags.archived === true) {
               playCelebration();
+
+              // Settling is the reader saying this work is done, which is the
+              // one moment the worktree behind it is provably spare. Asked
+              // after the flag write lands, so the question is about a task
+              // that is already settled rather than a condition of settling it.
+              const item = sessionIndexItems.find((i) => i.sessionId === sessionId);
+              if (item?.worktreeName) {
+                void askAboutWorktree(sessionId, item.worktreeName, item.title, "notice");
+              }
             }
             // Settling the open session leaves nothing to look at but the
             // unsettle bar, so it goes back to the empty composer instead.
@@ -440,6 +510,17 @@ function App() {
           onUnarchive={() =>
             selectedSessionId && setSessionFlags(selectedSessionId, { archived: false })
           }
+          onRemoveWorktree={
+            selectedSessionId && selectedSession?.worktreeName
+              ? () =>
+                  void askAboutWorktree(
+                    selectedSessionId,
+                    selectedSession.worktreeName as string,
+                    selectedSession.title,
+                    "dialog",
+                  )
+              : undefined
+          }
           toolbar={
             <ComposerToolbar
               models={models}
@@ -509,8 +590,19 @@ function App() {
     </AppShell>
     {/* Outside `AppShell` on purpose: it is fixed to the window rather than
         placed in the layout, and the shell has no slot that isn't a pane. */}
-    <NoticeStack onSelect={(id) => void handleSelectSessionIndexItem(id)} />
+    <NoticeStack
+      onSelect={(id) => void handleSelectSessionIndexItem(id)}
+      onDeleteWorktree={(id) => removeWorktree(id)}
+    />
     <QuitDialog />
+    <WorktreeDialog
+      prompt={worktreePrompt}
+      onConfirm={(sessionId) => {
+        setWorktreePrompt(null);
+        void removeWorktree(sessionId);
+      }}
+      onClose={() => setWorktreePrompt(null)}
+    />
     </DiffWorkerPool>
     </TooltipProvider>
   );

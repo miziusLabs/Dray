@@ -278,6 +278,43 @@ async fn set_session_flags(
         .map_err(|e| e.to_string())
 }
 
+/// What removing this session's worktree would cost, for the dialog that asks.
+///
+/// Answers for a session with no worktree too — an all-zero, `exists: false`
+/// reading — so the caller has one shape to render rather than a null to
+/// branch on.
+#[tauri::command]
+async fn worktree_disposition(session_id: &str) -> Result<git::WorktreeDisposition, String> {
+    let item = store::get_session_index_item(session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let Some(item) = item.filter(|i| i.worktree_name.is_some()) else {
+        return Ok(git::WorktreeDisposition::default());
+    };
+
+    let path = store::worktree_path(&item.project_path, item.worktree_name.as_deref().unwrap());
+
+    Ok(git::worktree_disposition(&path, &item.project_path).await)
+}
+
+/// Deletes the session's worktree and its branch, and moves the session to its
+/// project root. The session, its transcript and its log all survive.
+///
+/// Returns the relocated index entry so the frontend replaces its row from
+/// what the disk holds rather than from what it hoped the write would do —
+/// `set_session_flags` makes the same bargain.
+#[tauri::command]
+async fn remove_session_worktree(
+    session_id: &str,
+    manager: State<'_, SessionManager>,
+) -> Result<SessionIndexItem, String> {
+    manager
+        .remove_worktree(session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Removes a session for good: its child, its index entry, and its log. `false`
 /// means the index never held the id, which the sidebar treats the same as a
 /// success — either way the row it was asked to remove is gone.
@@ -445,6 +482,8 @@ pub fn run() {
             push_branch,
             set_session_flags,
             delete_session,
+            worktree_disposition,
+            remove_session_worktree,
             mark_session_idle,
             interrupt_session,
             stop_task,

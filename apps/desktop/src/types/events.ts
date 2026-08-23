@@ -916,3 +916,42 @@ reasoningTokens: number | null, totalTokens: number | null, costUsd: number | nu
  * and every event that doesn't report one. See [`ModelUsage`].
  */
 perModel: Array<ModelUsage>, };
+
+/**
+ * What removing this worktree would cost, read once so the dialog and the
+ * removal agree about what is in the way.
+ */
+export type WorktreeDisposition = { 
+/**
+ * `false` once the directory is gone — removed by hand, or by a `claude`
+ * run that did have an exit prompt. The caller skips the dialog and goes
+ * straight to relocating the session, so a half-dead tree tidies itself
+ * up rather than asking a question about a directory nobody can see.
+ */
+exists: boolean, 
+/**
+ * `git status --porcelain` lines: modified, staged, and untracked alike.
+ */
+changedFiles: number, 
+/**
+ * Commits **only this branch holds** — reachable from its HEAD and from
+ * no other branch, remote or tag. That is the question the reader is
+ * actually asking, since a commit some other ref also holds survives the
+ * branch being deleted.
+ *
+ * Counting against remotes alone was the first version and was wrong in
+ * the plainest case: a repo with no remote at all reported every commit
+ * in its history as at risk, so a spotless worktree warned about the
+ * initial commit.
+ *
+ * A squash-merged PR still counts, since its commits are genuinely on no
+ * other ref whatever landed on `main`. The CLI's own exit prompt has the
+ * same blind spot; it over-warns, which is the safe direction.
+ */
+unpushedCommits: number, 
+/**
+ * The reason string on git's own lock, when one is held by a **live**
+ * process. `None` covers both the unlocked tree and the far commoner
+ * case of a lock left behind by a session that has since exited.
+ */
+lockedBy: string | null, };

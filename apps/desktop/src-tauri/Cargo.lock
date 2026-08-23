@@ -953,6 +953,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 6.0.0",
  "fff-search",
+ "libc",
  "notify-rust",
  "serde",
  "serde_json",

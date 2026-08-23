@@ -317,33 +317,6 @@
 }
 
 @layer utilities {
-  /* A notice card's remaining life, drained left to right. `transform` rather
-     than `width` so it runs on the compositor and never lays the card out again
-     mid-countdown.
-
-     Declared here rather than in `@theme` beside the others: Tailwind drops a
-     themed `@keyframes` whose name it can't find in an `animation` *shorthand*,
-     and this one is driven by longhands. It compiled to a bar that never moved
-     and a card that therefore never dismissed itself. */
-  @keyframes notice-timer {
-    from {
-      transform: scaleX(1);
-    }
-    to {
-      transform: scaleX(0);
-    }
-  }
-
-  /* Longhands, not the `animation` shorthand: the duration is per-kind and
-     arrives as an inline style, and the shorthand would reset it to 0s here for
-     the inline value to have to win back. */
-  .notice-timer {
-    animation-name: notice-timer;
-    animation-timing-function: linear;
-    animation-fill-mode: forwards;
-    transform-origin: left;
-  }
-
   /* The full shimmer: the travelling gradient plus the clip and transparent
      fill that confine it to the glyphs. `--animate-shimmer` alone animates a
      background nothing can see, and the four classes it needs alongside it were

@@ -8,9 +8,17 @@ const alertVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-card text-card-foreground",
+        // `--popover`, not `--card`, and the two are the same colour with an
+        // opaque page under them — so this changes nothing until vibrancy is
+        // on. There `--card` becomes a 5.5% white veil, which is right for a
+        // surface sitting *in* the page and wrong for one floating over it:
+        // an alert lands on the sidebar, which has no fill under vibrancy, so
+        // the veil composited straight onto the window material and left the
+        // text washed out. `--popover` is the token for a surface that floats,
+        // and it is deliberately left opaque there for exactly this reason.
+        default: "bg-popover text-popover-foreground",
         destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+          "bg-popover text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
       },
     },
     defaultVariants: {

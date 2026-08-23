@@ -372,6 +372,64 @@ If it come back: commit = `add -A -- <paths>` then `commit -m … -- <paths>`, b
 
 **Selected file derived, never stored.** `find(path) ?? files[0]` — file that stop being changed can't leave pane pointing at nothing, and first-by-position right here where turn panel refuse it: diff have own pane, so opening one hide nothing.
 
+## Deleting a worktree
+
+**Nobody else clean these up, verified twice over.** Docs say sweep "never removes worktrees you create with `--worktree`", and that `-p` runs have no exit prompt so Claude don't clean up their worktrees at all — and `-p` = exactly how Dray spawn. So keep/remove dialog that live in CLI never fire here, and every worktree Dray create is Dray's to remove.
+
+**Lock = required step, not defensive one.** Same docs say `-p` run "leaves the lock it took on each one at creation in place". Verified live against v2.1.239 in scratch repo: after `claude -p --worktree` exit, tree still carry `locked claude session <name> (pid N start <date>)`, and `git worktree remove --force` refuse it outright — exit 128, "use 'remove -f -f' to override or unlock first". So [remove_worktree](apps/desktop/src-tauri/src/git.rs) unlock first, and that string = what pid check parse.
+
+Pid = whole reason to read reason rather than unlock blind. Live pid mean some other session working in that directory *now*, and unlocking pull tree out from under it — so live lock = only thing that refuse this. `kill(pid, 0)` answer it (`libc`, one line in `Cargo.toml`), `EPERM` counting as alive since process owned by another user still hold that lock.
+
+Order load-bearing at both end: unlock before remove because lock refuse it, `branch -D` after remove because git refuse branch some worktree still have checked out — which this branch was moment ago. Path guard sit ahead of all of it and key on **shape not index**: direct child of `<project>/.claude/worktrees/` or nothing, so empty worktree name resolving to project root can never reach a delete.
+
+**Session survive, and CLI meet us there.** Removal rewrite index entry — `cwd` = `project_path`, `worktree_name` and `branch` cleared — and `cwd` = load-bearing half, since `send_msg` read it off index rather than trust caller. Docs describe other half: CLI "resumes the session in the directory you launched Claude from" when worktree gone, "tells you the worktree is gone and clears the session's worktree binding". Transcript follow too — it recorded under session's cwd, and `--resume <id>` fall back to scanning every `~/.claude/projects` dir for `<id>.jsonl`, taking it when exactly one match. So transcript, log and everything in them survive; only directory go.
+
+Clearing `branch` = less obvious half. `sessionBranch` fall back to it when no worktree name, and for worktree session that field hold *base* branch it forked from — leaving it point PR tab at whatever PR happen to be open against `main`.
+
+**"Unpushed" mean no other ref hold it, not "no remote hold it".** First version counted `rev-list HEAD --not --remotes` and was wrong in plainest case: repo with no remote report its whole history at risk, so spotless worktree warn about initial commit. Now `--not --exclude=<branch> --branches --remotes --tags`, which read as "commits only this branch hold". Two spelling traps, both fail silently to zero: `--exclude` apply to **next** ref-enumerating option only (so `--branches` lose own branch while `--remotes` stay whole, which what let pushed branch read as safe), and its glob relative to `refs/heads` — `--exclude=refs/heads/foo` match nothing.
+
+Squash-merged PR still count, since its commits genuinely on no other ref whatever landed on `main`. CLI's own exit prompt have same blind spot. Over-warn = safe direction.
+
+**Lock lookup canonicalize both side.** Git print real path, so tree under `/var/…` come back `/private/var/…` and plain `==` find no record — which read as "not locked", one wrong answer that function can give. Cost a whole test run to notice.
+
+**Two ways in, and shape follow who asked.** Settle raise **notice**, settled bar's button raise **dialog**, and difference not inconsistency — it who started it. Settling, reader doing something else and being *offered* something, so safe answer must cost zero click: card expire into "keep it" after 15s and therefore carry no Keep button, since doing nothing already is keeping. Pressing "Delete worktree" = reader asking, and they owed confirm naming cost. Both read copy from [worktree.ts](apps/desktop/src/lib/worktree.ts), so two route cannot drift into describing same deletion differently.
+
+Notice = first `NoticeKind` raised by reader's own click rather than by something off screen, and first whose button **destroy** rather than navigate. Three thing follow.
+
+**Action lead, subject ride beside it.** Card arrive unasked-for while reader doing something else, so first thing read = what it *want*, not what happened. `label` = `Delete worktree?`, `subject` = task's title muted **on same line**, `detail` = what survive and what don't. First pass led with `Settled <task>` and that read as **receipt**, and receipt = thing you look away from; second pass put task on own third line and two heading-weight line read as two thing to deal with. Muted, behind action, on one line = qualifier, which what it is.
+
+Task named by own **title** not by generated worktree name — `calm-navy-beacon` name directory reader never chose, title = work they just settled. Action `shrink-0` and title = half that give way, since it part reader recognize from opening word; `title` attribute restore what clip took.
+
+It only card with **two** button. Skip = answer card give itself when bar run out, so it there to be *said* rather than waited for — answer you can only give by waiting is one you cannot give.
+
+**Tooltip holding only keycap need own left padding.** `TooltipContent` tighten `pr-1.5` when kbd present — right where label lead and cap trail, since cap carry own inset — but leave `pl-3`, so tooltip that *only* cap sit visibly off-centre. Fixed in component not at call site: `has-[>[data-slot=kbd]:first-child]:pl-1.5` (and same for `kbd-group`), which key on exactly that case and leave label-plus-cap tooltip alone.
+
+**Accelerator in tooltip here, not in button.** Rest of stack draw keycap inline, which read fine on card holding one button and badly on this one holding two: row grow wider than sentence above it, and card meant to sit in corner stop fitting in one. So `WithShortcut` wrap each button in tooltip carrying cap — where app put shortcut anyway. Empty `keys` render **no tooltip at all** rather than empty one: only top card answer to keys, and elsewhere tooltip would repeat button's own visible label back, exact thing app's tooltip rule forbid.
+
+Two key, deliberately. ⌘G press **Skip**, keeping it non-destructive across whole stack — chord that usually navigate but sometimes delete directory = shape that burn someone once. ⌘D press **Delete**, and live on card not on stack: it must run same `confirm` button do, since "Deleted" state = card's own, and key reaching past it would delete worktree while card still sat there offering to. Both guard on `isNext`, so stack have exactly one target and two key aim at same card; ⌘D also guard on `idle` so repeat press can't land mid-flight.
+
+And it only card that **stay after being pressed**: `phase` go `idle` → `working` → `done`, button become "Deleted" with check, Skip go (nothing left to skip, and live button beside "Deleted" invite second thought about directory already gone). **Countdown = WAAPI `Animation`, not CSS class, and that a bug fix.** One object own both bar and dismissal, so still exactly one clock and store still hold no `setTimeout`. But CSS version had **no single object to ask**: duration arrive as inline style, pause as `group-hover` rule, and between them hover leave bar visibly frozen while card go away moment cursor leave. Reported honestly as "bar stop but timer keep running", and it was — nothing owned that clock.
+
+`element.animate()` fix it by construction. `pause()` freeze `currentTime` outright, `play()` pick it up there, so hovering to read card cost exactly nothing — which what hover meant to do. `onfinish` fire only on real finish, so paused card cannot expire, and neither can one whose window occluded and animation throttled (behaviour we want anyway). `duration` change on `done` re-run effect, cancel old animation, mint 1.4s one — that how confirmation ride same clock.
+
+Do **not** "fix" this by restarting on mouse-leave. Tried, wrong: hover mean reader still reading, not that they earned fresh window, and restart make card that mouse merely pass over outlive one it never touched. `@keyframes notice-timer` and `.notice-timer` deleted with it — nothing left drive bar from stylesheet.
+
+Hover-pause drop in `done` and have to: reader's cursor on card, having just clicked it, and pause exist to protect button they still reaching for. Past that press no target left to protect, and card waiting for mouse to leave read as stuck. `removeWorktree` return bool for this alone — failed delete already reach reader through error banner, so card leave rather than claim something that didn't happen.
+
+Dialog get **no** such confirmation: it close, and enough else on screen already say so.
+
+Card also only one naming its subject, breaking `NoticeStack`'s own "verb and nothing else" rule on purpose — several card can stack, and "Settled" alone say nothing about which settle it answer for. Name = **task's title**, not worktree's: generated name (`calm-navy-beacon`) name directory reader never chose, where title = thing they just settled. Detail line then say "its worktree", which reach directory through thing that own it. Title run to 60 char and card `w-fit`, so it capped and truncated with `title` attribute restoring rest — the one use app's tooltip rule keep native attribute for. Dialog keep worktree name instead: it open from settled bar, where title already two inches away in header.
+
+**Counts _are_ warning, so dialog one step not two.** Sidebar's delete and PR panel's merge take second confirm precisely because they carry no such detail; adding one here make reader confirm sentence they already read. Destructive fill only where something actually lost — on clean tree this tidying up, and red make safe answer look like dangerous one.
+
+**Already-gone tree ask nothing.** Disposition read *before* deciding whether to ask, so worktree deleted by hand tidy up silently — dialog about directory reader can no longer see = question with one answer. Same read make stale registration prune itself.
+
+**Delete take tree with it, no second question.** Folded into `SessionManager::delete`, best-effort beside attachments, with one cost worth naming: failed removal there orphan tree with no UI left to retry from, since row it hung off about to go. `git worktree remove` by hand = recovery. Failing whole delete instead worse — session reader asked to be rid of would still be there.
+
+**Alert = `--popover`, not `--card`, and that vibrancy fix not taste.** Two token same colour with opaque page under them, so swap change nothing until glass on. There `--card` become 5.5% white veil — right for surface sitting *in* page, wrong for one floating over it. Notice card land on sidebar, which have no fill under vibrancy, so veil composite straight onto window material and leave text washed out. `--popover` = token for surface that float and deliberately left opaque in that block. Applies to `Alert` in general, not just worktree one.
+
+**Destructive confirm sit rightmost and take solid red.** `AlertDialogFooter` = `sm:flex-row sm:justify-end`, so source order = screen order — confirm must come **after** `AlertDialogCancel` in markup or it land on left. `destructive` prop on `AlertDialogAction` carry solid fill, not button's own `destructive` variant: that one a tint, for control sitting among others, where this the one thing in dialog that do something. Same red worktree notice's button use, so two route to same deletion look like same action. Prop caller's to set — both dialog today destructive, but red default quietly colour first one that isn't.
+
 ## Persistence
 
 Everything live under `~/.dray/` ([store.rs](apps/desktop/src-tauri/src/store.rs), [projects.rs](apps/desktop/src-tauri/src/projects.rs)) .
@@ -625,7 +683,7 @@ Several things deliberately unfinished — don't mistake for bugs:
 
 - **PR panel read and act, never write prose.** No commenting, no replying to review, no requesting review, no closing. Every action there = state change moving work toward landing; anything wanting text box, or ending PR, belong to GitHub for now.
 
-- **Branch left behind after merge.** `--delete-branch` deliberately not passed (see above), and nothing else clean up worktree or its branch — so merged worktree session leave tree at `.claude/worktrees/<name>` and branch beside it. Wanted as own thing, driven by session lifecycle rather than by merge button.
+- **Worktree cleanup hang off session lifecycle, not off merge.** `--delete-branch` still deliberately not passed (see above) — merge button say nothing about tree. Cleanup live on settle and on delete instead, see _Deleting a worktree_ below. Merged session whose reader never settle it therefore still leave tree behind; that reader's call, not merge's.
 
 - **Repo view read, commit and push — no fetch, no pull, no discard.** Ahead count against *last known* upstream, so branch someone else pushed to read as level until push itself fail. Discard-changes and stage-hunk deliberately absent: both destroy work, and neither belong in first pass of surface agent also writing to.
 

@@ -15,7 +15,7 @@ use crate::{
     models::{find_model, resolve_effort, Effort, Model, ModelId},
     store::{
         append_session_event, append_session_index_item, delete_session, get_session_index_item,
-        list_session_events, resolve_worktree_name, set_session_status,
+        list_session_events, relocate_session_to_project, resolve_worktree_name, set_session_status,
         touch_session_index_item, worktree_path, SessionIndexItem, SessionSnapshot,
         SessionStatus,
     },
@@ -230,6 +230,30 @@ impl StatusTracker {
             next
         })
     }
+}
+
+/// Deletes the worktree an index entry names, if it names one.
+///
+/// A session that never had a worktree is a no-op rather than an error: this
+/// sits on the delete path too, where most sessions have no tree to remove.
+///
+/// The path is rebuilt from `project_path` and the name rather than read off
+/// `cwd`. The two agree today, but `cwd` is a field the agent can move —
+/// `EnterWorktree` relocates a live session — and the one argument this must
+/// never get wrong is which directory to delete.
+async fn remove_session_worktree(item: &SessionIndexItem) -> Result<()> {
+    let Some(name) = item.worktree_name.as_deref() else {
+        return Ok(());
+    };
+
+    let path = worktree_path(&item.project_path, name);
+    // Claude Code's own naming, minted at creation and never written to the
+    // index — the same rebuild `sessionBranch` does on the frontend.
+    let branch = format!("worktree-{name}");
+
+    git::remove_worktree(&item.project_path, &path, Some(&branch)).await?;
+
+    Ok(())
 }
 
 /// Persists a status change and tells the frontend. Failures are logged, not
@@ -605,6 +629,39 @@ impl SessionManager {
         session.answer_questions(request_id, answers, app).await
     }
 
+    /// Deletes the worktree a session was running in and moves the session to
+    /// its project root, keeping the transcript and everything in it.
+    ///
+    /// The child is killed first and unconditionally, even when it is idle:
+    /// its working directory is about to stop existing, and the lock git
+    /// refuses the removal over names that process. A session with no live
+    /// child is the ordinary case here — this is offered on settle, which is
+    /// something a reader does to finished work.
+    ///
+    /// Ordering is the whole of the method. Disk first, index second: an entry
+    /// relocated before a removal that then failed would describe a session as
+    /// living at the project root while its files sat in a directory nothing
+    /// pointed at any more.
+    pub async fn remove_worktree(&self, session_id: &str) -> Result<SessionIndexItem> {
+        let item = get_session_index_item(session_id)
+            .await?
+            .with_context(|| format!("no session {session_id}"))?;
+
+        if item.worktree_name.is_none() {
+            bail!("that session is not running in a worktree");
+        }
+
+        if let Some(session) = self.sessions.lock().await.remove(session_id) {
+            session.kill().await?;
+        }
+
+        remove_session_worktree(&item).await?;
+
+        relocate_session_to_project(session_id)
+            .await?
+            .with_context(|| format!("no session {session_id}"))
+    }
+
     /// Deletes a session: kills its child if one is running, then drops the
     /// index entry and the log. Returns whether the index held it.
     ///
@@ -614,6 +671,18 @@ impl SessionManager {
         let running = self.sessions.lock().await.remove(session_id);
         if let Some(session) = running {
             session.kill().await?;
+        }
+
+        // Best-effort for the same reason the attachments below are, and with
+        // one cost worth naming: a removal that fails here orphans the tree
+        // with no UI left to retry from, since the row it hung off is about to
+        // go. `git worktree remove` by hand is the recovery. Failing the
+        // delete instead would be worse — the session the user asked to be rid
+        // of would still be there.
+        if let Some(item) = get_session_index_item(session_id).await? {
+            if let Err(e) = remove_session_worktree(&item).await {
+                eprintln!("could not remove worktree for {session_id}: {e}");
+            }
         }
 
         // Best-effort: the images are a convenience for the transcript that is

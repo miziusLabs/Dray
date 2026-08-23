@@ -526,6 +526,46 @@ const setSessionFlags = async (
   }
 };
 
+// Deletes the worktree a session was running in, keeping the session. The
+// backend kills the child, removes the tree and its branch, and relocates the
+// index entry to the project root; the row is replaced from what it returns,
+// for the reason `setSessionFlags` above gives.
+//
+// The relocated item no longer carries a `worktreeName`, which is what retires
+// every control that offers this — the button disappears because the thing it
+// acted on is gone, rather than because anything tracks that it was pressed.
+const removeWorktree = async (sessionId: string): Promise<boolean> => {
+  let updated: SessionIndexItem;
+  try {
+    updated = await invoke<SessionIndexItem>("remove_session_worktree", { sessionId });
+  } catch (e) {
+    setError(String(e));
+    return false;
+  }
+
+  setSessionIndexItems((prev) =>
+    prev.map((i) => (i.sessionId === sessionId ? updated : i)),
+  );
+  // The open transcript holds its own copy of these fields, and `cwd` is the
+  // one that matters: the changes panel and the PR tab both read it, and left
+  // pointing into the deleted tree they would read a directory that is gone.
+  setSessions((prev) =>
+    prev.map((s) =>
+      s.sessionId === sessionId
+        ? { ...s, cwd: updated.cwd, worktreeName: null, branch: null }
+        : s,
+    ),
+  );
+  // A killed child leaves no `session_status`, so the sidebar would sit on
+  // whatever it last saw — `in_progress` for a session that was mid-turn.
+  setStatusBySession((prev) => ({ ...prev, [sessionId]: "idle" }));
+
+  // Reported so the notice card can say "Deleted" and mean it. A failure has
+  // already reached the reader through the error banner, and the card retires
+  // itself rather than claiming something that didn't happen.
+  return true;
+};
+
 // Removes the session everywhere it's held, backend first: the row must not
 // disappear before the disk agrees, or a failed delete leaves the sidebar
 // missing a session that is still there on the next launch.
@@ -1097,6 +1137,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession, removeWorktree};
 
 }
