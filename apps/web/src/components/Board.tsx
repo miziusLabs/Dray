@@ -19,14 +19,16 @@ export function Board({ className }: { className?: string }) {
           the transcript inside it unreadable, so the tile said nothing. Two
           also sidesteps the balancing artefact three has at small counts:
           CSS columns minimises height, so four items across three columns
-          resolves to 2+2+0 and leaves a visibly empty column. */}
-      <div className="columns-1 gap-3 sm:columns-2 sm:gap-4">
+          resolves to 2+2+0 and leaves a visibly empty column. Gap and gutter
+          stay flat at 12px rather than growing with the viewport, matching
+          the page shell's own flat padding. */}
+      <div className="columns-1 gap-3 sm:columns-2">
         {MEDIA.map((item, i) => (
           <div
             key={mediaKey(item)}
             // `bg-card` under everything so a tile occupies its space as a
             // surface while the poster or image decodes, rather than as a hole.
-            className="mb-3 break-inside-avoid overflow-hidden rounded-xl border border-border bg-card sm:mb-4"
+            className="mb-3 break-inside-avoid overflow-hidden rounded-lg border border-border bg-card"
           >
             {item.kind === "video" ? (
               <LazyVideo
@@ -47,9 +49,10 @@ export function Board({ className }: { className?: string }) {
                 // Has to describe the tile, not the viewport, or the
                 // preload `priority` emits picks one srcset candidate and
                 // layout then picks another — the lead image downloads
-                // twice. One column inside `px-4` below 640px, two inside
-                // `px-6` with a 16px gutter above it, capped by the shell.
-                sizes="(max-width: 639px) calc(100vw - 32px), (max-width: 1600px) calc((100vw - 64px) / 2), 768px"
+                // twice. One column inside the shell's flat `px-3` below
+                // 640px, two inside it with a 12px gutter above it, capped
+                // by the shell's own max width.
+                sizes="(max-width: 639px) calc(100vw - 24px), (max-width: 1600px) calc((100vw - 36px) / 2), 782px"
                 className="block h-auto w-full"
               />
             )}

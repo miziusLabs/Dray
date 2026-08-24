@@ -6,6 +6,12 @@ export const REPO = "https://github.com/monorepo-labs/dray";
 /// channel is the updater's, not the download page's.
 export const DOWNLOAD = `${REPO}/releases/latest`;
 
+/// The universal `.dmg`'s size, decimal MB rounded to match Finder's own
+/// "Get Info" — hand-updated per release since the link above deliberately
+/// carries no build-time lookup to compute it from. Check the latest release's
+/// asset list when bumping.
+export const DOWNLOAD_SIZE = "32 MB";
+
 /// Dray drives the CLI; it does not bundle or replace it. Anyone downloading
 /// needs Claude Code installed and signed in first, so the setup page is a
 /// prerequisite rather than a footnote. `docs.claude.com/en/docs/claude-code/*`
