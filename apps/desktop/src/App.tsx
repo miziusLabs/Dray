@@ -695,6 +695,7 @@ function App() {
         queuedMessages={queuedMessages}
         working={working}
         crowded={!collapsed && panelOpen}
+        active={viewTab === "chat"}
       />
       </TabBody>
 
