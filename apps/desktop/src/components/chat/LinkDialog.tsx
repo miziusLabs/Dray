@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { Copy, ExternalLink } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { LinkSafetyModalProps } from "streamdown";
 
@@ -23,23 +22,12 @@ import {
 /// link that works. The route out of the app is `openUrl`, the same one the PR
 /// panel takes, and `onConfirm` is therefore deliberately unused.
 export default function LinkDialog({ url, isOpen, onClose }: LinkSafetyModalProps) {
-  const [copied, setCopied] = useState(false);
-
-  // Reset on open, not on close: Radix keeps `Content` mounted through the
-  // fade, so clearing it on the way out swaps the button back for that frame.
-  useEffect(() => {
-    if (isOpen) setCopied(false);
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!copied) return;
-    const id = window.setTimeout(() => setCopied(false), 2000);
-    return () => window.clearTimeout(id);
-  }, [copied]);
-
+  // Both buttons close, so neither needs a "Copied" state — the dialog going
+  // away is the confirmation, and a card that stays up after being answered
+  // asks the reader to dismiss it twice.
   const copy = async () => {
     await navigator.clipboard.writeText(url);
-    setCopied(true);
+    onClose();
   };
 
   const open = async () => {
@@ -70,8 +58,8 @@ export default function LinkDialog({ url, isOpen, onClose }: LinkSafetyModalProp
             className="text-ui sm:mr-auto"
             onClick={() => void copy()}
           >
-            {copied ? <Check /> : <Copy />}
-            {copied ? "Copied" : "Copy link"}
+            <Copy />
+            Copy link
           </Button>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
