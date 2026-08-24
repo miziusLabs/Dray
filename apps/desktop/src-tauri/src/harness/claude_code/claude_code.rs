@@ -264,6 +264,13 @@ async fn read_stdout(
             *head = crate::git::snapshot_tree(session_cwd).await;
         }
 
+        // Here for the same reason: only the session layer knows which session's
+        // directory the bytes belong in. Before the emit below, so the live
+        // transcript and the replayed one load the same file.
+        if let AgentEventPayload::ToolCallCompleted { ref mut result, .. } = agent_event.payload {
+            crate::attachments::archive_result_images(session_id, &mut result.images).await;
+        }
+
         // Read before the event is moved into the log below. These three are
         // the turn's boundaries in the sense that matters here: each is a point
         // where handing the CLI a held prompt costs nothing. A tool starting or
