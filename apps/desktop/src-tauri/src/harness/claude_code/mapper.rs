@@ -631,9 +631,9 @@ impl Mapper {
                     duration_ms: None,
                     // A `data:` URL, not a path: this is where the bytes are,
                     // and the session layer is where they can be written to
-                    // disk. Anything emitted with one still draws — the
-                    // frontend reads either half of an `ImageRef` — so a failed
-                    // archive costs the log entry, not the picture.
+                    // disk. The URL never survives past the emit — the session
+                    // layer strips it before the retained copies — so a failed
+                    // archive still draws live and costs only the reloaded view.
                     images: content
                         .images()
                         .into_iter()

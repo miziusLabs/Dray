@@ -344,6 +344,18 @@ async fn read_stdout(
             continue;
         }
 
+        // The data: URL a failed archive leaves behind must not reach the
+        // retained copies: it is the whole image as base64, in a log read whole
+        // on every open — the exact cost archiving exists to avoid. Stripped
+        // here rather than in the archiver because the emit above must keep it:
+        // the live transcript draws the picture either way, and only a reload
+        // pays for the failure by showing the row without it.
+        if let AgentEventPayload::ToolCallCompleted { ref mut result, .. } = agent_event.payload {
+            for image in &mut result.images {
+                image.url = None;
+            }
+        }
+
         events.lock().await.push(agent_event.clone());
 
         if let Err(err) = append_session_event(session_id, agent_event).await {
