@@ -5,6 +5,55 @@ The release job reads the matching section into the GitHub release notes and the
 updater carries it, so this file is what a release says about itself — not a
 second description of it. GitHub's generated commit list is appended below it.
 
+## 0.5.2
+
+### Added
+
+- **The sidebar says which work has landed.** A merged PR now marks its row
+  alongside open and draft, so the question the list gets scanned for at the
+  end of a day — what can I settle — no longer means opening every session in
+  turn. A branch whose first PR merged and whose follow-up is open still reads
+  as live work.
+- **CI on the row, in the two places it matters.** A running check takes the
+  timestamp's slot behind the working orb; a failing one turns the PR's own
+  glyph red, because a broken build is a fact about that pull request rather
+  than another thing on the row. Passing draws nothing at all — marking every
+  green branch green a second time makes the mark that does need reading
+  harder to find.
+- **⌘R refreshes whichever panel tab you're reading**, the same action as the
+  button in the tab row.
+
+### Changed
+
+- **The PR tab keeps its place whatever state the PR is in.** Merging one sent
+  it to the end of the row, reshuffling the tabs under the cursor at the moment
+  you were looking at what you'd just done. The pane opening itself on a new PR
+  now selects that tab too, instead of landing on Changes.
+- **The PR buttons stay hidden on a branch holding nothing new.** Level with
+  its base and a clean tree means the button opens a pull request with no diff
+  in it.
+- **Red is for failures worth acting on.** A group header no longer reds
+  because one call inside it failed — the failing row says so itself once
+  expanded. Across ten sessions of logs, 38 of 45 failed `Bash` calls were the
+  agent probing and missing: a guessed path, a glob, a binary check. Red on
+  every one made red the transcript's resting state.
+- **The worktree card shows itself deleting.** Unlocking, removing and deleting
+  the branch run for seconds, and a dead button through all of it read as a
+  click that missed.
+
+### Fixed
+
+- **The PR tab looked up the wrong branch and hid itself.** It rebuilt the name
+  from a guess made when the session was created, so a `git checkout` inside a
+  worktree left it asking GitHub about a branch holding no PR — an empty
+  answer, a hidden tab, and nothing said. It reads the branch git reports now.
+- **Deleting a worktree took the PR tab with it.** The session's branch was
+  cleared alongside the tree, dropping the only record of where its pull
+  request lives — exactly when the reader was settling the work.
+- **A second edit to the same file could crash the diff.** Highlighted lines
+  were cached under the file's name alone, so a longer diff reused the first
+  one's and walked off the end mid-render.
+
 ## 0.5.1
 
 ### Added
