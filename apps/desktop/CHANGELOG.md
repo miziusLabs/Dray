@@ -5,6 +5,32 @@ The release job reads the matching section into the GitHub release notes and the
 updater carries it, so this file is what a release says about itself — not a
 second description of it. GitHub's generated commit list is appended below it.
 
+## 0.5.3
+
+### Added
+
+- **A pull request turning ready to merge says so.** CI reports with nobody
+  watching, and the panel's own line going from "Checks not passing" to "Ready
+  to merge" is a silent two-word swap you'd only catch by looking. The notice
+  is raised whatever you're doing, and only on the transition — a PR already
+  ready when the app opens is recorded in silence rather than opening a card
+  per landed branch at every launch.
+
+### Fixed
+
+- **Worktree sessions kept their first-prompt title.** Title generation ran in
+  the session's own directory, which for a worktree the CLI only creates after
+  launch — so the spawn failed into stderr and the fallback stood. Every
+  worktree session on disk had one.
+- **Deleting a worktree still cost the PR tab.** The session moves to the
+  project root when its tree goes, and git's HEAD there is whatever that shared
+  checkout is on — usually `main` — so the tab looked the PR up by the wrong
+  branch, got nothing back, and hid itself. Sessions settled before this
+  release get their tab back on startup.
+- **A merge state GitHub hadn't worked out yet read as ready.** It put a merge
+  button under a pull request that couldn't take one, and would now have
+  sounded a notification for it too.
+
 ## 0.5.2
 
 ### Added
