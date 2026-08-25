@@ -10,6 +10,26 @@ import type { MergeMethod, PrUnavailable, PullRequest } from "@/types/events";
 /// reader's eyes; a settled PR is never polled at all.
 const SETTLING_POLL_MS = 15_000;
 
+/// How often to re-ask about an open pull request with nothing visibly moving.
+///
+/// A check that has not *registered* yet is indistinguishable from no CI at
+/// all: the rollup is empty either way, so `isSettling` reads false and the
+/// faster poll above never starts. That is the common case for a PR the app
+/// just opened — GitHub takes a few seconds to a minute to attach the first
+/// run — and it left the panel showing "no checks" until the reader hit refresh
+/// by hand.
+///
+/// So an open PR is polled whatever its rollup says, just more slowly, and the
+/// first check to appear promotes it to the settling rate. Same reasoning
+/// [usePrMarks](./usePrMarks.ts) gates its own poll on "any open PR" rather than
+/// on "any check running": the tighter read has nothing to watch during exactly
+/// the window that needs watching.
+///
+/// Still gated on `active`, so this only runs while the PR tab is the one being
+/// looked at. A settled PR costs one `gh` a minute for as long as it is on
+/// screen, which is the price of not making the reader ask twice.
+const OPEN_POLL_MS = 60_000;
+
 /// How long a fetched answer counts as fresh. Switching tabs or sessions and
 /// coming back inside this window paints from the cache without a round trip —
 /// `gh` costs the better part of a second, which reads as the panel reloading
@@ -92,6 +112,12 @@ export function usePullRequest(
   /// the app onto a session that already has a PR is not an appearance and
   /// raises nothing.
   onOpened?: () => void,
+  /// Called after a write here succeeds. A merge, a reopen or a ready-for-review
+  /// changes what every *other* view of this branch should say, and the sidebar
+  /// mark is the one that would otherwise sit wrong the longest — it reads from
+  /// its own per-repo cache with a two-minute window. This hook refetches its
+  /// own list either way; the callback is for the readers it doesn't own.
+  onChanged?: () => void,
 ) {
   const key = branch ? keyOf(cwd, branch) : null;
 
@@ -109,6 +135,9 @@ export function usePullRequest(
 
   const onOpenedRef = useRef(onOpened);
   onOpenedRef.current = onOpened;
+
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
 
   /// Every write to `state` goes through this.
   ///
@@ -180,16 +209,22 @@ export function usePullRequest(
     if (active) void load(false);
   }, [active, load]);
 
-  // Only while something can still change by itself — see `isSettling`. Watches
-  // the whole list, not one row: a check on a PR further down the list is still
-  // a check the reader is waiting on.
+  // Two rates, and which one applies is the whole of this. An open PR is always
+  // worth re-asking about — a check can still arrive, someone can still comment
+  // — and `isSettling` only says whether something is *visibly* in flight, so it
+  // picks the speed rather than gating the poll. Gating on it left a fresh PR
+  // whose checks had not registered yet polling zero times.
+  //
+  // Both watch the whole list, not one row: a check on a PR further down it is
+  // still a check the reader is waiting on.
   const settling = state.prs.some(isSettling);
+  const anyOpen = state.prs.some(isOpen);
   useEffect(() => {
-    if (!active || !settling) return;
+    if (!active || !anyOpen) return;
 
-    const id = setInterval(() => void load(true), SETTLING_POLL_MS);
+    const id = setInterval(() => void load(true), settling ? SETTLING_POLL_MS : OPEN_POLL_MS);
     return () => clearInterval(id);
-  }, [active, settling, load]);
+  }, [active, anyOpen, settling, load]);
 
   /// Runs a write against `number` and refetches.
   ///
@@ -216,6 +251,10 @@ export function usePullRequest(
           await invoke(command, { cwd, number });
         }
         commit(k, (prev) => ({ ...prev, error: null }));
+        // Not key-guarded, and that is the difference from every other write
+        // here: this one refreshes a *repo-wide* read that is true of the
+        // branch whether or not the reader is still looking at it.
+        onChangedRef.current?.();
       } catch (e) {
         commit(k, (prev) => ({ ...prev, error: asUnavailable(e) }));
       } finally {

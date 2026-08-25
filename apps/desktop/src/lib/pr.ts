@@ -1,4 +1,4 @@
-import type { PrCheck, PullRequest } from "@/types/events";
+import type { PrCheck, PrMark, PullRequest } from "@/types/events";
 
 /// The branch a session's work lands on, for the PR lookup and the header.
 ///
@@ -28,6 +28,30 @@ export function sessionBranch(
 ): string | null {
   if (observed) return observed;
   return session.worktreeName ? `worktree-${session.worktreeName}` : session.branch;
+}
+
+/// Which pull request a sidebar row draws, out of every one on its branch.
+///
+/// One branch can carry several — the same fix opened against `main` and a
+/// release branch, or a follow-up opened after the first one landed — and the
+/// row has space for exactly one glyph. Live work outranks a record: an open PR
+/// wins over a merged one however recently that merged, because the mark's job
+/// is "what is there to do here", and a draft beats a merged one for the same
+/// reason. Only where *nothing* is open does the row say merged, which is
+/// precisely when that is the useful thing to say: the work landed and the
+/// session can be settled.
+///
+/// Ties inside a rank go to the first, and the backend hands both halves back
+/// ordered by most recently updated — so a branch with two open PRs marks
+/// itself from the one being worked on.
+export function pickPrMark(prs: PrMark[]): PrMark | undefined {
+  const rank = (pr: PrMark) => (pr.state !== "OPEN" ? 2 : pr.isDraft ? 1 : 0);
+
+  let best: PrMark | undefined;
+  for (const pr of prs) {
+    if (!best || rank(pr) < rank(best)) best = pr;
+  }
+  return best;
 }
 
 /// What the tab's badge says, or nothing.
@@ -132,9 +156,14 @@ export function summarizeChecks(checks: PrCheck[]): CheckSummary {
   return summary;
 }
 
-/// True while something could still change on its own. The panel's poll hangs
-/// off this — a PR whose checks have all reported is not going to move under
-/// the reader's eyes, so nothing needs to keep asking.
+/// True while something is *visibly* in flight — a check still running, a
+/// mergeability GitHub has not worked out yet.
+///
+/// This picks the panel's poll *rate*, not whether it polls at all. It used to
+/// gate the poll outright, and that was wrong in the one window that mattered:
+/// a check which has not registered yet leaves the rollup empty, exactly like a
+/// repo with no CI, so a PR the app had just opened read as settled and never
+/// re-asked. See `OPEN_POLL_MS`.
 export function isSettling(pr: PullRequest | null): boolean {
   if (!pr || pr.state !== "OPEN") return false;
   return pr.mergeable === "UNKNOWN" || pr.checks.some((c) => c.state === "pending");
