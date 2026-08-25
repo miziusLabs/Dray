@@ -4,9 +4,13 @@ import CommitMessage from "@/components/changes/CommitMessage";
 import DiffPane from "@/components/changes/DiffPane";
 import FileList from "@/components/changes/FileList";
 import HistoryList from "@/components/changes/HistoryList";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useChanges } from "@/hooks/useChanges";
+import { useHotkey } from "@/hooks/useHotkey";
 import { useCommitLog, useHeadTree } from "@/hooks/useRepo";
 import { commitBase } from "@/lib/commit";
+import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import type { ChangedFile, Commit } from "@/types/events";
 
@@ -49,6 +53,24 @@ export default function ChangesView({
   revision: string;
 }) {
   const [subTab, setSubTab] = useState<SubTab>("uncommitted");
+
+  // ⌘⇧← / ⌘⇧→ step this row, the same shape ⌘⇧↑/↓ steps the session list — the
+  // arrow points at the tab, so a third sub-tab needs no third binding. Not
+  // ⌘1/⌘2, which the view row above already spends, and not ⌘⇧[ /], which
+  // belongs to the right panel and would mean two different rows at once.
+  //
+  // Clamped rather than wrapped: with two entries wrapping makes both chords do
+  // the same thing, so pressing ← twice would land on History.
+  //
+  // Registered only while this view is showing. It stays mounted when it isn't,
+  // and `useHotkey` claims every chord it matches, so leaving it bound would
+  // take ⌘⇧← from the composer, where it selects to the start of the line.
+  const stepSubTab = (delta: number) => {
+    const next = SUB_TABS[SUB_TABS.findIndex((t) => t.value === subTab) + delta];
+    if (next) setSubTab(next.value);
+  };
+  useHotkey("ArrowLeft", () => stepSubTab(-1), { shift: true, enabled: active });
+  useHotkey("ArrowRight", () => stepSubTab(1), { shift: true, enabled: active });
   const [commit, setCommit] = useState<Commit | null>(null);
   const [workingPath, setWorkingPath] = useState<string | null>(null);
   const [commitPath, setCommitPath] = useState<string | null>(null);
@@ -112,23 +134,35 @@ export default function ChangesView({
             a list under them rather than a panel body: the button's own `px-2`
             lands its label at 12px, level with the filenames below it. */}
         <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-1">
-          {SUB_TABS.map(({ value, label }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setSubTab(value)}
-              className={cn(
-                "rounded-md px-2 py-1 text-ui transition-colors",
-                subTab === value
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {label}
-              {value === "uncommitted" && workingFiles.length > 0 && (
-                <span className="ml-1 text-muted-foreground">{workingFiles.length}</span>
-              )}
-            </button>
+          {SUB_TABS.map(({ value, label }, i) => (
+            <Tooltip key={value}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setSubTab(value)}
+                  className={cn(
+                    "rounded-md px-2 py-1 text-ui transition-colors",
+                    subTab === value
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {label}
+                  {value === "uncommitted" && workingFiles.length > 0 && (
+                    <span className="ml-1 text-muted-foreground">{workingFiles.length}</span>
+                  )}
+                </button>
+              </TooltipTrigger>
+              {/* Keycaps alone, like the view row above: the name is already on
+                  the button, and the arrow is which side of the row it sits on. */}
+              <TooltipContent side="bottom" className="px-1.5">
+                <KbdGroup>
+                  <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+                  <Kbd>⇧</Kbd>
+                  <Kbd>{i === 0 ? "←" : "→"}</Kbd>
+                </KbdGroup>
+              </TooltipContent>
+            </Tooltip>
           ))}
         </div>
 

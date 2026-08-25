@@ -12,6 +12,12 @@ type HotkeyOptions = {
   /// silently never firing, and matching position alone would put the chord
   /// under a different glyph on every non-US layout, so this takes both.
   code?: string;
+  /// False unregisters the listener outright rather than making the handler a
+  /// no-op. The difference is `preventDefault`: this claims every chord it
+  /// matches, so a binding left registered while its view is hidden would eat
+  /// the key from whatever *is* on screen — ⌘⇧← is select-to-line-start in the
+  /// composer.
+  enabled?: boolean;
 };
 
 /// Binds a document-level shortcut. The handler is held in a ref so passing a
@@ -19,12 +25,13 @@ type HotkeyOptions = {
 export function useHotkey(
   key: string,
   handler: () => void,
-  { meta = true, shift = false, alt = false, code }: HotkeyOptions = {},
+  { meta = true, shift = false, alt = false, code, enabled = true }: HotkeyOptions = {},
 ) {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
 
   useEffect(() => {
+    if (!enabled) return;
     const onKeyDown = (e: KeyboardEvent) => {
       // `code` is only consulted for an Option chord, and only for a letter.
       // macOS applies the Option layout to `key` — ⌥O can arrive as "ø" — so a
@@ -53,5 +60,5 @@ export function useHotkey(
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [key, meta, shift, alt, code]);
+  }, [key, meta, shift, alt, code, enabled]);
 }
