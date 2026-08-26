@@ -139,38 +139,35 @@ export default function ComposerToolbar({
           />
 
           {/* Both describe a repo, so neither means anything until one is
-              picked — and a worktree has nothing to fork from. */}
+              picked. The branch selector stays visible when worktree mode is
+              enabled so it continues to show the worktree's source branch. */}
           {projectPath && (
             <>
               <WorktreeToggle on={useWorktree} onToggle={onToggleWorktree} />
 
-              {/* A worktree forks from the remote's default branch no matter
-                  what is checked out, so offering a branch here would promise
-                  something the CLI doesn't honour. State the real base instead. */}
-              {useWorktree ? (
-                branches?.defaultBase && (
-                  <span className="truncate px-1.5 text-ui text-muted-foreground/60">
-                    from {branches.defaultBase}
-                  </span>
-                )
-              ) : (
-                // Relative, so the switch popover anchors to the picker rather
-                // than to the window.
-                <div className="relative flex min-w-0 items-center">
-                  <BranchSelector
-                    branches={branches}
-                    value={branch}
-                    onSelect={onSelectBranch}
-                    disabled={pendingBranch !== null}
-                  />
-                  <BranchSwitchDialog
-                    target={pendingBranch}
-                    dirty={branches?.dirty ?? 0}
-                    onConfirm={onConfirmBranchSwitch}
-                    onCancel={onCancelBranchSwitch}
-                  />
-                </div>
-              )}
+              {/* Relative, so the switch popover anchors to the picker rather
+                  than to the window. Keeping the label inside this stable
+                  wrapper prevents the selector from being remounted when the
+                  worktree mode changes. */}
+              <div className="relative flex min-w-0 items-center">
+                {useWorktree && (
+                  <span className="text-ui text-muted-foreground/60">from</span>
+                )}
+                <BranchSelector
+                  key="branch-selector"
+                  branches={branches}
+                  value={branch}
+                  onSelect={onSelectBranch}
+                  disabled={pendingBranch !== null}
+                />
+                <BranchSwitchDialog
+                  key="branch-switch-dialog"
+                  target={pendingBranch}
+                  dirty={branches?.dirty ?? 0}
+                  onConfirm={onConfirmBranchSwitch}
+                  onCancel={onCancelBranchSwitch}
+                />
+              </div>
             </>
           )}
         </>
