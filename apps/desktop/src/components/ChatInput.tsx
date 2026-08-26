@@ -563,8 +563,7 @@ export default function ChatInput({
           ref={cardRef}
           className={cn(
             "relative rounded-2xl transition-colors",
-            !isNewTask &&
-              "border border-[oklch(1_0_0/6%)] bg-composer focus-within:border-[oklch(1_0_0/8%)]",
+            !isNewTask && "bg-composer shadow-sm",
           )}
         >
           {/* Two separate consequences of the empty state, passed separately
@@ -617,11 +616,9 @@ export default function ChatInput({
             </div>
           )}
 
-          {/* Both buttons sit on the last line. At one line that reads as
-              centered anyway, because the textarea's vertical padding below is
-              tuned to match the buttons' own height — no `self-center` needed,
-              and nothing drifts as the box grows. */}
-          <div className={cn("flex items-end gap-1 py-2", isNewTask ? "px-0" : "px-3")}>
+          {/* Keep the send control centered against the input row, including
+              after the bar's vertical padding changes. */}
+          <div className={cn("flex items-center gap-1 py-2", isNewTask ? "px-0" : "px-3")}>
             <div className="relative min-w-0 flex-1">
               <textarea
                 ref={textareaRef}
