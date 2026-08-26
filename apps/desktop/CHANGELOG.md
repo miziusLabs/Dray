@@ -5,6 +5,20 @@ The release job reads the matching section into the GitHub release notes and the
 updater carries it, so this file is what a release says about itself — not a
 second description of it. GitHub's generated commit list is appended below it.
 
+## 0.7.3
+
+### Fixed
+
+- **The sidebar mark and the PR panel no longer disagree.** They read GitHub
+  separately — one per repo, one per branch — with nothing joining them, so a
+  "Ready to merge" notice could land on a panel still saying checks were not
+  passing, or the panel went green beside a row still spinning. Each read now
+  tells the other when something changed, and a panel-triggered read stays
+  quiet so the two cannot keep asking `gh` on each other's behalf.
+- **A stale answer can no longer overwrite a newer one.** Reads are sequenced
+  per branch, so a slow reply landing last stops winning, and two pull requests
+  on one branch are now picked the same way in both places.
+
 ## 0.7.2
 
 ### Added
