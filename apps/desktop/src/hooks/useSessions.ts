@@ -498,6 +498,27 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
 // replaced from what the store returned rather than from the value we sent —
 // the index is authoritative, and a failed write must not leave the sidebar
 // showing a state the disk doesn't have.
+/// Cuts a spawned session loose from its parent, so the sidebar stops nesting
+/// it under a row it no longer belongs to.
+///
+/// The row is replaced from what the backend returned rather than from a local
+/// edit, for `setSessionFlags`' reason: the index is authoritative, and a
+/// failed write must not leave the sidebar drawing a state the disk doesn't
+/// have. Nothing re-parents — detaching is one-way.
+const detachSession = async (sessionId: string) => {
+  try {
+    const updated = await invoke<SessionIndexItem | null>("detach_session", {
+      sessionId,
+    });
+    if (!updated) return;
+    setSessionIndexItems((prev) =>
+      prev.map((i) => (i.sessionId === sessionId ? updated : i)),
+    );
+  } catch (e) {
+    setError(String(e));
+  }
+};
+
 const setSessionFlags = async (
   sessionId: string,
   flags: { archived?: boolean; pinned?: boolean },
@@ -903,6 +924,12 @@ sessionIndexItemsRef.current = sessionIndexItems;
 const statusBySessionRef = useRef(statusBySession);
 statusBySessionRef.current = statusBySession;
 
+// And again for the archived split: `session_created` is registered once, so
+// without this it would judge every arriving session against whichever view was
+// open at mount.
+const showArchivedRef = useRef(showArchived);
+showArchivedRef.current = showArchived;
+
 // `completed` means finished *and unread*. Reading is what retires it, so every
 // path to a read funnels through here: the status landing on the session already
 // on screen, the user clicking a finished one in the sidebar, and coming back to
@@ -1032,6 +1059,38 @@ useEffect(() => {
 // it to the index itself, so this only mirrors what's already on disk. Its own
 // listener rather than a branch in `agent_event`: nothing here came from the
 // agent, and it must not land in the session's event list.
+// A session created by something other than the composer — an agent calling the
+// `dray` CLI, which reaches the backend over its own socket. The row has to
+// appear without a refetch, the way a composer-created one does.
+//
+// The index item alone, never a `SessionSnapshot`: `agent_event` writes into
+// sessions this hook already holds and drops events for ids it doesn't, so a
+// snapshot here would start a transcript in memory that later events could miss.
+// Left as an index item, `handleSelectSessionIndexItem` loads it whole from disk
+// on first open — and `session_status` and `session_title` still land, since
+// both write by id into maps the sidebar reads rather than into `sessions`.
+//
+// Deliberately not selected. The user is mid-conversation in the session that
+// spawned this one; yanking them out of it is the opposite of what fanning work
+// out is for.
+useEffect(() => {
+  const listenerPromise = listen<SessionIndexItem>("session_created", (event) => {
+    const item = event.payload;
+    // A new session is never archived, so it belongs to the active list only.
+    if (showArchivedRef.current) return;
+
+    setSessionIndexItems((prev) =>
+      prev.some((i) => i.sessionId === item.sessionId)
+        ? prev.map((i) => (i.sessionId === item.sessionId ? item : i))
+        : [...prev, item],
+    );
+  });
+
+  return () => {
+    listenerPromise.then((unlisten) => unlisten());
+  };
+}, []);
+
 useEffect(() => {
   const listenerPromise = listen<SessionTitleEvent>("session_title", (event) => {
     const { sessionId, title } = event.payload;
@@ -1154,6 +1213,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, deleteSession, removeWorktree};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, detachSession, deleteSession, removeWorktree};
 
 }
