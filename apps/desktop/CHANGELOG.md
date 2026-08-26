@@ -5,6 +5,33 @@ The release job reads the matching section into the GitHub release notes and the
 updater carries it, so this file is what a release says about itself — not a
 second description of it. GitHub's generated commit list is appended below it.
 
+## 0.7.2
+
+### Added
+
+- **A settings dialog, and analytics behind a switch in it.** Dray now reports
+  one event — `app_started`, carrying no properties — so there is a count of
+  how many people run it. Nothing about your sessions, prompts, repositories or
+  files is collected, and there is no second event.
+
+  **It is on by default.** Turn it off in Settings, or set `DRAY_NO_ANALYTICS`
+  in the environment, which wins over the stored setting in one direction: it
+  can switch reporting off, never on.
+
+### Fixed
+
+- **A dev build no longer steals the installed app's socket.** They share one
+  file, so running `pnpm tauri dev` took the channel over — every `dray` call
+  reached the dev app while the installed app's own agents wrote into a socket
+  nobody was listening on. Each build now has its own.
+- **Project groups follow the project list's order**, not the recency of the
+  sessions inside them. Replying to any session used to lift its whole project
+  above the others, moving a heading under your eye mid-turn.
+- **A relayed message no longer shows its plumbing.** The
+  `[message from the Dray session …]` prefix is what tells the receiving agent
+  who sent it, but it was drawn in the bubble too — the avatar above already
+  says that.
+
 ## 0.7.1
 
 ### Changed
