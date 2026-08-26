@@ -723,6 +723,44 @@ Asymmetry = point: appending to private file atomic, rewriting shared one not.
 
 **Except when user ask.** App menu's "Check for Updates…" = question, so it answered either way — "Up to date" and "Couldn't check" both drawn, both retire themselves after 4s. Difference = who asked: scheduled check say nothing because nobody asked it, hand-triggered one leave menu item looking broken if it do same. Menu item **emit to frontend** rather than check in Rust, because channel live in frontend's local storage — emitting also mean manual check reuse scheduled path, in-flight guard included. Verdict read off `check_update` resolving with no `update_status` having arrived: command emit nothing when nothing newer, so absence = whole of signal. Still nothing while sidebar collapsed, so manual check there answer into void — real gap, see _Known issues_.
 
+## Settings
+
+**One dialog, one row so far** ([SettingsDialog.tsx](apps/desktop/src/components/SettingsDialog.tsx)). Gear in sidebar's titlebar strip, ⌘, from anywhere, and analytics opt-out = only thing in it.
+
+**Mounted in `App`, not beside gear that open it.** Sidebar unmount whole when collapsed, so dialog living there take ⌘, with it — and that chord = one route into settings that survive collapsed sidebar. Open state not persisted: settings opened to change something and closed again, so reopening app into them = app remembering wrong half of session.
+
+**Gear share titlebar strip with sidebar toggle, and order swap in fullscreen.** Strip `justify-end` normally (clearing traffic lights), `justify-start` in fullscreen (they gone). Toggle also drawn in app header when sidebar collapsed, so it must hold strip's outer edge in both layouts and never change which end it at; gear have no second home and move instead.
+
+**Row shape = `SettingRow`**, label and reason left, control right. Two rules it encode: description **not optional** — it where "why is this off by default" live — and setting that cannot apply on this platform **disabled, not hidden**, since row that vanish read as setting app forgot and sentence under it = only place reason can be said.
+
+**Analytics row = two sentence: what it for, what it never touch.** Second one = row's whole job. "Analytics" read as behavioural tracking to most people, and for tool that watch you work on own code, saying plainly conversation and activity not collected = part worth space. Deliberately **not** itemised — listing every field read as something to be wary of rather than something to skim, which why row don't name ping, version or OS one by one.
+
+**`Dialog` = `alert-dialog`'s frame exactly, `showClose` the one difference.** To reader two are same object and differ only in whether app asking question or reader opened something — alert answered by own buttons so carry no dismiss, dialog dismissed rather than answered, and Escape alone = way out only for people who already know it there. `--popover` not `--card`: under vibrancy `--card` become 5.5% white veil, right for surface sitting *in* page and wrong for one floating over it.
+
+## Analytics
+
+**One event, `app_started`, and that whole of it** ([analytics.rs](apps/desktop/src-tauri/src/analytics.rs)). Hosted Aptabase over `tauri-plugin-aptabase`. Question it answer = how many people run Dray, on what version, on what OS — and plugin stamp `appVersion`, `osName`, `osVersion`, `locale`, `engineVersion` and `isDebug` on every event itself, so call site carry no props. Nothing about what reader *do* in app measured, deliberately.
+
+**No persistent identifier sent, and that shape not accident.** Client mint session id rolling over after four idle hours and write nothing to disk. So this count **launches, not people**: actives and version adoption answerable, retention cohort not. That Aptabase's own trade, and why no install id sit in `~/.dray` beside it — second id would answer question this deliberately don't.
+
+**Empty key = inert plugin, and that ordinary state not failure.** `APP_KEY` come from `option_env!("APTABASE_KEY")`, so unconfigured checkout and every local build compile with none, and client's `is_enabled` drop event before it reach queue. Plugin still **registered** either way: `track` stay ordinary call rather than `Option` every call site unwrap, and managed state its trait reach for only exist once plugin do. `build.rs` declare `rerun-if-env-changed` for it — `option_env!` resolve at compile time, so key exported after first build bake in as absent until something else force rebuild. Key itself write-only and meant to ship in binary; release workflow pass it as secret so local build stay silent.
+
+**`app_exited` deliberately absent.** It buy session duration and nothing else, and it cannot be had free: Tauri dispatch plugin `on_event` **before** app's own `run` callback (`on_event_loop_event` in tauri's `app.rs` end by calling plugin store, then caller invoke callback), so plugin's flush-on-exit already run by time anything in that callback enqueue. Sending it therefore mean second `flush_events_blocking` on quit path — `futures::executor::block_on` around request with **10s** timeout, on main thread, after window gone. Duration figure not worth putting that in front of quit.
+
+**Flush interval 15s, against plugin's own 60s default.** Longer than good many launches — open Dray, look at running session, quit — and those run would then report only through blocking flush on exit. Free when queue empty: poll return without request.
+
+**Opt-out live in one `AtomicBool`, because plugin cannot answer it.** Plugin decide enablement once, at `build` time, from key alone, so switch reader flip mid-run reach nothing — hence `ENABLED` here and `set_enabled` beside it, which settings command call so toggle need no restart.
+
+**Persisted answer live in `~/.dray/settings.json`, not local storage, and timing = whole reason** ([settings.rs](apps/desktop/src-tauri/src/settings.rs)). `app_started` send from `setup`, before webview exist — so pref kept where `ade.diffStyle` and every other pick live could not be consulted until after one event it govern already gone. **Anything frontend can read for itself belong there, not here**, or this become second settings store free to disagree with first.
+
+**Read and track folded into one `analytics::start`.** Ordering = point: `track` must not run before persisted answer in hand. Spawned inside `setup` rather than blocking it, since nothing on screen wait on it. `DRAY_NO_ANALYTICS` win one direction only — it turn reporting off, cannot turn it on over stored `false`.
+
+**Read fail *closed*, and missing file not same case as broken one.** Missing or empty = fresh install, read as default (opted in). Anything else — unparseable JSON, unreadable file, no home dir — read as opted **out**, because file that exist and can't be understood far likelier belong to someone who turned this off than someone who never touched it. Never error either way: this sit on launch path, so hand-edited file must not stop app starting. Pinned by test, and the direction is the test worth having.
+
+**`ENABLED` start `false`, not `true`.** `analytics::start` spawned, so window exist at launch where consent not yet read; anything reaching `track` inside it would report for someone who may have opted out. Nothing do today — `start` own only call — but second call site = exactly change that wouldn't think to check.
+
+**Dialog draw *effective* state, not stored one.** `get_settings` answer off `analytics::enabled()`, and `SettingsView` carry `analytics_locked` beside it. Two differ whenever `DRAY_NO_ANALYTICS` set, and switch drawn from file there sit at `on` while nothing being sent — so row disable itself and name env var instead. `env_opt_out()` read in one place for that reason: two site reading same variable = how flag and switch drawn from it drift apart.
+
 ## Notifications
 
 Three events hand session back to reader — it finished, it want permission, it asked question — and each announce itself on **exactly one channel**, chosen by where reader is. `announce` in [useSessions](apps/desktop/src/hooks/useSessions.ts) = that split, written once and shared, so no event end up on two channels:

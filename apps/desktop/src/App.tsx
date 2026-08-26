@@ -10,6 +10,7 @@ import ChatInput from "@/components/ChatInput";
 import DiffWorkerPool from "@/components/DiffWorkerPool";
 import NoticeStack from "@/components/NoticeStack";
 import QuitDialog from "@/components/QuitDialog";
+import SettingsDialog from "@/components/SettingsDialog";
 import WorktreeDialog, { type WorktreePrompt } from "@/components/WorktreeDialog";
 import PrPanel from "@/components/PrPanel";
 import { useChanges } from "@/hooks/useChanges";
@@ -137,6 +138,11 @@ function App() {
   // standing preference, and reopening the app onto a repo view for every
   // session would be wrong more often than right.
   const [viewTabs, setViewTabs] = useState<Record<string, ViewTab>>({});
+
+  // Not persisted: settings are opened to change something and closed again, so
+  // reopening the app into them would be the app remembering the wrong half of
+  // a session.
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [worktreePrompt, setWorktreePrompt] = useState<WorktreePrompt | null>(null);
 
@@ -515,6 +521,11 @@ function App() {
   // No-ops without a session, where there is no row to switch.
   useHotkey("1", () => setViewTab("chat"));
   useHotkey("2", () => setViewTab("changes"));
+  // ⌘, — every macOS app's preferences chord, and the only way into settings
+  // while the sidebar is collapsed and its gear gone with it. Safe to take for
+  // `useHotkey`'s usual pair of reasons: it claims the chord, and the app's
+  // custom menu carries no Settings item to swallow the key first.
+  useHotkey(",", () => setSettingsOpen(true));
   // No accelerator: Shift+Tab on its own. The CLI spends this chord on
   // permission mode, which in practice gets set once and left; effort is the
   // dial actually reached for mid-work, so it takes the cheapest key here.
@@ -554,6 +565,7 @@ function App() {
           selectedSessionId={selectedSessionId}
           collapsed={collapsed}
           onToggleCollapsed={toggleSidebar}
+          onOpenSettings={() => setSettingsOpen(true)}
           onSelect={handleSelectSessionIndexItem}
           onNewSession={handleNewSession}
           onDetach={detachSession}
@@ -801,6 +813,9 @@ function App() {
       onDeleteWorktree={(id) => removeWorktree(id)}
     />
     <QuitDialog />
+    {/* Mounted here rather than in the sidebar, which unmounts whole when it
+        collapses and would take ⌘, with it. */}
+    <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     <WorktreeDialog
       prompt={worktreePrompt}
       onConfirm={(sessionId) => removeWorktree(sessionId)}
