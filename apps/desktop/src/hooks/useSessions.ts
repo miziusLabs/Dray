@@ -17,11 +17,11 @@ import { AgentEvent, ApprovalPolicy, BackgroundTask, BranchList, Effort, Harness
 
 // Only for a session indexed before the model was recorded, which reads back as
 // "unknown". Everything else seeds from the user's stored prefs.
-const DEFAULT_MODEL: ModelId = "haiku";
+const DEFAULT_MODEL: ModelId = "pi";
 const DEFAULT_EFFORT: Effort = "high";
 
 /// A stretch where the agent is busy and the transcript has nothing to show —
-/// a request in flight, or a thinking block, which Claude Code streams as an
+/// a request in flight, or a thinking block, which Pi streams as an
 /// *empty* string with only a token estimate and so renders nothing at all from
 /// open to commit.
 ///
@@ -450,14 +450,8 @@ const handleNewSession = () => {
   selectionRequestRef.current = null;
   setSelectedSessionId(null);
   setHarnessState(prefs.harness);
-  setModelId(
-    prefs.harness === "pi"
-      ? "pi"
-      : prefs.modelId === "pi"
-        ? "haiku"
-        : prefs.modelId,
-  );
-  setPiModel(prefs.harness === "pi" ? prefs.piModel : null);
+  setModelId("pi");
+  setPiModel(prefs.piModel);
   setEffortByModel(prefs.effortByModel);
   setPermissionModeState(prefs.permissionMode);
   setUseWorktreeState(prefs.useWorktree);

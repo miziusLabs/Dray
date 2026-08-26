@@ -53,10 +53,10 @@ export default defineConfig(async () => ({
   worker: { format: "es" as const },
 
   test: {
-    // `.claude/worktrees` holds live agent worktrees — full checkouts of this
+    // `.dray/worktrees` holds live agent worktrees — full checkouts of this
     // repo. Their test files resolve `@` against *this* tree's src, so a stale
     // copy fails against code it was never written for.
-    exclude: [...configDefaults.exclude, "**/.claude/**"],
+    exclude: [...configDefaults.exclude, "**/.dray/**"],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

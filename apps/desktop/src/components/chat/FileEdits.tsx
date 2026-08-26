@@ -15,8 +15,8 @@ function diffLineClass(line: string): string {
   return "text-muted-foreground";
 }
 
-/// Codex reports edits first-class; Claude Code does not, so its edits arrive as
-/// ordinary `file_edit` tool calls and this renders only for Codex sessions.
+/// Pi reports edits first-class; Pi does not, so its edits arrive as
+/// ordinary `file_edit` tool calls and this renders only for Pi sessions.
 export default function FileEdits({ edits }: { edits: FileEdit[] }) {
   if (!edits.length) return null;
 

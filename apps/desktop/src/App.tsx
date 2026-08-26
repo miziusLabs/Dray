@@ -142,7 +142,7 @@ function App() {
   const [worktreePrompt, setWorktreePrompt] = useState<WorktreePrompt | null>(null);
 
   // Reads what the removal would cost *before* deciding whether to ask, so a
-  // worktree that isn't there any more — deleted by hand, or by a `claude` run
+  // worktree that isn't there any more — deleted by hand, or by a `Pi` run
   // that had an exit prompt of its own — is tidied up silently. Asking about a
   // directory the reader can no longer see is a question with one answer.
   //

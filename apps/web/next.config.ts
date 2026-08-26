@@ -12,8 +12,8 @@ const config: NextConfig = {
   // `http://localhost` is, so this is not a dev-only quirk. Sending no referer
   // at all is allowed, and is the only lever a third-party page has: `<video>`
   // takes no `referrerpolicy` attribute, so the policy has to be the whole
-  // document's. It costs nothing here — the outbound links are GitHub and the
-  // Claude docs, and inbound attribution is set by the sending site, not by us.
+  // document's. It costs nothing here — the outbound links are GitHub and Pi,
+  // and inbound attribution is set by the sending site, not by us.
   // If X ever starts requiring a positive x.com referer this stops working and
   // the cards fall back to poster plus "Watch on X", which is where they were.
   async headers() {

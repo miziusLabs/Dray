@@ -57,7 +57,7 @@ describe("filterCommands", () => {
     command("railway:deploy", "Deploy to Railway"),
     command("usage", "Show plan limits"),
     command("cost", "Token usage for this session"),
-    command("model", "Set the AI model for Claude Code"),
+    command("model", "Set the AI model for Pi"),
   ];
 
   /// Stable sort plus an all-equal score means the CLI's own ordering survives,
@@ -110,7 +110,7 @@ describe("commandSource", () => {
   });
 
   /// A bundled skill is indistinguishable from a built-in and is meant to be:
-  /// neither was installed by anyone, so both read as "came with Claude Code".
+  /// neither was installed by anyone, so both read as "came with Pi".
   it("files a bundled skill with the built-ins", () => {
     expect(commandSource(command("dataviz", "Use this skill whenever..."))).toBe("harness");
   });

@@ -54,7 +54,7 @@ enum Command {
     Send(Send),
     /// Upgrade this binary to the newest release.
     Update,
-    /// Manage the Claude Code skill that documents this CLI.
+    /// Manage the Pi skill that documents this CLI.
     #[command(subcommand)]
     Skill(SkillCommand),
 }
@@ -70,18 +70,10 @@ struct New {
     #[arg(long)]
     project: Option<PathBuf>,
 
-    /// Claude model alias: opus, sonnet, fable or haiku. Pi uses ~/.pi/agent/settings.json.
-    #[arg(long)]
-    model: Option<String>,
-
     /// low, medium, high, xhigh or max. Defaults to the calling session's
     /// effort, then the model's own.
     #[arg(long)]
     effort: Option<String>,
-
-    /// Which agent runs it: claude_code or pi.
-    #[arg(long)]
-    harness: Option<String>,
 
     /// Base the new session's worktree on existing work: a session id, a
     /// branch, or any git ref. Committed work only. Defaults to the
@@ -117,7 +109,7 @@ struct Ls {
 
 #[derive(Subcommand)]
 enum SkillCommand {
-    /// Write the skill to ~/.claude/skills/dray/, where Claude Code finds it.
+    /// Write the skill to ~/.pi/agent/skills/dray/, where Pi finds it.
     Install,
 }
 
@@ -145,9 +137,9 @@ fn new(args: New) -> Result<(), String> {
     let request = Request::CreateSession(CreateSession {
         prompt: args.prompt,
         project_path: resolve_project(args.project),
-        model: args.model,
+        model: None,
         effort: args.effort,
-        harness: args.harness,
+        harness: None,
         parent_session_id: parent_session_id(),
         from: args.from,
     });
@@ -308,8 +300,7 @@ fn scratch_dir() -> Result<PathBuf, String> {
 
     let path = std::env::temp_dir().join(format!("dray-update-{}", std::process::id()));
 
-    std::fs::create_dir(&path)
-        .map_err(|e| format!("could not create {}: {e}", path.display()))?;
+    std::fs::create_dir(&path).map_err(|e| format!("could not create {}: {e}", path.display()))?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
         .map_err(|e| format!("could not restrict {}: {e}", path.display()))?;
 
@@ -369,11 +360,13 @@ fn download(url: &str, path: &Path) -> Result<(), String> {
 fn install_skill() -> Result<(), String> {
     let dir = dirs::home_dir()
         .ok_or("could not resolve your home directory")?
-        .join(".claude")
+        .join(".pi")
+        .join("agent")
         .join("skills")
         .join("dray");
 
-    std::fs::create_dir_all(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
 
     let path = dir.join("SKILL.md");
     std::fs::write(&path, SKILL).map_err(|e| format!("could not write {}: {e}", path.display()))?;
@@ -417,7 +410,9 @@ fn send(request: Request) -> Result<Response, String> {
 /// spawns; absent when a person runs this in their own terminal, which is
 /// ordinary rather than an error.
 fn parent_session_id() -> Option<String> {
-    std::env::var("DRAY_SESSION_ID").ok().filter(|v| !v.is_empty())
+    std::env::var("DRAY_SESSION_ID")
+        .ok()
+        .filter(|v| !v.is_empty())
 }
 
 /// `--project` if given, else the repo the current directory sits in.
@@ -438,7 +433,7 @@ fn resolve_project(explicit: Option<PathBuf>) -> Option<String> {
 /// `rev-parse --show-toplevel` answers the linked worktree, and that is what an
 /// agent running in a Dray worktree session was putting on the wire as the new
 /// session's project. The app then computed a `cwd` of
-/// `<that worktree>/.claude/worktrees/<name>`, which `claude -w` never creates —
+/// `<that worktree>/.dray/worktrees/<name>`, which Pi does not create —
 /// it resolves the repo for itself — so Changes, commit and PR all read a
 /// directory that does not exist.
 ///
@@ -602,7 +597,7 @@ mod tests {
     }
 
     #[test]
-    fn the_skill_carries_frontmatter_claude_code_can_read() {
+    fn the_skill_carries_frontmatter_pi_can_read() {
         assert!(SKILL.starts_with("---\n"), "skill needs YAML frontmatter");
         assert!(SKILL.contains("\nname: dray\n"));
         assert!(SKILL.contains("\ndescription: "));
@@ -637,7 +632,7 @@ mod tests {
             return;
         };
 
-        let tree = repo.join(".claude").join("worktrees").join("child");
+        let tree = repo.join(".dray").join("worktrees").join("child");
         git(&repo, &["worktree", "add", "-q", tree.to_str().unwrap()]);
 
         let root = repo.to_string_lossy().into_owned();

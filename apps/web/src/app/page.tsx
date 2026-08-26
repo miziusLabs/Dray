@@ -1,9 +1,8 @@
 import { AppleGlyph } from "@/components/AppleGlyph";
 import { Board } from "@/components/Board";
-import { ClaudeGlyph } from "@/components/ClaudeGlyph";
 // import { Tweets } from "@/components/Tweets";
 import { Wordmark } from "@/components/Wordmark";
-import { CLAUDE_SETUP, DOWNLOAD, DOWNLOAD_SIZE, REPO } from "@/lib/links";
+import { DOWNLOAD, DOWNLOAD_SIZE, PI_SETUP, REPO } from "@/lib/links";
 
 /// One full-width container for the whole page. The pitch is short enough now
 /// that it needs no reading measure of its own, and the board wants every
@@ -50,24 +49,21 @@ export default function Home() {
         {/* The prerequisite and the licence were a paragraph each and are
             one line now — both are footnotes to the button above them, and
             stacked they read as terms rather than as a caption. "Supports"
-            rather than "Requires": the app is built to run any harness, but
-            today that's Claude Code alone, and the word says so rather than
-            reading as a permanent restriction. The GitHub link lives here
-            now, on "open source", instead of repeating itself in a nav bar
+            rather than "Requires": the app is built around Pi, and the word
+            says so rather than reading as a permanent restriction. The GitHub
+            link lives here now, on "open source", instead of repeating itself in a nav bar
             that otherwise held nothing but a wordmark and this same link. */}
         <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:text-sm">
-          <ClaudeGlyph className="size-3.5 shrink-0" />
           <span>
             Supports{" "}
             <a
-              href={CLAUDE_SETUP}
+              href={PI_SETUP}
               target="_blank"
               rel="noopener noreferrer"
               className="text-foreground underline decoration-border underline-offset-4 transition-colors hover:decoration-current"
             >
-              Claude Code
+              Pi
             </a>
-            , more harnesses coming
           </span>
           <span aria-hidden>·</span>
           <span>

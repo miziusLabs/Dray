@@ -42,12 +42,9 @@ export function useComposerPrefs() {
 
   // Merged over the seed on read, so a record written by an older build that
   // lacks a key gets the seed for it rather than `undefined` reaching a picker.
-  // Claude Code is no longer offered for new sessions. Normalize preferences
-  // written by older builds so they cannot select the removed provider.
-  const merged: ComposerPrefs =
-    prefs.harness === "pi"
-      ? { ...SEED, ...prefs }
-      : { ...SEED, ...prefs, harness: "pi", modelId: "pi", piModel: null };
+  // Normalize preferences written by older builds so removed harnesses and
+  // their model aliases cannot reach a new session.
+  const merged: ComposerPrefs = { ...SEED, ...prefs, harness: "pi", modelId: "pi" };
 
   const patch = useCallback(
     (next: Partial<ComposerPrefs>) => setPrefs((prev) => ({ ...SEED, ...prev, ...next })),

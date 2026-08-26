@@ -12,8 +12,7 @@ export const DOWNLOAD = `${REPO}/releases/latest`;
 /// asset list when bumping.
 export const DOWNLOAD_SIZE = "32 MB";
 
-/// Dray drives the CLI; it does not bundle or replace it. Anyone downloading
-/// needs Claude Code installed and signed in first, so the setup page is a
-/// prerequisite rather than a footnote. `docs.claude.com/en/docs/claude-code/*`
-/// still redirects here, but this is where it lands.
-export const CLAUDE_SETUP = "https://code.claude.com/docs/en/setup";
+/// Dray drives Pi; it does not bundle or replace it. Anyone downloading needs
+/// Pi installed and configured first, so its project page is a prerequisite
+/// rather than a footnote.
+export const PI_SETUP = "https://github.com/badlogic/pi-mono";

@@ -206,7 +206,7 @@ function rendersRow(item: WorkItem): boolean {
   return isToolGroup(item) || RENDERS.has(item.payload.type);
 }
 
-/// `seq` is the ordering key — most Claude Code events carry no usable `ts`.
+/// `seq` is the ordering key — most Pi events carry no usable `ts`.
 function bySeq(a: AgentEvent, b: AgentEvent) {
   return a.seq - b.seq;
 }

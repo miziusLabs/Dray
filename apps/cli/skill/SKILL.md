@@ -41,9 +41,7 @@ Options:
 | flag | meaning |
 |---|---|
 | `--project <path>` | Repo to run in. Defaults to the current session's, or the repo you are in. |
-| `--model <alias>` | `opus`, `sonnet`, `fable`, `haiku`. Defaults to the current session's model. |
 | `--effort <level>` | `low`, `medium`, `high`, `xhigh`, `max`. Defaults to the current session's. |
-| `--harness <name>` | `claude_code` or `pi`. Defaults to the current session's. |
 | `--from <session\|ref>` | Start the worktree on existing work instead of `origin/<default>`. |
 
 ### Each session gets its own worktree
@@ -67,8 +65,8 @@ dray new --from feature/login "Write tests for the login flow on this branch"
 takes — or a branch, tag or commit. Naming a session is the usual case: you have
 its id already, and you do not have to know how Dray names its branches.
 
-This is what makes review possible. Spawn a session with a different model or a
-different harness, point it at yours with `--from`, and it gets its own checkout
+This is what makes review possible. Spawn another Pi session, point it at yours
+with `--from`, and it gets its own checkout
 of the same commits — so it collides with nobody while it reads.
 
 Three things to know:

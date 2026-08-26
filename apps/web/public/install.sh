@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs the `dray` CLI and its Claude Code skill.
+# Installs the `dray` CLI and its Pi skill.
 #
 # Deliberately POSIX sh, not bash: this is piped into whatever /bin/sh is, and
 # on a minimal linux image that is dash rather than bash.

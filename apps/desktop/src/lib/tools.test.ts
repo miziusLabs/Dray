@@ -27,7 +27,7 @@ describe("isRoutineError", () => {
   it("passes over a worktree isolation refusal", () => {
     expect(
       isRoutineError(
-        "This session is isolated in the worktree /Users/y/p/.claude/worktrees/ivory-gold-fjord, " +
+        "This session is isolated in the worktree /Users/y/.mizius/worktrees/ivory-gold-fjord, " +
           "but this command is too complex to verify that it stays inside the worktree. " +
           "Refusing to run it — a worktree-isolated session's git operations must target its own worktree.",
       ),
@@ -51,7 +51,7 @@ describe("isRoutineError", () => {
   });
 
   it("passes over a binary that isn't there", () => {
-    expect(isRoutineError("Exit code 127\n(eval):1: command not found: claude")).toBe(true);
+    expect(isRoutineError("Exit code 127\n(eval):1: command not found: pi")).toBe(true);
   });
 
   it("passes over a command the harness blocked", () => {

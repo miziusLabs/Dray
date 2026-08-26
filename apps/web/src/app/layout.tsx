@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 const title = "Dray: run every coding agent from one app";
 const description =
-  "A native macOS app that drives the coding-agent CLIs you already have, on the subscription you already pay for. Claude Code today, with more harnesses coming.";
+  "A native macOS app for the Pi coding agent, on the subscription you already pay for.";
 
 // Without a base, Next emits relative og:image URLs and most crawlers drop
 // them. The domain is not known at build time, so Vercel's own is the fallback

@@ -13,7 +13,7 @@ function prompt(baseline: string | null): AgentEvent {
   return {
     id: `e-${baseline ?? "none"}`,
     sessionId: "s",
-    harness: "claude_code",
+    harness: "pi",
     seq: 0,
     ts: "2026-08-11T00:00:00Z",
     turnId: null,

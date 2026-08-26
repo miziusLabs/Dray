@@ -9,7 +9,7 @@ function event(seq: number, payload: AgentEventPayload): AgentEvent {
   return {
     id: `e-${seq}`,
     sessionId: "s",
-    harness: "claude_code",
+    harness: "pi",
     seq,
     ts: "2026-08-13T00:00:00Z",
     turnId: null,
