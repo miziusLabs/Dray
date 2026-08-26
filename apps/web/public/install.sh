@@ -8,13 +8,17 @@
 #
 # Honours:
 #   DRAY_INSTALL_DIR   where the binary lands (default ~/.local/bin)
-#   DRAY_VERSION       a specific release tag (default: latest)
+#   DRAY_VERSION       a specific release tag (default: the pinned one below)
 
 set -eu
 
 REPO="monorepo-labs/dray"
 INSTALL_DIR="${DRAY_INSTALL_DIR:-$HOME/.local/bin}"
-VERSION="${DRAY_VERSION:-latest}"
+# Pinned, not `latest`. The app and the CLI publish into the same repo and both
+# ship non-prerelease, so `/releases/latest/download/` belongs to whichever went
+# out most recently — an app release lands there carrying no `dray-*.tar.gz` and
+# the installer 404s. Bump this line with every `cli-v*` tag.
+VERSION="${DRAY_VERSION:-cli-v0.1.0}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
