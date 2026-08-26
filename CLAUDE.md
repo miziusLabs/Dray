@@ -537,6 +537,123 @@ Hover-pause drop in `done` and have to: past that press no target left to protec
 
 **Socket failure cost feature, never app.** `serve` error logged and dropped in `setup()` — app refusing to start because socket in use would trade whole product for side channel, and reader could act on it either way.
 
+## Forking a session
+
+**Fork = one conversation carried on twice.** Sidebar row's right-click menu hold
+it, as submenu: **Fork here** and **Fork in new worktree**. Both copy whole
+conversation — CLI have no way to fork at chosen message, `--fork-session` take
+session and nothing narrower — so two item differ only in *where* copy run.
+
+**Fork lazy, and that whole shape.** Two half to fork and they cost different
+thing. App's half — copy log, write index entry — instant. CLI's half only
+happen on **spawn**, so doing it eagerly cost child process per fork and turn's
+wait before row appear. So `SessionManager::fork` write app's half now and leave
+`fork_from` on index entry as instruction; **first send** spawn
+`--resume <parent> --fork-session --session-id <new>` and clear it. Every send
+after = ordinary resume. Copied log = what fork replay meanwhile, so it open
+reading exactly like parent.
+
+**`--fork-session` honour `--session-id`**, verified against v2.1.246 — that
+what let frontend mint fork's id like it mint new session's, keeping one rule
+(app choose id, CLI adopt it) rather than two. Without it CLI mint own and app
+have to read it back off first `result`, which arrive turn later. Also verified:
+CLI write fork **complete standalone transcript** holding parent's history, so
+`--resume <fork>` after work with no reference to parent; and `-w` combine with
+all three, which what make second menu item possible at all.
+
+**Refused while parent busy.** CLI fork by *reading* parent's transcript, which
+live child still appending to, so fork taken mid-turn inherit half a turn.
+Backend check `is_busy()`, submenu trigger disable on `in_progress` — second one
+save trip, not the guard.
+
+**Refused too where parent have no conversation.** Index entry written before
+spawn, so session whose child failed to start sit in sidebar with empty log and
+no CLI transcript under its id. Answered here as one sentence; left to first send
+it come back as CLI's own "no conversation found", turn later.
+
+**Fork here leave `worktree_name` `None`, even forking worktree session.** Field
+mean "this session own that tree", and settling or deleting fork would otherwise
+pull directory out from under parent still working in it. `cwd` and `branch`
+inherit either way, so fork still run in parent's tree and its PR tab still find
+branch. Cost = two session writing one checkout, same trade two plain sessions
+already make, and changes panel attribute either's edit to whichever turn open.
+
+**`worktree_removed` inherit though, and that not same question.** Flag decide
+whether recorded `branch` or git's own HEAD believed, not who own tree. Fork in
+place of **relocated** session sit in shared checkout exactly as parent do, so
+HEAD there name whatever else going on in it — hardcoding `false` there took PR
+tab off every fork of settled worktree session, silently, since guess fail closed
+same way. Fork into new tree read HEAD straight and carry `false`.
+
+**Fork in new worktree = one resume whose tree don't exist yet**, so it need
+creation's treatment inside `send_msg`: `-w` to make tree, project root as spawn
+dir because missing directory can't be `chdir`ed into, `base_ref_tree` as
+baseline because there no tree to snapshot. Name resolved against **project**,
+not against parent's own, so fork of fork can't collide with tree it came from.
+Item name that cost out loud: `claude -w` fork *tree* from `origin/<default>`,
+not from wherever session is, so copy carry whole conversation onto code that
+may not hold work it was about.
+
+**Name resolved against index too, not disk alone.** `resolve_worktree_name` ask
+filesystem alone, and lazy fork open window that never had: fork's tree not exist
+until first send, so its name live **only in index** until then. Anything else
+drawing name — another fork, or ordinary new worktree session — take one pending
+fork already hold, and that fork's `-w` then fail against tree other one made.
+**Permanently**, since name on its index entry by then and every retry redraw
+same one. Only 16³ name exist, so not vanishing odds it look like.
+`resolve_unclaimed_worktree_name` read both, and **both** call site use it —
+creation path too, since it the one most likely to draw name a fork hold.
+
+**Copied log repointed, twice, and both about outliving parent.** Every event
+carry `session_id` and frontend route live event by it, so log left alone open
+claiming to be parent's then grow new event under own id — one log describing two
+session. And `ImageRef.path` name file under
+`~/.dray/attachments/<session-id>/`, so verbatim copy draw picture out of
+parent's directory and go blank moment parent deleted; attachment directory
+copied beside log and path rewritten onto it. `id` deliberately **not** re-minted
+— these same event, and nothing join across session on it. `repoint_events` split
+out from copy so rule testable with no `~/.dray` to write into.
+
+**`parent_session_id` inherit, because fork = copy and copy sit where original
+sit.** Sidebar draw fork **beside** its source under same parent, not under
+source, and depth cap count it at same depth. Reset to `None` look tidier and is
+hole: copy surface top-level and free to spawn where session it copied could
+not — depth cap a copy walk around. Detach = way out for anyone wanting fork
+standing on own, and it already one-way, so nothing lost. Pinned by test.
+
+**`fork_from` = instruction, not lineage.** Cleared once CLI carry fork out, and
+that timing load-bearing both way: cleared **after** spawn, so child failing to
+start leave instruction standing and next send fork again; **before** prompt go
+out, because from there CLI own session under this id and forking parent second
+time abandon it. `#[serde(default)]` so entry predating field read as nothing to
+do — reading it any other way fork every existing session on its next send.
+
+**Title = parent's plus `(fork)`**, truncated to same 60 chars everything else
+is, and suffix take its room from parent's text rather than being cut off. Fork
+have no first prompt, so title generation have nothing to run on; mark = what
+stop two identical row telling apart only by timestamp.
+
+**Fork of fork keep one suffix, not one per generation.** `fork_title` strip
+`(fork)` off parent's title before adding own — nothing here track lineage
+either (`fork_from` cleared once CLI carry it out), so counting generation in
+title would promise more than rest of feature keep.
+
+**Submenu's digit picks by position, and the listener sits above the portal
+it names rows in.** `1`/`2` on Fork here / Fork in new worktree, same rule
+`VIEW_TABS` accelerator follow. `SubContent` render through Radix portal, so
+handler placed there only fire once focus — not just open submenu — move
+inside it; hovering trigger alone leave focus behind on trigger. Listener
+instead live on outer `ContextMenuContent`, gated on `onOpenChange`'s own
+`open` flag rather than focus location — React still deliver event there
+through component tree not DOM one, so key fire moment submenu draw, hover or
+keyboard alike.
+
+**Restoring composer's controls split out for this.** Fork open selected — forking
+= asking to work in copy — but it can't go through
+`handleSelectSessionIndexItem`, which read `sessionIndexItems` and won't hold new
+row until next render. So `restoreSessionControls` take *item* not id, and both
+path call it. Without it fork open under whatever model composer last left on
+rather than one it inherited.
 ## Persistence
 
 Everything live under `~/.dray/` ([store.rs](apps/desktop/src-tauri/src/store.rs), [projects.rs](apps/desktop/src-tauri/src/projects.rs)) .
@@ -792,6 +909,12 @@ Several things deliberately unfinished — don't mistake for bugs:
 - **PR panel read and act, never write prose.** No commenting, no replying to review, no requesting review, no closing. Every action there = state change moving work toward landing; anything wanting text box, or ending PR, belong to GitHub for now.
 
 - **Worktree cleanup hang off session lifecycle, not off merge.** `--delete-branch` still deliberately not passed — merge button say nothing about tree. Cleanup live on settle and on delete instead. Merged session whose reader never settle it therefore still leave tree behind; that reader's call, not merge's.
+
+- **Fork copy conversation whole, and record no lineage.** CLI expose no
+  fork-at-message, so no picker for where to branch from. `fork_from` cleared
+  once CLI carry fork out, so nothing on disk say which session a fork came from
+  and sidebar draw no link between the two. Both wanted a field each if it ever
+  earn one; neither is missing machinery.
 
 - **Handoff row have no Revert, no Amend, no Stash.** Each destroy or rewrite work, and button that send prompt for one = button whose blast radius decided by model. Reader can still type it.
 

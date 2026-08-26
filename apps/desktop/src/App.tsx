@@ -98,6 +98,7 @@ function App() {
     handleSelectSessionIndexItem,
     handleNewSession,
     setSessionFlags,
+    forkSession,
     detachSession,
     deleteSession,
     removeWorktree,
@@ -578,6 +579,7 @@ function App() {
               void handleSelectSessionIndexItem(sessionId);
             }
           }}
+          onFork={forkSession}
           onDelete={deleteSession}
           showArchived={showArchived}
           onToggleArchived={() => setShowArchived((v) => !v)}
