@@ -10,13 +10,13 @@ File give Claude Code (claude.ai/code) guidance for work with code in this repo.
 
 **Description over ~1000 character open with `## TLDR for human`, closed by `---`.** One line per thing worked on, even when only one. Shorter description need none — it already scan faster than its own summary.
 
-**Status:** start → `In Progress`. PR opened → `In Review`. Merged, or pushed straight to `main` → `Done`.
+**Status:** start → `In Progress`. After that, leave it — GitHub integration move issue to `In Review` on PR open and `Done` on merge, so setting either by hand = noise. **Exception: work pushed straight to `main`.** No PR = nothing for integration to read, so set `Done` yourself.
 
-**PR carry issue id so Linear link itself.** Body (`Fixes DRA-123`) or branch name — integration read both. Worktree branch = `worktree-<name>` minted by CLI, so body = reliable slot. Link move status on own but can lag, so set `In Review` by hand too.
+**PR carry issue id so Linear link itself.** Body (`Fixes DRA-123`) or branch name — integration read both. Worktree branch = `worktree-<name>` minted by CLI, so body = reliable slot. Id = what arm the whole status rule above; PR without one leave issue sitting `In Progress` forever.
 
 **One team, `Dray`. Prefix `DRA-`. Assign every issue to `yogesh`.**
 
-Linear MCP not connected → say so and stop. No issue, no work.
+Linear MCP not connected → say so, then carry on with the work. Tell reader at the end which issue still want creating, so it can be filed by hand.
 
 **Don't commit unprompted.** Stage + describe change, then wait — even when finished and passing. Asked = approval for that commit only, not ones after. Same for `git push`, branches, anything rewriting history.
 
