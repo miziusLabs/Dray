@@ -512,7 +512,7 @@ export default function Sidebar({
       </div>
 
       {/* Keep the session cards clear of the scrollbar edge. */}
-      <div className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 pl-2 pr-2">
+      <div className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 pl-2 pr-1">
         {rowCount === 0 ? (
           <p className="px-2 py-6 text-ui text-muted-foreground">{emptyText}</p>
         ) : (
@@ -1152,7 +1152,7 @@ function SessionRow({
           // indent that padding used to provide, so the title sits exactly where
           // it always did and the rail can still touch the row's edge. The one
           // gap that remains — title to hover controls — is `pl-2` on that slot.
-          "group relative flex min-h-7 w-full cursor-pointer items-center rounded-md pl-0 pr-0.5",
+          "group relative flex min-h-7 w-full cursor-pointer items-center rounded-md pl-0 pr-1",
           // Opacity is in the transition list for the faded rows below. It has
           // to ride the same declaration: `transition-colors` and
           // `transition-opacity` both set `transition-property`, so `cn` would
