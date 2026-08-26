@@ -89,7 +89,7 @@ export function handoffActions(
       id: "commitPush",
       label: "Commit & push",
       kind: "prompt",
-      prompt: "commit and push your changes",
+      prompt: "Commit and push your changes.",
     });
   } else if (status.ahead > 0 || status.upstream === null) {
     // Only where there is nothing to commit: with a dirty tree the reader wants
