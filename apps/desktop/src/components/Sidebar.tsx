@@ -572,17 +572,10 @@ export default function Sidebar({
           ))
         )}
 
-        {/* Sits in the list as its last row, so it scrolls away once there are
-            enough sessions to push it off — by then the shortcut has been read.
-            Pinning it to the sidebar's bottom edge would keep it on screen
-            forever, which is a permanent line of chrome for a one-time hint.
-            Hidden with only one row: there's nothing to jump or switch to. */}
-        {rowCount > 1 && <ShortcutHint selected={selectedSessionId !== null} />}
       </div>
 
-      {/* Outside the scroll container, unlike the shortcut hint above it: that
-          is a one-time tip that has earned its way off screen, and this is an
-          offer that has to still be there when the list is long. */}
+      {/* Outside the scroll container so this offer stays visible when the list
+          is long. */}
       <UpdateRow
         status={updateStatus}
         blocked={updateBlocked}
@@ -590,31 +583,6 @@ export default function Sidebar({
         onInstall={onInstallUpdate}
       />
     </aside>
-  );
-}
-
-/// The ⌘⇧↑/↓ hint, laid out on the session rows' own edges so it reads as the
-/// last row rather than as a caption under the list.
-///
-/// With nothing selected both arrows land on the same place — the newest session
-/// — so showing the pair would offer a choice that isn't one. One arrow, and the
-/// verb changes with it: entering the list is a jump, walking it is a switch.
-function ShortcutHint({ selected }: { selected: boolean }) {
-  return (
-    <div className="flex min-h-7 items-center justify-between pr-0.5 pl-2 text-ui text-muted-foreground/60">
-      {selected ? "Switch tasks" : "Jump to task"}
-      {/* Held back from the stock keycap: everywhere else a `Kbd` labels a
-          control the eye is already on, but this one is the row, so the default
-          fill makes a hint the loudest thing in the list. */}
-      <KbdGroup className="[&_kbd]:bg-muted/40 [&_kbd]:text-muted-foreground/60">
-        <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
-        {/* Spelled out on every platform, unlike the ⌘ beside it. ⇧ is the one
-            modifier glyph that doesn't read as itself — an arrow, in a hint
-            that ends in arrow keys — so no keycap in the app draws it. */}
-        <Kbd>Shift</Kbd>
-        <Kbd>{selected ? "↑↓" : "↓"}</Kbd>
-      </KbdGroup>
-    </div>
   );
 }
 
