@@ -255,6 +255,9 @@ const handleSendMsg = async (
 
   if (!sessionId) {
     sessionId = crypto.randomUUID();
+    // Claimed alongside the selection everywhere it moves, or a read still out
+    // from an earlier click can land afterwards and roll this one away.
+    selectionRequestRef.current = sessionId;
     setSelectedSessionId(sessionId);
   }
 
@@ -434,6 +437,7 @@ const handleAnswerQuestions = async (
 // since the picker is the only thing that moves the tree and a remembered name
 // would either be a lie or an unasked-for checkout.
 const handleNewSession = () => {
+  selectionRequestRef.current = null;
   setSelectedSessionId(null);
   setModelId(prefs.modelId);
   setEffortByModel(prefs.effortByModel);
@@ -443,6 +447,16 @@ const handleNewSession = () => {
 };
 
 const handleSelectSessionIndexItem = async (sessionId: string) => {
+  // Claimed synchronously, so a click arriving during the read below is visible
+  // to it immediately. The rendered selection cannot serve here — it is a render
+  // behind, so a read finishing in that gap would still see itself as current.
+  selectionRequestRef.current = sessionId;
+
+  // Where the reader was, for the case the id turns out to resolve to nothing.
+  // Whether it is still somewhere they can be put back is decided at the
+  // rollback itself, not here — see there.
+  const previous = selectedSessionIdRef.current;
+
   setSelectedSessionId(sessionId);
 
   // Opening the session is answering the notice about it — an unread completion
@@ -486,7 +500,45 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
     const snapshot = await invoke<SessionSnapshot | null>("get_session_by_id", { sessionId });
     if (snapshot) {
       upsertSession(snapshot);
+      return;
     }
+
+    // The id resolves to nothing on disk, so the selection has to go back where
+    // it was. Leaving it is not the harmless-looking half-state it reads as:
+    // `selectedSession` would be null while `selectedSessionId` still held the
+    // dead id, and both `centered` and `isNewTask` derive from that null — so
+    // the reader gets the *new task* composer while `handleSendMsg` still finds
+    // an id, computes `isNewSession: false`, and resumes a session that is gone.
+    //
+    // Reached by a relayed message naming a sender since deleted: the
+    // attribution is persisted deliberately, and the session it points at need
+    // not outlive it. A sidebar row can go stale the same way.
+    //
+    // Only when this read is still the one being waited on. A click that landed
+    // while it was out has already claimed the request, and rolling back onto
+    // this answer would take the reader off the session they just asked for.
+    if (selectionRequestRef.current !== sessionId) return;
+
+    // Only a session still loaded can be gone back to, and that is judged here
+    // rather than before the read, for two reasons that both end in this same
+    // dead end. The selection this started from is *optimistic* until its own
+    // read lands, so it may itself be an id about to be rolled back; and a
+    // session that was loaded when this began can be deleted while the read is
+    // out, which `deleteSession` does not clear the selection for unless that
+    // session was the one selected — and by here it is not.
+    //
+    // Nothing to go back to leaves `null`, the empty composer. Not where the
+    // reader asked to be, but a state they can act from.
+    const restorable =
+      previous && sessionsRef.current.some((s) => s.sessionId === previous)
+        ? previous
+        : null;
+
+    selectionRequestRef.current = restorable;
+    setSelectedSessionId(restorable);
+    // Not "deleted": all this knows is that the id resolved to nothing, and
+    // deletion is the likely cause rather than the observed one.
+    setError("Session not found.");
   } catch (e) {
     setError(String(e));
   }
@@ -911,6 +963,16 @@ useEffect(() => {
   };
 }, []);
 
+/// The selection the reader last *asked* for, written at call time rather than
+/// at render.
+///
+/// Not interchangeable with `selectedSessionIdRef` below, which mirrors state
+/// and so lags a render behind: a click landing while a read is in flight has
+/// already changed this, and has not yet changed that. Only this one can answer
+/// "is my answer still the one being waited on", which is what stops a slow
+/// read from overwriting a newer click.
+const selectionRequestRef = useRef<string | null>(selectedSessionId);
+
 // Inside the listener the closure would see the mount-time selection; the ref
 // tracks the live one so "already being viewed" is judged against reality.
 const selectedSessionIdRef = useRef(selectedSessionId);
@@ -929,6 +991,14 @@ statusBySessionRef.current = statusBySession;
 // open at mount.
 const showArchivedRef = useRef(showArchived);
 showArchivedRef.current = showArchived;
+
+/// The loaded sessions as of now, for the one reader that runs after an `await`
+/// and so cannot trust the copy its closure captured. `deleteSession` empties a
+/// row out of `sessions` without touching the selection unless that row *was*
+/// the selection — so a session validated before a read can be gone by the time
+/// the read answers.
+const sessionsRef = useRef(sessions);
+sessionsRef.current = sessions;
 
 // `completed` means finished *and unread*. Reading is what retires it, so every
 // path to a read funnels through here: the status landing on the session already

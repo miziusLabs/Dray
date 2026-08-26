@@ -70,11 +70,6 @@ struct New {
     #[arg(long)]
     project: Option<PathBuf>,
 
-    /// Name the worktree instead of letting Dray generate one. Every session
-    /// gets one — they are meant to run at the same time.
-    #[arg(long)]
-    worktree_name: Option<String>,
-
     /// opus, sonnet, fable or haiku. Defaults to the calling session's model.
     #[arg(long)]
     model: Option<String>,
@@ -144,7 +139,6 @@ fn new(args: New) -> Result<(), String> {
     let request = Request::CreateSession(CreateSession {
         prompt: args.prompt,
         project_path: resolve_project(args.project),
-        worktree_name: args.worktree_name,
         model: args.model,
         effort: args.effort,
         harness: args.harness,
@@ -249,15 +243,24 @@ fn print_table(sessions: &[SessionSummary]) {
 
     let status_width = width(|s| s.status.as_str());
     let title_width = width(|s| s.title.as_str()).min(60);
+    let branch_width = width(|s| s.branch.as_deref().unwrap_or("-"));
 
     for session in sessions {
         let title: String = session.title.chars().take(title_width).collect();
+        // Named rather than given a column of its own: two bare ids on one row
+        // under no header is a table nobody can read, and most rows have no
+        // parent to print at all.
+        let parent = match &session.parent_session_id {
+            Some(id) => format!("  spawned by {id}"),
+            None => String::new(),
+        };
         println!(
-            "{}  {:<status_width$}  {:<title_width$}  {}",
+            "{}  {:<status_width$}  {:<title_width$}  {:<branch_width$}{}",
             session.session_id,
             session.status,
             title,
             session.branch.as_deref().unwrap_or("-"),
+            parent,
         );
     }
 }
@@ -445,6 +448,13 @@ mod tests {
         // checkout is never the right answer — the flag is gone rather than
         // defaulted.
         assert!(Cli::try_parse_from(["dray", "new", "x", "--no-worktree"]).is_err());
+    }
+
+    #[test]
+    fn the_worktree_cannot_be_named_either() {
+        // An agent has no basis for picking a name, Dray generates a readable
+        // one, and a caller-supplied name is one more thing that can collide.
+        assert!(Cli::try_parse_from(["dray", "new", "x", "--worktree-name", "n"]).is_err());
     }
 
     #[test]

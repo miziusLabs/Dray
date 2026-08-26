@@ -41,7 +41,6 @@ Options:
 | flag | meaning |
 |---|---|
 | `--project <path>` | Repo to run in. Defaults to the current session's, or the repo you are in. |
-| `--worktree-name <name>` | Name the worktree instead of letting Dray generate one. |
 | `--model <alias>` | `opus`, `sonnet`, `fable`, `haiku`. Defaults to the current session's model. |
 | `--effort <level>` | `low`, `medium`, `high`, `xhigh`, `max`. Defaults to the current session's. |
 | `--harness <name>` | `claude_code`. Defaults to the current session's. |
@@ -65,8 +64,10 @@ dray ls --all        # every project
 ```
 
 Each row carries the session id, title, status (`idle`, `in_progress`,
-`completed`), and branch. This is how you check on sessions you started — nothing
-reports back on its own, so poll `dray ls` if you need to know when one finishes.
+`completed`), and branch. A session created by another one also says which —
+`spawned by <id>` in the table, `parentSessionId` in the JSON. This is how you
+check on sessions you started — nothing reports back on its own, so poll
+`dray ls` if you need to know when one finishes.
 
 ## Messaging a session
 
@@ -84,8 +85,9 @@ session, so it wakes an idle agent up. If that session is mid-turn the message i
 queued and picked up at the next boundary — that is reported, and is not a
 failure.
 
-The receiving agent is told which session the message came from, so write it as a
-message to a colleague, not as a note to yourself.
+The receiving agent is told which session the message came from, and is given its
+id — so it can answer with `dray send <that-id>` without looking anything up.
+Write it as a message to a colleague, not as a note to yourself.
 
 Send when there is something the other session genuinely needs. A message costs
 it a whole turn, so "done" on its own is rarely worth one.
