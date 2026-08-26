@@ -246,11 +246,15 @@ async fn remove_session_worktree(item: &SessionIndexItem) -> Result<()> {
     };
 
     let path = worktree_path(name);
-    // Pi's own naming, minted at creation and never written to the
-    // index — the same rebuild `sessionBranch` does on the frontend.
-    let branch = format!("worktree-{name}");
+    // New worktree branches use the worktree UUID itself. A source-branch
+    // worktree must leave that user's branch intact; the legacy prefix is
+    // retained here only so older sessions can still be cleaned up safely.
+    let branch = item
+        .branch
+        .as_deref()
+        .filter(|branch| *branch == name || *branch == format!("worktree-{name}"));
 
-    git::remove_worktree(&item.project_path, &path, Some(&branch)).await?;
+    git::remove_worktree(&item.project_path, &path, branch).await?;
 
     Ok(())
 }
@@ -307,17 +311,21 @@ impl SessionManager {
         _model: ModelId,
         pi_model: Option<PiModel>,
         effort: Option<Effort>,
+        title_model: Option<PiModel>,
+        title_effort: Option<Effort>,
         permission_mode: ApprovalPolicy,
         cwd: &str,
         // Recorded, not acted on: the picker checks the branch out when the
         // user picks it, so by here the tree is already on it.
         branch: Option<&str>,
         use_worktree: bool,
+        create_worktree_branch: bool,
         worktree_name: Option<&str>,
         // Where the worktree starts from, already resolved to a git ref by the
         // caller — the orchestration socket turns a session id into one, and
         // nothing below here knows sessions. `None` is the ordinary case and
-        // hands the tree to `Pi worktree mode`, which forks it from `origin/<default>`.
+        // the composer supplies the currently checked-out branch when it uses
+        // a worktree.
         base_ref: Option<&str>,
         is_new_session: bool,
         // Set only for a session created over the orchestration socket. The
@@ -373,28 +381,33 @@ impl SessionManager {
                 None => git::list_branches(cwd).await?.current,
             };
 
-            // A base ref is the one case Dray makes the tree itself. The harness
-            // cannot be told where to fork from — `-w` resolves the default
-            // branch and fetches `origin/<it>`, and its flag surface exposes no
-            // base at all — so the tree is created here and the child is spawned
-            // *into* it with no `-w`. Refused for a session with no worktree,
-            // which would mean checking a ref out over whatever the reader has
-            // in the project root.
+            // Dray creates the tree itself because the harness cannot be told
+            // which source branch to use. The child is spawned into the created
+            // tree with no `-w`. A source-branch worktree deliberately checks
+            // out the selected branch again; a new-branch worktree gives it a
+            // private UUID branch.
             //
             // Ahead of the index write, unlike the spawn below: a base git
             // cannot resolve has left nothing behind at all and the caller is
             // getting the error.
             let owned_worktree = match (base_ref, &worktree_name, harness) {
                 (Some(base), Some(name), _) => {
-                    git::create_worktree(cwd, name, base).await?;
+                    git::create_worktree_with_mode(cwd, name, base, true).await?;
                     true
                 }
                 (Some(_), None, _) => bail!("a base ref needs a worktree to check it out into"),
                 (None, Some(name), Harness::Pi) => {
-                    let base = git::worktree_base_ref(cwd)
-                        .await
-                        .context("could not resolve Pi's worktree base")?;
-                    git::create_worktree(cwd, name, &base).await?;
+                    let base = match (branch.as_deref(), create_worktree_branch) {
+                        (Some(branch), _) => branch.to_string(),
+                        (None, true) => git::worktree_base_ref(cwd)
+                            .await
+                            .context("could not resolve Pi's worktree base")?,
+                        (None, false) => {
+                            bail!("stay-on-source worktrees require a checked-out branch")
+                        }
+                    };
+                    git::create_worktree_with_mode(cwd, name, &base, create_worktree_branch)
+                        .await?;
                     true
                 }
                 (None, _, _) => false,
@@ -402,13 +415,18 @@ impl SessionManager {
 
             // Indexed before the process spawns, so a session that fails to
             // start is still visible rather than vanishing without a trace.
+            let recorded_branch = if worktree_name.is_some() && create_worktree_branch {
+                worktree_name.as_deref()
+            } else {
+                branch.as_deref()
+            };
             let mut item = SessionIndexItem::new(
                 session_id,
                 harness,
                 &session_cwd,
                 cwd,
                 worktree_name.as_deref(),
-                branch.as_deref(),
+                recorded_branch,
                 prompt,
                 model,
                 effort,
@@ -447,7 +465,14 @@ impl SessionManager {
             // until the CLI creates it, and `current_dir` on a missing path
             // fails the spawn outright. Nothing waits on this, so that took
             // every worktree session's title with it in silence.
-            crate::title::spawn_title_generation(session_id, prompt, cwd, app);
+            crate::title::spawn_title_generation(
+                session_id,
+                prompt,
+                cwd,
+                title_model.as_ref(),
+                title_effort,
+                app,
+            );
 
             // Taken before the child exists, so nothing it does can end up
             // inside its own baseline. A worktree the CLI has yet to create has

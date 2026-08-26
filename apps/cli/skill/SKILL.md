@@ -76,15 +76,15 @@ Three things to know:
   for a review of work in progress, commit it first — or say plainly in your
   prompt what is missing, or the reviewer will report on a tree that lacks the
   very change the user is looking at.
-- **A new branch, not a shared one.** The session gets its own
-  `worktree-<name>` branch starting at that commit. It never checks out the
-  branch you named, so it cannot commit onto your work or move it.
+- **A new branch, not a shared one.** The session gets its own `<name>` branch
+  starting at that commit. It never checks out the branch you named, so it
+  cannot commit onto your work or move it.
 - **Not a shared checkout.** There is no way to run two sessions in one
   directory, and `--from` is not it. Two agents writing to one checkout overwrite
   each other, and the changes panel cannot tell them apart.
 
 The line `dray new` prints says what it resolved: `Started "…" in worktree
-calm-owl, based on worktree-brisk-jade`. Worth reading back when you passed a
+calm-owl, based on brisk-jade`. Worth reading back when you passed a
 session id, since the branch that id resolved to is something only the app knew.
 
 ## Listing sessions

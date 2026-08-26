@@ -2,8 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useComposerPrefs, type EffortByModel } from "@/hooks/useComposerPrefs";
+import {
+  useComposerPrefs,
+  type EffortByModel,
+  type WorktreeBranchMode,
+} from "@/hooks/useComposerPrefs";
 import { useDockBadge } from "@/hooks/useDockBadge";
+import type { TitlePrefs } from "@/hooks/useTitlePrefs";
 import {
   ANSWERED_BY_OPENING,
   dismissNotice,
@@ -50,7 +55,7 @@ export type StreamingBlock = {
     callId: string | null,
 }
 
-export function useSessions() {
+export function useSessions(titlePrefs: TitlePrefs) {
 
     // The sticky defaults. Live state below seeds from these and writes back on
     // every user-initiated change; restoring a session writes live state only.
@@ -82,6 +87,9 @@ export function useSessions() {
     // has uncommitted changes. Null when nothing is pending.
     const [pendingBranch, setPendingBranch] = useState<string | null>(null);
     const [useWorktree, setUseWorktreeState] = useState(() => prefs.useWorktree);
+    const [worktreeBranchMode, setWorktreeBranchModeState] = useState<WorktreeBranchMode>(
+      () => prefs.worktreeBranchMode,
+    );
     // Per-session, not global: sessions run concurrently and all of their events
     // arrive on the same channel, so a single value would clear on another's
     // turn. The backend drives this via `session_status`, and this map is the
@@ -161,6 +169,11 @@ const setUseWorktree = (next: boolean | ((prev: boolean) => boolean)) => {
   const resolved = typeof next === "function" ? next(useWorktree) : next;
   setUseWorktreeState(resolved);
   setPrefs({ useWorktree: resolved });
+};
+
+const setWorktreeBranchMode = (mode: WorktreeBranchMode) => {
+  setWorktreeBranchModeState(mode);
+  setPrefs({ worktreeBranchMode: mode });
 };
 
 // Attaching a known project just selects it, so this doubles as "switch to one
@@ -292,12 +305,15 @@ const handleSendMsg = async (
       model: modelId,
       piModel,
       effort,
+      titleModel: titlePrefs.piModel,
+      titleEffort: titlePrefs.effort,
       permissionMode,
       cwd,
-      // Recorded, not acted on — the picker already checked it out. Null for a
-      // worktree session, whose branch the CLI names itself.
-      branch: isNewSession && !useWorktree ? branch : null,
+      // Recorded, not acted on for a normal session. For a worktree session it
+      // is the source branch used when creating the isolated checkout.
+      branch: isNewSession ? branch : null,
       useWorktree: isNewSession && useWorktree,
+      createWorktreeBranch: isNewSession && worktreeBranchMode === "new",
       worktreeName: null,
       isNewSession,
     });
@@ -455,6 +471,7 @@ const handleNewSession = () => {
   setEffortByModel(prefs.effortByModel);
   setPermissionModeState(prefs.permissionMode);
   setUseWorktreeState(prefs.useWorktree);
+  setWorktreeBranchModeState(prefs.worktreeBranchMode);
   setBranch(branches?.current ?? null);
 };
 
@@ -652,8 +669,8 @@ const removeWorktree = async (sessionId: string): Promise<boolean> => {
   // pointing into the deleted tree they would read a directory that is gone.
   // Copied off the write rather than restated here — spelling the relocation
   // out a second time is how this and the index drift, and it had: `branch`
-  // was cleared here while the entry on disk keeps `worktree-<name>` for the
-  // PR tab to find its PR by.
+  // was cleared here while the entry on disk keeps the worktree's branch for
+  // the PR tab to find its PR by.
   setSessions((prev) =>
     prev.map((s) =>
       s.sessionId === sessionId
@@ -1372,6 +1389,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession, removeWorktree};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, worktreeBranchMode, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, setWorktreeBranchMode, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession, removeWorktree};
 
 }

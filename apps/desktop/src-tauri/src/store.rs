@@ -47,8 +47,8 @@ pub struct SessionIndexItem {
     /// their project rather than each becoming a project of their own.
     pub project_path: String,
     pub branch: Option<String>,
-    /// `Some` marks this a worktree session; Pi names the branch
-    /// `worktree-<name>`.
+    /// `Some` marks this a worktree session. The branch is either the source
+    /// branch or a generated branch named exactly like the worktree UUID.
     pub worktree_name: Option<String>,
     /// This session ran in a worktree and that tree has since been deleted, so
     /// `cwd` is the project root it was moved back to. The distinction is what
@@ -253,12 +253,10 @@ impl SessionIndexItem {
             harness,
             cwd: cwd.to_string(),
             project_path: project_path.to_string(),
-            // A worktree's branch is the CLI's to name, so it's derived rather
-            // than read; everything else records the branch actually checked out.
-            branch: match worktree_name {
-                Some(name) => Some(format!("worktree-{name}")),
-                None => branch.map(str::to_string),
-            },
+            // The caller knows the branch actually used: source mode records
+            // the source branch, while new-branch mode records the generated
+            // UUID. Nothing is derived from the worktree name here.
+            branch: branch.map(str::to_string),
             worktree_name: worktree_name.map(str::to_string),
             worktree_removed: false,
             title: title_from_prompt(first_prompt),
@@ -297,8 +295,10 @@ impl SessionIndexItem {
                 None => self.cwd.clone(),
             },
             project_path: self.project_path.clone(),
+            // A worktree fork always gets its own generated branch, whose name
+            // is exactly the worktree UUID rather than a prefixed variant.
             branch: match worktree_name {
-                Some(name) => Some(format!("worktree-{name}")),
+                Some(name) => Some(name.to_string()),
                 None => self.branch.clone(),
             },
             worktree_name: worktree_name.map(str::to_string),
@@ -405,10 +405,10 @@ pub async fn resolve_unclaimed_worktree_name(
 /// reader's own editor, so HEAD there answers "what is this checkout on" and
 /// never "where did this session's work land".
 ///
-/// The guess itself is just `branch`, with no `worktree-<name>` rebuild beside
-/// it: [`SessionIndexItem::new`] and [`SessionIndexItem::fork`] both write that
-/// name into the field at creation, so the record already holds it. `pr.ts`
-/// rebuilds it because a frontend session object can predate that write.
+/// The guess itself is just `branch`, with no branch-name rebuild beside it:
+/// [`SessionIndexItem::new`] and [`SessionIndexItem::fork`] both write the
+/// actual branch into the field at creation, so the record already holds it.
+/// `pr.ts` falls back to the recorded value while its git reading is pending.
 pub fn session_branch(item: &SessionIndexItem, observed: Option<&str>) -> Option<String> {
     if item.worktree_removed {
         return item.branch.clone();
@@ -613,9 +613,9 @@ pub async fn set_session_status(
 /// at the project root.
 ///
 /// `worktree_name` goes and `branch` stays, and the second half is the one
-/// worth stating. `branch` holds `worktree-<name>` — the branch the CLI made
-/// and the work landed on, written there by `new` — not the base it forked
-/// from, so it is exactly what the PR lookup needs and the only record of it
+/// worth stating. `branch` holds the branch the work landed on, written there
+/// by `new` — not the base it forked from when a new branch was requested — so
+/// it is exactly what the PR lookup needs and the only record of it
 /// left once the tree and the local branch are gone. `sessionBranch` falls
 /// back to it when there is no worktree name, which is what keeps the PR tab
 /// on a settled session pointing at that session's own PR. Clearing it here
@@ -655,10 +655,10 @@ pub async fn relocate_session_to_project(session_id: &str) -> Result<Option<Sess
 /// shared project root then outranks the branch the work landed on. Inferred
 /// from the shape the relocation leaves behind and nothing else: no worktree
 /// name, `cwd` back at the project root, and a `branch` still holding the
-/// `worktree-` prefix that only [`SessionIndexItem::new`] mints. A plain
-/// session sitting on a branch named that way is the false positive this can
-/// produce, and it costs that session its recorded branch instead of its HEAD
-/// rather than anything destructive.
+/// legacy generated branch that only [`SessionIndexItem::new`] used to mint. A
+/// plain session sitting on a branch named that way is the false positive this
+/// can produce, and it costs that session its recorded branch instead of its
+/// HEAD rather than anything destructive.
 ///
 /// Writes only when it changed something, so this is a read on every launch
 /// after the first.
@@ -1053,7 +1053,7 @@ mod tests {
             "/p/.dray/worktrees/wt",
             "/p",
             Some("wt"),
-            None,
+            Some("main"),
             "add the PR panel",
             ModelId::Pi,
             Some(Effort::High),
@@ -1092,7 +1092,7 @@ mod tests {
             "/p",
             "/p",
             Some("wt"),
-            None,
+            Some("worktree-wt"),
             "add the PR panel",
             ModelId::Pi,
             None,
@@ -1128,13 +1128,11 @@ mod tests {
             ApprovalPolicy::Auto,
             None,
         );
-        // The name the CLI mints, which `new` already wrote into the field.
-        assert_eq!(
-            session_branch(&worktree, None).as_deref(),
-            Some("worktree-calm-owl")
-        );
-        // Git's own reading outranks the guess: anything checking out another
-        // branch inside the tree leaves the record describing one it left.
+        // The source branch is recorded directly rather than rebuilt from the
+        // worktree name.
+        assert_eq!(session_branch(&worktree, None).as_deref(), Some("main"));
+        // Git's own reading outranks the recorded branch: anything checking out
+        // another branch inside the tree leaves the record describing one it left.
         assert_eq!(
             session_branch(&worktree, Some("fix/thing")).as_deref(),
             Some("fix/thing")
@@ -1163,7 +1161,7 @@ mod tests {
         settled.worktree_removed = true;
         assert_eq!(
             session_branch(&settled, Some("main")).as_deref(),
-            Some("worktree-calm-owl")
+            Some("main")
         );
     }
 
@@ -1221,7 +1219,7 @@ mod tests {
         assert_eq!(fork.cwd, worktree_path("bold-otter"));
         assert_eq!(fork.project_path, "/p", "it still groups under the project");
         assert_eq!(fork.worktree_name.as_deref(), Some("bold-otter"));
-        assert_eq!(fork.branch.as_deref(), Some("worktree-bold-otter"));
+        assert_eq!(fork.branch.as_deref(), Some("bold-otter"));
     }
 
     /// The suffix is the whole point of the title, so truncation takes its room
@@ -1358,10 +1356,10 @@ mod tests {
         );
     }
 
-    /// A worktree session records the branch the CLI is about to make, not the
-    /// base it forks from — which is why `relocate_session_to_project` keeps
-    /// the field. It is the only place the PR's branch survives once the tree
-    /// and the local branch are deleted.
+    /// A worktree session records the branch it will use. Source mode records
+    /// the source branch; new-branch mode records the generated UUID. This is
+    /// why `relocate_session_to_project` keeps the field: it is the only place
+    /// the PR's branch survives once the tree and any generated branch are deleted.
     #[test]
     fn a_worktree_session_records_the_branch_its_work_lands_on() {
         let item = SessionIndexItem::new(
@@ -1378,7 +1376,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(item.branch.as_deref(), Some("worktree-calm-owl"));
+        assert_eq!(item.branch.as_deref(), Some("main"));
         assert!(!item.worktree_removed);
     }
 
@@ -1408,7 +1406,7 @@ mod tests {
     /// The flag arrived after the removal path already worked, so trees settled
     /// before it have to be recognised by the shape relocation leaves: no
     /// worktree name, `cwd` back at the project root, and a branch still
-    /// carrying the prefix only `new` mints. Without this those sessions keep
+    /// carrying the legacy generated prefix. Without this those sessions keep
     /// reading the shared checkout's HEAD and keep losing their PR tab.
     #[test]
     fn a_tree_settled_before_the_flag_existed_is_recognised_by_its_shape() {

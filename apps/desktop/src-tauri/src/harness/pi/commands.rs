@@ -225,6 +225,7 @@ fn models_from_response(response: &Value) -> Result<Vec<Model>> {
                 }),
                 label: name.to_string(),
                 efforts: vec![
+                    Effort::Off,
                     Effort::Low,
                     Effort::Medium,
                     Effort::High,

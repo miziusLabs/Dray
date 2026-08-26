@@ -4,18 +4,17 @@ import type { PrCheck, PrMark, PullRequest } from "@/types/events";
 ///
 /// `observed` is what git says HEAD is, and it wins wherever the session still
 /// has a checkout of its own to be read off. Everything else
-/// here is a *guess made at creation*: a worktree session's branch is the
-/// CLI's to name, so it is rebuilt from the worktree name, and the recorded
-/// `branch` is whatever was checked out when the session was first sent to.
-/// Neither is re-read, so a checkout inside the tree moves HEAD and leaves
-/// both describing a branch the session is no longer on — which the PR tab
-/// fails *closed* on, asking GitHub about a branch that has no PR and hiding
-/// itself because the answer is empty.
+/// here is the branch recorded at creation. New-branch worktrees record their
+/// UUID branch, while source-branch worktrees record the branch they share with
+/// the project checkout. Neither is re-read, so a checkout inside the tree moves
+/// HEAD and leaves the recorded value describing a branch the session is no
+/// longer on — which the PR tab fails *closed* on, asking GitHub about a branch
+/// that has no PR and hiding itself because the answer is empty.
 ///
 /// A null `observed` is the ordinary resting state, not an error: the read is
 /// per-session and lands a frame late, and a non-repo has no branch at all.
-/// The guess is right for every session that leaves HEAD where the CLI put it,
-/// which is most of them, so falling back to it beats drawing nothing.
+/// The recorded value is used while the git reading is pending, so the header
+/// and PR tab do not disappear for a frame after a session is opened.
 ///
 /// `worktreeRemoved` is the one case `observed` loses. A relocated session runs
 /// in the project root, shared with every other session and with the reader's
@@ -38,7 +37,7 @@ export function sessionBranch(
 ): string | null {
   if (session.worktreeRemoved) return session.branch;
   if (observed) return observed;
-  return session.worktreeName ? `worktree-${session.worktreeName}` : session.branch;
+  return session.branch;
 }
 
 /// Which pull request a sidebar row draws, out of every one on its branch.

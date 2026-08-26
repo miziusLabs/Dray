@@ -363,7 +363,7 @@ export type ContextWindow = { usedTokens: number, maxTokens: number, };
  */
 export type DeltaEvent = { "delta": "block_start", block: BlockRef, blockType: BlockType, } | { "delta": "text_delta", block: BlockRef, text: string, } | { "delta": "input_delta", block: BlockRef, partialJson: string, } | { "delta": "block_stop", block: BlockRef, };
 
-export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+export type Effort = "off" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ErrorSource = "harness" | "parser" | "process";
 
@@ -778,8 +778,8 @@ cwd: string,
  */
 projectPath: string, branch: string | null, 
 /**
- * `Some` marks this a worktree session; Pi names the branch
- * `worktree-<name>`.
+ * `Some` marks this a worktree session. The branch is either the source
+ * branch or a generated branch named exactly like the worktree UUID.
  */
 worktreeName: string | null, 
 /**
@@ -852,8 +852,8 @@ cwd: string,
  */
 projectPath: string, branch: string | null, 
 /**
- * `Some` marks this a worktree session; Pi names the branch
- * `worktree-<name>`.
+ * `Some` marks this a worktree session. The branch is either the source
+ * branch or a generated branch named exactly like the worktree UUID.
  */
 worktreeName: string | null, 
 /**

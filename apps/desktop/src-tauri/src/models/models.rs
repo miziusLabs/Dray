@@ -10,6 +10,7 @@ use ts_rs::TS;
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum Effort {
+    Off,
     Low,
     Medium,
     High,
@@ -21,6 +22,7 @@ impl Effort {
     /// The `--effort` flag value.
     pub fn as_arg(self) -> &'static str {
         match self {
+            Effort::Off => "off",
             Effort::Low => "low",
             Effort::Medium => "medium",
             Effort::High => "high",
@@ -34,6 +36,7 @@ impl Effort {
     /// worth reporting, where silently running a different effort is not.
     pub fn from_arg(alias: &str) -> Option<Self> {
         match alias {
+            "off" => Some(Effort::Off),
             "low" => Some(Effort::Low),
             "medium" => Some(Effort::Medium),
             "high" => Some(Effort::High),
@@ -212,6 +215,7 @@ mod wire_tests {
     #[test]
     fn every_effort_matches_its_cli_arg() {
         for e in [
+            Effort::Off,
             Effort::Low,
             Effort::Medium,
             Effort::High,

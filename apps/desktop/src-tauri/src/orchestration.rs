@@ -259,7 +259,7 @@ async fn create_session(create: CreateSession, app: &AppHandle) -> Result<Respon
     // the same call that drops an effort a model has no levels for.
     let effort = match create.effort.as_deref() {
         Some(alias) => Some(Effort::from_arg(alias).with_context(|| {
-            format!("unknown effort {alias:?} — try low, medium, high, xhigh or max")
+            format!("unknown effort {alias:?} — try off, low, medium, high, xhigh or max")
         })?),
         None => parent.as_ref().and_then(|p| p.effort),
     };
@@ -288,12 +288,16 @@ async fn create_session(create: CreateSession, app: &AppHandle) -> Result<Respon
             model,
             None,
             effort,
+            None,
+            None,
             permission_mode,
             &project_path,
             None,
             // Always. Sessions created this way are meant to run at the same
             // time, and several agents writing to one checkout overwrite each
             // other — the changes panel cannot even tell them apart.
+            true,
+            // Agent-created worktrees always use their own branch.
             true,
             // Never named by the caller: an agent has no basis for choosing
             // one, and a name that collides is a create that fails for a field
@@ -480,9 +484,12 @@ async fn send_message(send: SendMessage, app: &AppHandle) -> Result<Response> {
             target.model,
             target.pi_model.clone(),
             target.effort,
+            None,
+            None,
             target.permission_mode,
             &target.cwd,
             None,
+            false,
             false,
             None,
             None,

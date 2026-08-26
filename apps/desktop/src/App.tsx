@@ -43,8 +43,9 @@ import { warmHighlighter } from "@/hooks/useHighlighter";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { pushNotice } from "@/hooks/useNotices";
+import { titleModels, useTitlePrefs } from "@/hooks/useTitlePrefs";
 import { useSessions } from "@/hooks/useSessions";
-import type { WorktreeDisposition } from "@/types/events";
+import type { Effort, Model, PiModel, WorktreeDisposition } from "@/types/events";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
 import { useUpdater } from "@/hooks/useUpdater";
 import { changeRange, turnChangedTree } from "@/lib/changes";
@@ -55,6 +56,7 @@ import { buildTranscript } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 
 function App() {
+  const [titlePrefs, setTitlePrefs] = useTitlePrefs();
   const {
     selectedSessionId,
     selectedSession,
@@ -75,6 +77,7 @@ function App() {
     branches,
     branch,
     useWorktree,
+    worktreeBranchMode,
     busy,
     backgroundTasks,
     compacting,
@@ -91,6 +94,7 @@ function App() {
     setPendingBranch,
     runCheckout,
     setUseWorktree,
+    setWorktreeBranchMode,
     handleSendMsg,
     handleInterrupt,
     handleStopTask,
@@ -105,7 +109,27 @@ function App() {
     detachSession,
     deleteSession,
     removeWorktree,
-  } = useSessions();
+  } = useSessions(titlePrefs);
+
+  const titleModelOptions = useMemo(() => titleModels(models), [models]);
+  const handleTitleModelChange = (
+    nextModelId: Model["id"],
+    nextEffort: Effort | null,
+    nextPiModel: PiModel | null,
+  ) => {
+    const nextModel = titleModelOptions.find(
+      (model) =>
+        model.id === nextModelId &&
+        (model.id !== "pi" ||
+          (model.piModel?.provider === nextPiModel?.provider &&
+            model.piModel?.id === nextPiModel?.id)),
+    );
+    setTitlePrefs(
+      nextModelId,
+      nextEffort ?? nextModel?.defaultEffort ?? "off",
+      nextPiModel,
+    );
+  };
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
   const {
@@ -820,6 +844,13 @@ function App() {
       onOpenChange={setSettingsOpen}
       showArchived={showArchived}
       onShowArchivedChange={setShowArchived}
+      worktreeBranchMode={worktreeBranchMode}
+      onWorktreeBranchModeChange={setWorktreeBranchMode}
+      titleModels={titleModelOptions}
+      titleModelId={titlePrefs.modelId}
+      titlePiModel={titlePrefs.piModel}
+      titleEffort={titlePrefs.effort}
+      onTitleModelChange={handleTitleModelChange}
     />
     <WorktreeDialog
       prompt={worktreePrompt}

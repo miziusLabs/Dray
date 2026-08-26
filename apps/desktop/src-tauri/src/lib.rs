@@ -41,10 +41,13 @@ async fn send_msg(
     model: ModelId,
     pi_model: Option<PiModel>,
     effort: Option<Effort>,
+    title_model: Option<PiModel>,
+    title_effort: Option<Effort>,
     permission_mode: ApprovalPolicy,
     cwd: &str,
     branch: Option<&str>,
     use_worktree: bool,
+    create_worktree_branch: bool,
     worktree_name: Option<&str>,
     is_new_session: bool,
     app: AppHandle,
@@ -64,14 +67,16 @@ async fn send_msg(
             model,
             pi_model,
             effort,
+            title_model,
+            title_effort,
             permission_mode,
             cwd,
             branch,
             use_worktree,
+            create_worktree_branch,
             worktree_name,
-            // The composer offers no base ref: a worktree session created there
-            // is one the reader is starting fresh, and the picker already hides
-            // the branch list in worktree mode because `-w` would not honour it.
+            // The composer has no explicit base ref; its selected branch is
+            // recorded and used as the worktree's starting point.
             None,
             is_new_session,
             // The composer never has a parent, and its prompts are the user's

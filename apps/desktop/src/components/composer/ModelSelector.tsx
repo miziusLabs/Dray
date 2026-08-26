@@ -18,6 +18,7 @@ import {
 import type { Effort, Model, ModelId, PiModel } from "@/types/events";
 
 const EFFORT_LABELS: Record<Effort, string> = {
+  off: "Off",
   low: "Low",
   medium: "Medium",
   high: "High",
@@ -29,12 +30,12 @@ const EFFORT_LABELS: Record<Effort, string> = {
 /// where the model offers nothing to cycle, so the chord no-ops rather than
 /// inventing an effort the CLI would ignore.
 ///
-/// `low` is left out of the cycle and stays pickable from the menu: a blind
-/// chord landing on it makes the model worse at the work, which is not
-/// something anyone reaches for a shortcut to do. An effort outside the
-/// remaining list — `low` itself included — enters at the start.
+/// `off` and `low` are left out of the cycle and stay pickable from the menu:
+/// a blind chord landing on either changes the model's behavior too much for a
+/// shortcut. An effort outside the remaining list — `off` and `low` included —
+/// enters at the start.
 export function nextEffort(model: Model | undefined, current: Effort | null): Effort | null {
-  const cycle: Effort[] = model?.efforts.filter((e) => e !== "low") ?? [];
+  const cycle: Effort[] = model?.efforts.filter((e) => e !== "off" && e !== "low") ?? [];
   if (cycle.length === 0) return null;
   const from = current ?? model?.defaultEffort ?? null;
   const i = from ? cycle.indexOf(from) : -1;
@@ -44,12 +45,14 @@ export function nextEffort(model: Model | undefined, current: Effort | null): Ef
 export default function ModelSelector({
   models,
   modelId,
+  id,
   piModel,
   effort,
   onChange,
 }: {
   models: Model[];
   modelId: ModelId;
+  id?: string;
   piModel: PiModel | null;
   effort: Effort | null;
   onChange: (modelId: ModelId, effort: Effort | null, piModel: PiModel | null) => void;
@@ -82,6 +85,7 @@ export default function ModelSelector({
             {/* `text-ui` over the button's own `text-sm`: the toolbar has to track
                 the runtime font-size setting like the rest of the chrome. */}
             <Button
+              id={id}
               type="button"
               variant="ghost"
               size="sm"

@@ -1383,7 +1383,7 @@ pub async fn resolve_commit(cwd: &str, base: &str) -> Option<String> {
 }
 
 /// Creates a worktree at `~/.mizius/worktrees/<name>` on a new branch
-/// `worktree-<name>`, starting from `base`. Returns the path.
+/// named exactly `<name>`, starting from `base`. Returns the path.
 ///
 /// The symmetric half of [`remove_worktree`], and it exists because the harness
 /// cannot do this: `Pi worktree mode` resolves the repo's default branch, fetches
@@ -1392,13 +1392,10 @@ pub async fn resolve_commit(cwd: &str, base: &str) -> Option<String> {
 /// work is one Dray makes the tree for and then spawns the child *into*, with
 /// no `-w` at all.
 ///
-/// **A branch, never a detached HEAD.** Detaching would suit a session that
-/// only reads, but every surface downstream reads a worktree session's branch
-/// off its name — the PR tab looks one up, the handoff row offers to push it,
-/// and the removal above deletes it — so a tree with no branch breaks four
-/// things to prevent a commit nobody was going to object to. Same name the CLI
-/// would have minted, so `--from` changes where the branch starts and nothing
-/// else about it.
+/// A private branch is used by default so the worktree can commit without
+/// moving the source branch. The source-branch mode is available through
+/// [`create_worktree_with_mode`], which deliberately checks out the existing
+/// branch in the linked worktree instead.
 ///
 /// `-B` rather than `-b`, matching the CLI: a branch left behind by a tree
 /// deleted outside Dray would otherwise make that name fail forever, since the
@@ -1410,6 +1407,19 @@ pub async fn resolve_commit(cwd: &str, base: &str) -> Option<String> {
 /// never releases the lock, which is the whole reason removal has to unlock
 /// first; a tree made here has no such lock to leave behind.
 pub async fn create_worktree(project_path: &str, name: &str, base: &str) -> Result<String> {
+    create_worktree_with_mode(project_path, name, base, true).await
+}
+
+/// Creates a worktree using either a generated private branch or the source
+/// branch itself. With `create_branch = false`, Git requires `--force` because
+/// the source branch is already checked out in the project worktree; callers
+/// must not delete that branch when removing the linked worktree.
+pub async fn create_worktree_with_mode(
+    project_path: &str,
+    name: &str,
+    base: &str,
+    create_branch: bool,
+) -> Result<String> {
     let path = PathBuf::from(worktree_path(name));
 
     // Checked before the tree, not after: `worktree add` on an unresolvable
@@ -1422,25 +1432,38 @@ pub async fn create_worktree(project_path: &str, name: &str, base: &str) -> Resu
     fs::create_dir_all(path.parent().context("worktree path has no parent")?).await?;
 
     let path = path.to_string_lossy().into_owned();
-    let branch = format!("worktree-{name}");
-
-    // `--no-track` so the branch takes no upstream from the base. Without it a
-    // base that is a remote-tracking ref makes every later `git push` on this
-    // session's branch aim at the *base's* branch.
-    run(
-        project_path,
-        &[
-            "worktree",
-            "add",
-            "--no-track",
-            "-B",
-            &branch,
-            "--end-of-options",
-            &path,
-            base,
-        ],
-    )
-    .await?;
+    if create_branch {
+        // The generated branch has the same UUID as the worktree directory.
+        // `--no-track` keeps a remote base from becoming this branch's upstream.
+        run(
+            project_path,
+            &[
+                "worktree",
+                "add",
+                "--no-track",
+                "-B",
+                name,
+                "--end-of-options",
+                &path,
+                base,
+            ],
+        )
+        .await?;
+    } else {
+        // The source branch is already checked out in the project worktree.
+        run(
+            project_path,
+            &[
+                "worktree",
+                "add",
+                "--force",
+                "--end-of-options",
+                &path,
+                base,
+            ],
+        )
+        .await?;
+    }
 
     Ok(path)
 }
@@ -1723,14 +1746,13 @@ mod tests {
         format!("{name}-{}", dir.file_name().unwrap().to_string_lossy())
     }
 
-    /// Adds a worktree the way Pi does — under `~/.mizius/worktrees/`,
-    /// on a `worktree-<name>` branch — and locks it the way a `-p` session
-    /// leaves it locked.
+    /// Adds a worktree under `~/.mizius/worktrees/` on a generated branch and
+    /// locks it the way a `-p` session leaves it locked.
     async fn scratch_worktree(dir: &Path, name: &str, lock: Option<&str>) -> PathBuf {
         let at = dir.to_str().unwrap();
         let name = test_worktree_name(dir, name);
         let path = PathBuf::from(worktree_path(&name));
-        let branch = format!("worktree-{name}");
+        let branch = name.clone();
 
         run(
             at,
@@ -1785,7 +1807,7 @@ mod tests {
         run(at, &["checkout", "-q", "-"]).await.unwrap();
 
         let name = test_worktree_name(&dir, "reviewer");
-        let branch = format!("worktree-{name}");
+        let branch = name.clone();
         let path = create_worktree(at, &name, "authors-work")
             .await
             .expect("a branch that exists is a base");
@@ -1810,6 +1832,27 @@ mod tests {
         fs::remove_dir_all(&dir).await.ok();
     }
 
+    #[tokio::test]
+    async fn can_keep_the_source_branch_without_deleting_it() {
+        let dir = scratch_repo().await;
+        let at = dir.to_str().unwrap();
+        let name = test_worktree_name(&dir, "source");
+        let source = current_branch(at).await.unwrap();
+
+        let path = create_worktree_with_mode(at, &name, &source, false)
+            .await
+            .expect("the source branch can be checked out in the linked worktree");
+
+        assert_eq!(
+            current_branch(&path).await.as_deref(),
+            Some(source.as_str())
+        );
+        remove_worktree(at, &path, None).await.unwrap();
+        assert_eq!(current_branch(at).await.as_deref(), Some(source.as_str()));
+
+        fs::remove_dir_all(&dir).await.ok();
+    }
+
     /// Refused before anything is on disk, so a typo costs an error rather than
     /// a half-made tree the reader has to clean up.
     #[tokio::test]
@@ -1827,9 +1870,7 @@ mod tests {
 
         let name = test_worktree_name(&dir, "nope");
         assert!(!PathBuf::from(worktree_path(&name)).exists());
-        let branches = git(at, &["branch", "--list", "worktree-nope"])
-            .await
-            .unwrap();
+        let branches = git(at, &["branch", "--list", &name]).await.unwrap();
         assert!(branches.trim().is_empty(), "branch left behind: {branches}");
 
         fs::remove_dir_all(&dir).await.ok();
@@ -1848,7 +1889,7 @@ mod tests {
 
         assert_eq!(resolve_commit(at, "v1").await.as_deref(), Some(head));
         let name = test_worktree_name(&dir, "at-a-commit");
-        let branch = format!("worktree-{name}");
+        let branch = name.clone();
         let path = create_worktree(at, &name, head)
             .await
             .expect("a commit is a base");
@@ -1867,7 +1908,7 @@ mod tests {
         let at = dir.to_str().unwrap();
 
         let name = test_worktree_name(&dir, "recycled");
-        let branch = format!("worktree-{name}");
+        let branch = name.clone();
         run(at, &["branch", &branch]).await.unwrap();
         create_worktree(at, &name, "HEAD")
             .await
@@ -1898,7 +1939,7 @@ mod tests {
         let at = dir.to_str().unwrap();
 
         let name = test_worktree_name(&dir, "rolled-back");
-        let branch = format!("worktree-{name}");
+        let branch = name.clone();
         let path = create_worktree(at, &name, "HEAD").await.unwrap();
 
         let deleted_branch = remove_worktree(at, &path, Some(&branch))
@@ -1946,7 +1987,7 @@ mod tests {
         // A pid that cannot be running, which is what a `-p` session leaves
         // behind once its process is gone.
         let name = test_worktree_name(&dir, "one");
-        let branch = format!("worktree-{name}");
+        let branch = name.clone();
         let path = scratch_worktree(
             &dir,
             "one",
@@ -1965,9 +2006,7 @@ mod tests {
         assert!(deleted_branch, "the branch outlived its worktree");
         assert!(!path.exists(), "the directory is still on disk");
 
-        let branches = git(at, &["branch", "--list", "worktree-one"])
-            .await
-            .unwrap();
+        let branches = git(at, &["branch", "--list", &branch]).await.unwrap();
         assert!(branches.trim().is_empty(), "branch left behind: {branches}");
 
         let list = git(at, &["worktree", "list", "--porcelain"]).await.unwrap();
@@ -1983,7 +2022,7 @@ mod tests {
         // Our own pid: alive by definition, so the guard has to fire.
         let reason = format!("pi session two (pid {} start now)", std::process::id());
         let name = test_worktree_name(&dir, "two");
-        let branch = format!("worktree-{name}");
+        let branch = name.clone();
         let path = scratch_worktree(&dir, "two", Some(&reason)).await;
 
         let err = remove_worktree(at, path.to_str().unwrap(), Some(&branch))
@@ -2010,7 +2049,7 @@ mod tests {
         let dir = scratch_repo().await;
         let at = dir.to_str().unwrap();
         let name = test_worktree_name(&dir, "three");
-        let branch = format!("worktree-{name}");
+        let branch = name.clone();
         let path = scratch_worktree(&dir, "three", None).await;
 
         // What the reader does when they get tired of waiting for this button.
@@ -2036,7 +2075,7 @@ mod tests {
         let dir = scratch_repo().await;
         let at = dir.to_str().unwrap();
         let name = test_worktree_name(&dir, "four");
-        let branch = format!("worktree-{name}");
+        let branch = name.clone();
         let path = scratch_worktree(&dir, "four", None).await;
         let tree = path.to_str().unwrap();
 

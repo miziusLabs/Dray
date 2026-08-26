@@ -49,10 +49,8 @@ const check = (state: PrCheck["state"]): PrCheck => ({
 });
 
 describe("sessionBranch", () => {
-  it("names a worktree session's branch the way the CLI does", () => {
-    expect(sessionBranch({ branch: "main", worktreeName: "calm-owl" })).toBe(
-      "worktree-calm-owl",
-    );
+  it("uses the recorded source branch for a source-branch worktree", () => {
+    expect(sessionBranch({ branch: "main", worktreeName: "calm-owl" })).toBe("main");
   });
 
   it("uses the checked-out branch otherwise", () => {
@@ -64,14 +62,11 @@ describe("sessionBranch", () => {
   // on and loses only the name of the directory it ran in. The PR outlives
   // both, so the tab has to survive the tidy-up.
   it("keeps naming the PR's branch after the worktree is deleted", () => {
-    expect(sessionBranch({ branch: "worktree-calm-owl", worktreeName: null })).toBe(
-      "worktree-calm-owl",
-    );
+    expect(sessionBranch({ branch: "calm-owl", worktreeName: null })).toBe("calm-owl");
   });
 
-  // The name rebuilt from the index is a guess made at creation. Anything that
-  // checks out another branch inside the tree leaves it describing a branch the
-  // session is no longer on, and the PR tab hid itself over it.
+  // Git's live reading wins over the branch recorded at creation. Anything
+  // checking out another branch inside the tree should update the PR lookup.
   it("lets git's own reading of HEAD outrank the guess", () => {
     expect(
       sessionBranch({ branch: "main", worktreeName: "calm-owl" }, "fix/thing"),
@@ -87,18 +82,16 @@ describe("sessionBranch", () => {
   it("ignores the shared checkout's HEAD once the worktree is gone", () => {
     expect(
       sessionBranch(
-        { branch: "worktree-calm-owl", worktreeName: null, worktreeRemoved: true },
+        { branch: "calm-owl", worktreeName: null, worktreeRemoved: true },
         "main",
       ),
-    ).toBe("worktree-calm-owl");
+    ).toBe("calm-owl");
   });
 
   // The read is per-session and lands a frame late, and a non-repo has no
   // branch at all — so both fall back rather than drawing nothing.
   it("falls back while there is no reading to use", () => {
-    expect(sessionBranch({ branch: "main", worktreeName: "calm-owl" }, null)).toBe(
-      "worktree-calm-owl",
-    );
+    expect(sessionBranch({ branch: "main", worktreeName: "calm-owl" }, null)).toBe("main");
     expect(sessionBranch({ branch: "feature", worktreeName: null }, undefined)).toBe(
       "feature",
     );

@@ -6,9 +6,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import ModelSelector from "@/components/composer/ModelSelector";
 import { Switch } from "@/components/ui/switch";
-import { useAppSettings } from "@/hooks/useAppSettings";
-import type { SettingsView } from "@/types/events";
+import type { WorktreeBranchMode } from "@/hooks/useComposerPrefs";
+import type { Effort, Model, ModelId, PiModel } from "@/types/events";
 
 /// The app's preferences, such as they are.
 ///
@@ -21,14 +22,30 @@ export default function SettingsDialog({
   onOpenChange,
   showArchived,
   onShowArchivedChange,
+  worktreeBranchMode,
+  onWorktreeBranchModeChange,
+  titleModels,
+  titleModelId,
+  titlePiModel,
+  titleEffort,
+  onTitleModelChange,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
   showArchived: boolean;
   onShowArchivedChange: (next: boolean) => void;
+  worktreeBranchMode: WorktreeBranchMode;
+  onWorktreeBranchModeChange: (next: WorktreeBranchMode) => void;
+  titleModels: Model[];
+  titleModelId: ModelId;
+  titlePiModel: PiModel | null;
+  titleEffort: Effort;
+  onTitleModelChange: (
+    modelId: ModelId,
+    effort: Effort | null,
+    piModel: PiModel | null,
+  ) => void;
 }) {
-  const { settings, setAnalyticsEnabled } = useAppSettings(open);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Each row carries its own sentence, so there is no one description the
@@ -41,14 +58,81 @@ export default function SettingsDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-6">
-          <AnalyticsRow view={settings} onChange={setAnalyticsEnabled} />
           <SettledSessionsRow
             checked={showArchived}
             onChange={onShowArchivedChange}
           />
+          <WorktreeBranchModeRow
+            value={worktreeBranchMode}
+            onChange={onWorktreeBranchModeChange}
+          />
+          <TitleGenerationRow
+            models={titleModels}
+            modelId={titleModelId}
+            piModel={titlePiModel}
+            effort={titleEffort}
+            onChange={onTitleModelChange}
+          />
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function TitleGenerationRow({
+  models,
+  modelId,
+  piModel,
+  effort,
+  onChange,
+}: {
+  models: Model[];
+  modelId: ModelId;
+  piModel: PiModel | null;
+  effort: Effort;
+  onChange: (modelId: ModelId, effort: Effort | null, piModel: PiModel | null) => void;
+}) {
+  const id = useId();
+
+  return (
+    <SettingRow
+      id={id}
+      label="Title generation model"
+      description="Choose the model and reasoning level used to name new sessions."
+    >
+      <ModelSelector
+        id={id}
+        models={models}
+        modelId={modelId}
+        piModel={piModel}
+        effort={effort}
+        onChange={onChange}
+      />
+    </SettingRow>
+  );
+}
+
+function WorktreeBranchModeRow({
+  value,
+  onChange,
+}: {
+  value: WorktreeBranchMode;
+  onChange: (next: WorktreeBranchMode) => void;
+}) {
+  const id = useId();
+
+  return (
+    <SettingRow
+      id={id}
+      label="Create new worktree branches"
+      description="Off: stay on the branch the worktree was created from. On: create a new branch."
+    >
+      <Switch
+        id={id}
+        checked={value === "new"}
+        onCheckedChange={(checked) => onChange(checked ? "new" : "source")}
+      />
+    </SettingRow>
   );
 }
 
@@ -68,47 +152,6 @@ function SettledSessionsRow({
       description="Show settled sessions instead of active sessions."
     >
       <Switch id={id} checked={checked} onCheckedChange={onChange} />
-    </SettingRow>
-  );
-}
-
-/// Two sentences: what it is for, and what it never touches.
-///
-/// The second one is the row's whole job. "Analytics" reads as behavioural
-/// tracking to most people, and for a tool that watches you work on your own
-/// code, saying plainly that conversations and activity are not collected is
-/// the part worth the space. Kept short on purpose — an itemised list of
-/// fields reads as something to be wary of rather than something to skim.
-function AnalyticsRow({
-  view,
-  onChange,
-}: {
-  view: SettingsView | null;
-  onChange: (next: boolean) => void;
-}) {
-  const id = useId();
-
-  return (
-    <SettingRow
-      id={id}
-      label="Share basic analytics"
-      description={
-        view?.analyticsLocked
-          ? // Disabled and saying why, rather than hidden or — worse — drawn
-            // from the stored value and sitting at `on` while nothing is sent.
-            "Turned off for this run by DRAY_NO_ANALYTICS."
-          : "Counts how many people use Dray. Your conversations and activity are never collected."
-      }
-    >
-      <Switch
-        id={id}
-        // `null` until the first read lands. Disabled rather than guessing a
-        // value: either guess is wrong for somebody, and the dialog's own open
-        // animation is longer than a local file read.
-        disabled={view === null || view.analyticsLocked}
-        checked={view?.analyticsEnabled ?? false}
-        onCheckedChange={onChange}
-      />
     </SettingRow>
   );
 }

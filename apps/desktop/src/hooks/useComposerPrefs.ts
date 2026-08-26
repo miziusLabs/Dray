@@ -12,11 +12,13 @@ const SEED: ComposerPrefs = {
   effortByModel: {},
   permissionMode: "auto",
   useWorktree: false,
+  worktreeBranchMode: "source",
 };
 
 /// Effort is a property of the model, not of the picker: switching to Sonnet must
 /// not inherit the Max you last chose on Opus. Absent key = use the model default.
 export type EffortByModel = Partial<Record<ModelId, Effort>>;
+export type WorktreeBranchMode = "source" | "new";
 
 /// What a new session starts with. Deliberately not the whole composer: `branch`
 /// seeds from whatever the repo is checked out to, since restoring a name without
@@ -29,6 +31,7 @@ export type ComposerPrefs = {
   effortByModel: EffortByModel;
   permissionMode: ApprovalPolicy;
   useWorktree: boolean;
+  worktreeBranchMode: WorktreeBranchMode;
 };
 
 /// The sticky half of the composer. Every control the user can change writes here,
@@ -44,7 +47,13 @@ export function useComposerPrefs() {
   // lacks a key gets the seed for it rather than `undefined` reaching a picker.
   // Normalize preferences written by older builds so removed harnesses and
   // their model aliases cannot reach a new session.
-  const merged: ComposerPrefs = { ...SEED, ...prefs, harness: "pi", modelId: "pi" };
+  const merged: ComposerPrefs = {
+    ...SEED,
+    ...prefs,
+    harness: "pi",
+    modelId: "pi",
+    worktreeBranchMode: prefs.worktreeBranchMode === "new" ? "new" : "source",
+  };
 
   const patch = useCallback(
     (next: Partial<ComposerPrefs>) => setPrefs((prev) => ({ ...SEED, ...prev, ...next })),
