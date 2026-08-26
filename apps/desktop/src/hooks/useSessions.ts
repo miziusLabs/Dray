@@ -128,19 +128,6 @@ const effort: Effort | null = model
     : null
   : effortByModel[modelId] ?? null;
 
-// A null effort means "just switch to this model" — it must leave the model's
-// remembered pick alone, or coming back to Sonnet would lose the Extra High set
-// on it earlier. Only an explicit level writes to the map.
-const handleHarnessChange = (nextHarness: Harness) => {
-  setHarnessState(nextHarness);
-  // Switch the model immediately as well as refreshing the picker. Without this
-  // a quick first send after choosing Pi could reach Rust with the previous
-  // harness's model while the async model list is still loading.
-  setModelId(nextHarness === "pi" ? "pi" : prefs.modelId === "pi" ? "haiku" : prefs.modelId);
-  setPiModel(nextHarness === "pi" ? prefs.piModel : null);
-  setPrefs({ harness: nextHarness });
-};
-
 const handleModelChange = (
   nextModelId: ModelId,
   nextEffort: Effort | null,
@@ -1391,6 +1378,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleHarnessChange, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession, removeWorktree};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession, removeWorktree};
 
 }

@@ -82,7 +82,6 @@ function App() {
     contextUsage,
     error,
     setError,
-    handleHarnessChange,
     handleModelChange,
     setPermissionMode,
     handleAttachProject,
@@ -747,7 +746,6 @@ function App() {
           toolbar={
             <ComposerToolbar
               harness={harness}
-              onHarnessChange={handleHarnessChange}
               models={models}
               modelId={modelId}
               piModel={piModel}

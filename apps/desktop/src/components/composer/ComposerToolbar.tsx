@@ -1,7 +1,6 @@
 import { Plus } from "lucide-react";
 
 import BranchSelector from "@/components/composer/BranchSelector";
-import HarnessSelector from "@/components/composer/HarnessSelector";
 import BranchSwitchDialog from "@/components/composer/BranchSwitchDialog";
 import ContextMeter from "@/components/composer/ContextMeter";
 import ModelSelector from "@/components/composer/ModelSelector";
@@ -24,8 +23,6 @@ import type {
 
 export type ComposerToolbarProps = {
   harness: Harness;
-  onHarnessChange: (harness: Harness) => void;
-
   models: Model[];
   modelId: ModelId;
   piModel: PiModel | null;
@@ -74,7 +71,6 @@ export type ComposerToolbarProps = {
 /// the caller's, since only the caller knows which side of it the row sits on.
 export default function ComposerToolbar({
   harness,
-  onHarnessChange,
   models,
   modelId,
   piModel,
@@ -124,8 +120,6 @@ export default function ComposerToolbar({
           </KbdGroup>
         </TooltipContent>
       </Tooltip>
-
-      {isNewSession && <HarnessSelector value={harness} onChange={onHarnessChange} />}
 
       <ModelSelector
         models={models}

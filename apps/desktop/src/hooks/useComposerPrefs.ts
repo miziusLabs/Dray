@@ -6,8 +6,8 @@ import type { ApprovalPolicy, Effort, Harness, ModelId, PiModel } from "@/types/
 /// Seeds for a first run with nothing stored. Once the user picks anything, their
 /// pick is the default — these are never read again.
 const SEED: ComposerPrefs = {
-  harness: "claude_code",
-  modelId: "haiku",
+  harness: "pi",
+  modelId: "pi",
   piModel: null,
   effortByModel: {},
   permissionMode: "auto",
@@ -42,7 +42,12 @@ export function useComposerPrefs() {
 
   // Merged over the seed on read, so a record written by an older build that
   // lacks a key gets the seed for it rather than `undefined` reaching a picker.
-  const merged: ComposerPrefs = { ...SEED, ...prefs };
+  // Claude Code is no longer offered for new sessions. Normalize preferences
+  // written by older builds so they cannot select the removed provider.
+  const merged: ComposerPrefs =
+    prefs.harness === "pi"
+      ? { ...SEED, ...prefs }
+      : { ...SEED, ...prefs, harness: "pi", modelId: "pi", piModel: null };
 
   const patch = useCallback(
     (next: Partial<ComposerPrefs>) => setPrefs((prev) => ({ ...SEED, ...prev, ...next })),
