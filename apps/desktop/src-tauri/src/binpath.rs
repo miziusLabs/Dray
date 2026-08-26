@@ -1,14 +1,8 @@
-//! Finding the `claude` binary when the app wasn't launched from a shell.
+//! Finding agent binaries when the app wasn't launched from a shell.
 //!
 //! A bundled `.app` started from Finder or the Dock inherits `launchd`'s
-//! environment, not the user's. On macOS that means a `PATH` of roughly
-//! `/usr/bin:/bin:/usr/sbin:/sbin` — none of which holds `claude`, which
-//! installs to `~/.local/bin` or a node version manager's bin directory. So
-//! `Command::new("claude")` resolves under `pnpm tauri dev` and fails from the
-//! bundle, which is the same binary behaving differently by how it was started.
-//!
-//! Resolved once into a `OnceLock` and reused: the login-shell probe below costs
-//! real time (a shell reading the user's whole rc chain), and the answer can't
+//! minimal environment rather than the user's PATH. Resolve Pi once and reuse
+//! it: the login-shell probe below costs real time, and the answer cannot
 //! change while the app runs.
 
 use std::path::PathBuf;
@@ -16,32 +10,8 @@ use std::process::Stdio;
 use std::sync::OnceLock;
 use tokio::process::Command;
 
-static CLAUDE_PATH: OnceLock<PathBuf> = OnceLock::new();
 static PI_PATH: OnceLock<PathBuf> = OnceLock::new();
 static GH_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
-
-/// The absolute path to `claude`, or the bare name as a last resort.
-///
-/// Falling back to `"claude"` rather than erroring keeps the failure where it
-/// already was — a spawn error naming the binary — instead of turning a
-/// resolvable-by-PATH case we didn't predict into a hard stop.
-pub async fn claude() -> PathBuf {
-    if let Some(path) = CLAUDE_PATH.get() {
-        return path.clone();
-    }
-
-    let resolved = resolve("claude")
-        .await
-        .unwrap_or_else(|| PathBuf::from("claude"));
-
-    // A race here is harmless: both threads resolved the same binary, and the
-    // loser just drops its copy.
-    let _ = CLAUDE_PATH.set(resolved);
-    CLAUDE_PATH
-        .get()
-        .cloned()
-        .unwrap_or_else(|| PathBuf::from("claude"))
-}
 
 /// The absolute path to `pi`, or the bare name as a last resort.
 pub async fn pi() -> PathBuf {
@@ -79,7 +49,7 @@ pub fn agent_path() -> String {
 
 /// The absolute path to `gh`, or `None` where it isn't installed.
 ///
-/// `None` rather than a bare-name fallback, unlike [`claude`]: `gh` is optional
+/// `None` rather than a bare-name fallback: `gh` is optional
 /// here, and the caller turns a missing one into a line telling the reader to
 /// install it. A spawn error naming the binary would be the same fact worded as
 /// a crash.
@@ -126,7 +96,7 @@ fn search_path(bin: &str) -> Option<PathBuf> {
 /// inherits this process's `PATH`, and a bundled `.app` launched from Finder
 /// inherits launchd's, which holds none of these. So a `dray` the user has
 /// installed is invisible to the agent unless these are put back — the same
-/// failure this module exists to solve for `claude`, one layer out.
+/// failure this module exists to solve for Pi, one layer out.
 pub fn known_dirs() -> Vec<PathBuf> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
@@ -134,7 +104,6 @@ pub fn known_dirs() -> Vec<PathBuf> {
 
     let mut dirs = vec![
         home.join(".local/bin"),
-        home.join(".claude/local"),
         home.join(".bun/bin"),
         home.join(".npm-global/bin"),
         PathBuf::from("/opt/homebrew/bin"),
@@ -151,8 +120,8 @@ pub fn known_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// The directories `claude` actually installs to, checked directly so the
-/// common bundle launch never pays for a shell spawn. Not exhaustive by design
+/// The common install directories, checked directly so a bundle launch never
+/// pays for a shell spawn. Not exhaustive by design
 /// — [`login_shell_which`] is the general answer, this is the fast path.
 fn search_known_dirs(bin: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
@@ -221,20 +190,6 @@ fn is_executable(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The resolver must agree with the shell about where `claude` is. Skipped
-    /// rather than failed where it isn't installed, so CI without the CLI stays
-    /// green.
-    #[tokio::test]
-    async fn finds_the_claude_binary() {
-        let Some(found) = resolve("claude").await else {
-            eprintln!("claude not installed; skipping");
-            return;
-        };
-
-        assert!(found.is_absolute(), "got a bare name: {found:?}");
-        assert!(is_executable(&found));
-    }
 
     /// Pi is a Node entrypoint, so the same resolver must find it before a
     /// bundled app tries to spawn its shebang.

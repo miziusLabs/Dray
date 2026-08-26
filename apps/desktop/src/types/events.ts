@@ -10,7 +10,7 @@ export type AgentEvent = { id: string, sessionId: string, harness: Harness,
  * Position in the session's event log, and the cursor for reconnecting a UI
  * to a running session. One counter per session, shared by mapped stdout
  * lines and events the app synthesizes itself, seeded from the persisted log
- * on resume. Never sort by `ts` — most Claude Code events omit it.
+ * on resume. Never sort by `ts` — most Pi events omit it.
  */
 seq: number, ts: string, turnId: string | null, 
 /**
@@ -81,8 +81,8 @@ queued: boolean,
 from: MessageSender | null, } | { "type": "assistant_text", 
 /**
  * `Some` only when this content was also streamed, naming the preview
- * it supersedes. `None` — the common case, covering Claude Code
- * subagents and all of Codex — means nothing was streamed and the
+ * it supersedes. `None` — the common case, covering Pi
+ * subagents and all of Pi — means nothing was streamed and the
  * event simply appends in `seq` order.
  */
 block: BlockRef | null, text: string, } | { "type": "reasoning", block: BlockRef | null, text: string, encrypted: boolean, } | { "type": "delta" } & DeltaEvent | { "type": "tool_call_started", callId: string, 
@@ -96,12 +96,12 @@ name: string, toolType: ToolType,
  */
 input: JsonValue, 
 /**
- * Input that isn't JSON at all — Codex's `custom_tool_call.input` is raw
+ * Input that isn't JSON at all — Pi's `custom_tool_call.input` is raw
  * JS source.
  */
 rawInput: string | null, title: string | null, } | { "type": "tool_call_completed", callId: string, result: ToolResult, } | { "type": "file_edits", callId: string | null, edits: Array<FileEdit>, } | { "type": "subagent_started", agentId: string, label: string, description: string | null, prompt: string | null, } | { "type": "subagent_progress", agentId: string, 
 /**
- * What the subagent is doing right now — Claude Code rewrites this per
+ * What the subagent is doing right now — Pi rewrites this per
  * progress event, so it drives a live status line without expanding
  * the subagent's own events.
  */
@@ -258,7 +258,7 @@ taskType: string, description: string, };
 
 /**
  * Joins streamed content to its committed counterpart. A message is often
- * `[text, tool_use, …]` and each block arrives as its own event; Claude Code's
+ * `[text, tool_use, …]` and each block arrives as its own event; Pi's
  * committed events carry no index, so the mapper derives one by counting blocks
  * per `message_id` in arrival order.
  */
@@ -366,7 +366,7 @@ export type ContextWindow = { usedTokens: number, maxTokens: number, };
  *
  * **Deltas are a preview, never the source of truth**: the committed event for
  * the same [`BlockRef`] supersedes whatever they accumulated. Absent deltas are
- * the common case — Codex emits none, Claude Code none for subagent output — so
+ * the common case — Pi emits none, Pi none for subagent output — so
  * consumers must render correctly without them.
  * Tagged on `delta`, not `type`: [`AgentEventPayload::Delta`] is a newtype
  * variant, so these fields flatten into the payload object alongside its own
@@ -417,7 +417,7 @@ newText: string | null,
  */
 unreadable: Unreadable | null, };
 
-export type Harness = "claude_code" | "codex" | "pi";
+export type Harness = "pi";
 
 export type HookPhase = "started" | "finished";
 
@@ -471,7 +471,7 @@ efforts: Array<Effort>, defaultEffort: Effort | null, };
  * model beats failing the whole index read and emptying the sidebar. It maps
  * to no alias, so [`find_model`] rejects it and it can't reach a spawn.
  */
-export type ModelId = "opus" | "sonnet" | "fable" | "haiku" | "pi" | "unknown";
+export type ModelId = "pi" | "unknown";
 
 /**
  * What one model has consumed **for the session so far** — cumulative and
@@ -490,13 +490,13 @@ export type ModelId = "opus" | "sonnet" | "fable" | "haiku" | "pi" | "unknown";
  */
 export type ModelUsage = { 
 /**
- * The harness's own key — a dated id (`claude-haiku-4-5-20251001`), not the
+ * The harness's own key — a dated id (`pi-haiku-4-5-20251001`), not the
  * alias a session was started with.
  */
 model: string, inputTokens: number | null, outputTokens: number | null, cachedInputTokens: number | null, cacheWriteTokens: number | null, webSearchRequests: number | null, costUsd: number | null, 
 /**
  * This model's context window. Also what the composer's gauge measures
- * against — see `context_window` in the Claude Code mapper.
+ * against — see `context_window` in the Pi mapper.
  */
 contextWindow: number | null, maxOutputTokens: number | null, };
 
@@ -780,7 +780,7 @@ queued: QueuedMessage | null, };
 export type SessionIndexItem = { sessionId: string, harness: Harness, 
 /**
  * Where the agent actually runs. Equals `project_path` for a normal
- * session; points inside `.claude/worktrees/<name>` for a worktree one.
+ * session; points inside `~/.mizius/worktrees/<id>` for a worktree one.
  */
 cwd: string, 
 /**
@@ -789,7 +789,7 @@ cwd: string,
  */
 projectPath: string, branch: string | null, 
 /**
- * `Some` marks this a worktree session; Claude Code names the branch
+ * `Some` marks this a worktree session; Pi names the branch
  * `worktree-<name>`.
  */
 worktreeName: string | null, 
@@ -854,7 +854,7 @@ export type SessionInfo = { cwd: string | null, model: string | null, harnessVer
 export type SessionSnapshot = { events: Array<AgentEvent>, sessionId: string, harness: Harness, 
 /**
  * Where the agent actually runs. Equals `project_path` for a normal
- * session; points inside `.claude/worktrees/<name>` for a worktree one.
+ * session; points inside `~/.mizius/worktrees/<id>` for a worktree one.
  */
 cwd: string, 
 /**
@@ -863,7 +863,7 @@ cwd: string,
  */
 projectPath: string, branch: string | null, 
 /**
- * `Some` marks this a worktree session; Claude Code names the branch
+ * `Some` marks this a worktree session; Pi names the branch
  * `worktree-<name>`.
  */
 worktreeName: string | null, 
@@ -948,8 +948,8 @@ export type SessionTitleEvent = { sessionId: string, title: string, };
  */
 export type Settings = { model: string | null, 
 /**
- * How much the agent may do without asking. Modeled on Claude Code's
- * `permissionMode`, which is a closed set; Codex's `approval_policy` maps
+ * How much the agent may do without asking. Modeled on Pi's
+ * `permissionMode`, which is a closed set; Pi's `approval_policy` maps
  * onto these, gaining variants if it turns out to need them.
  */
 approvalPolicy: PermissionMode | null, sandbox: string | null, writableRoots: Array<string>, networkAccess: boolean | null, fastMode: string | null, };
@@ -970,27 +970,18 @@ analyticsEnabled: boolean, analyticsLocked: boolean, };
 
 /**
  * One command the user may type. `name` carries no leading slash — the picker
- * adds it — and may be namespaced by its plugin (`railway:deploy`).
+ * adds it — and may be namespaced by an extension.
  */
-export type SlashCommand = { name: string, description: string, 
-/**
- * What the command does with the rest of the line — `<model>`, `[name]`.
- * Empty for most; the CLI sends `""` rather than omitting it.
- */
-argumentHint: string, 
-/**
- * Other names that reach the same command. Absent on most.
- */
-aliases: Array<string>, };
+export type SlashCommand = { name: string, description: string, argumentHint: string, aliases: Array<string>, };
 
 /**
  * A running subagent, whose events interleave with the main conversation's on
  * one stdout stream.
  *
- * Claude Code identifies these by `parent_tool_use_id` — the id of the tool
+ * Pi identifies these by `parent_tool_use_id` — the id of the tool
  * call that spawned it, so this equals the `call_id` of the corresponding
  * [`AgentEventPayload::ToolCallStarted`] and is what nests a subagent's work
- * under it. Codex uses `agent_path`.
+ * under it. Pi uses `agent_path`.
  */
 export type Subagent = { id: string, 
 /**
@@ -1050,8 +1041,8 @@ images: Array<ImageRef>, };
 export type ToolType = "shell" | "file_read" | "file_edit" | "search" | "web" | "mcp" | "subagent_spawn" | "other";
 
 /**
- * How a turn ended. Claude Code reports this as `is_error` on its result
- * event; Codex live emits `turn.completed` (a failed turn is uncaptured so
+ * How a turn ended. Pi reports this as `is_error` on its result
+ * event; Pi live emits `turn.completed` (a failed turn is uncaptured so
  * far). A user-abort outcome likely deserves its own variant once one has been
  * captured.
  */
@@ -1138,7 +1129,7 @@ aheadOfBase: number | null, };
  */
 export type WorktreeDisposition = { 
 /**
- * `false` once the directory is gone — removed by hand, or by a `claude`
+ * `false` once the directory is gone — removed by hand, or by a `Pi`
  * run that did have an exit prompt. The caller skips the dialog and goes
  * straight to relocating the session, so a half-dead tree tidies itself
  * up rather than asking a question about a directory nobody can see.

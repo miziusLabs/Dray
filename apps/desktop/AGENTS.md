@@ -4,7 +4,7 @@
 
 `src/` contains the React 19 and TypeScript frontend. Keep reusable UI in `src/components/`, shared types in `src/types/`, styles near their owning components, and static imports in `src/assets/`. Files copied unchanged at build time belong in `public/`.
 
-`src-tauri/` is the Rust/Tauri 2 backend. Tauri commands and app setup live in `src-tauri/src/lib.rs`; session and CLI-process management live in `session.rs` and `claude_code.rs`. Claude stream-event parsing is isolated in `claude_code/parser.rs`, with captured `.jsonl` fixtures beside it. Native icons and capabilities stay under `src-tauri/icons/` and `src-tauri/capabilities/`.
+`src-tauri/` is the Rust/Tauri 2 backend. Tauri commands and app setup live in `src-tauri/src/lib.rs`; session and CLI-process management live in `session.rs` and `harness/pi/pi.rs`. Pi event parsing is isolated in `harness/pi/parser.rs`, with captured `.jsonl` fixtures beside it. Native icons and capabilities stay under `src-tauri/icons/` and `src-tauri/capabilities/`.
 
 ## Build, Test, and Development Commands
 
@@ -30,6 +30,6 @@ Tests currently live in `parser.rs` under `#[cfg(test)]` and use real JSONL fixt
 
 ## Commit & Pull Request Guidelines
 
-Recent history uses short, sentence-case summaries such as `Wire Claude Code sessions to a chat UI with live event streaming.` Keep each commit focused and describe the user-visible intent.
+Recent history uses short, sentence-case summaries such as `Wire Pi sessions to a chat UI with live event streaming.` Keep each commit focused and describe the user-visible intent.
 
 Pull requests should include a concise summary, verification commands, and linked issues when applicable. Add screenshots or a short recording for UI changes. Call out fixture/schema changes and any required local CLI setup.

@@ -41,13 +41,13 @@ pub struct SessionIndexItem {
     pub session_id: String,
     pub harness: Harness,
     /// Where the agent actually runs. Equals `project_path` for a normal
-    /// session; points inside `.claude/worktrees/<name>` for a worktree one.
+    /// session; points inside `~/.mizius/worktrees/<id>` for a worktree one.
     pub cwd: String,
     /// Repo root — the grouping key, so worktree sessions still list under
     /// their project rather than each becoming a project of their own.
     pub project_path: String,
     pub branch: Option<String>,
-    /// `Some` marks this a worktree session; Claude Code names the branch
+    /// `Some` marks this a worktree session; Pi names the branch
     /// `worktree-<name>`.
     pub worktree_name: Option<String>,
     /// This session ran in a worktree and that tree has since been deleted, so
@@ -293,7 +293,7 @@ impl SessionIndexItem {
             session_id: session_id.to_string(),
             harness: self.harness,
             cwd: match worktree_name {
-                Some(name) => worktree_path(&self.project_path, name),
+                Some(name) => worktree_path(name),
                 None => self.cwd.clone(),
             },
             project_path: self.project_path.clone(),
@@ -357,8 +357,8 @@ fn fork_title(parent: &str) -> String {
     format!("{}…{SUFFIX}", truncated.trim_end())
 }
 
-/// A worktree name no tree and no session has claimed. Wider than
-/// [`resolve_worktree_name`] on purpose, and every caller wants the wider one: a
+/// A worktree id no tree and no session has claimed. Wider than checking disk
+/// alone on purpose, and every caller wants the wider one: a
 /// fork's tree is not created until its first send, so its name lives only in the
 /// index until then. Resolving against disk alone lets anything else drawing a
 /// name — another fork, or an ordinary new worktree session — take one a pending
@@ -368,33 +368,23 @@ fn fork_title(parent: &str) -> String {
 ///
 /// Only 16³ names exist, so this is not the vanishing odds it looks like.
 pub async fn resolve_unclaimed_worktree_name(
-    project_path: &str,
-    requested: Option<&str>,
+    _project_path: &str,
+    _requested: Option<&str>,
 ) -> Result<String> {
     let claimed: Vec<String> = list_session_index_items()
         .await?
         .into_iter()
-        .filter(|i| i.project_path == project_path)
         .filter_map(|i| i.worktree_name)
         .collect();
 
-    // A name the user asked for is answered, never silently swapped — so a
-    // collision here is an error rather than a redraw.
-    if let Some(name) = requested {
-        if claimed.iter().any(|c| c == name) {
-            bail!("a session is already using the worktree name '{name}'");
-        }
-        return resolve_worktree_name(project_path, Some(name));
-    }
-
     for _ in 0..16 {
-        let name = resolve_worktree_name(project_path, None)?;
-        if !claimed.contains(&name) {
-            return Ok(name);
+        let id = random_worktree_id();
+        if !claimed.contains(&id) && !PathBuf::from(worktree_path(&id)).exists() {
+            return Ok(id);
         }
     }
 
-    bail!("could not find an unused worktree name after 16 attempts")
+    bail!("could not find an unused worktree id after 16 attempts")
 }
 
 /// The branch a session's work lands on — the reading `--from <session-id>`
@@ -430,65 +420,20 @@ pub fn session_branch(item: &SessionIndexItem, observed: Option<&str>) -> Option
         .or_else(|| item.branch.clone())
 }
 
-/// `claude -w <name>` places the tree here and names its branch
-/// `worktree-<name>` — both confirmed against the worktree fixtures.
-pub fn worktree_path(project_path: &str, name: &str) -> String {
-    PathBuf::from(project_path)
-        .join(".claude")
+/// Worktrees live in a shared, private directory outside project checkouts.
+pub fn worktree_path(id: &str) -> String {
+    dirs::home_dir()
+        .expect("a home directory is required for worktrees")
+        .join(".mizius")
         .join("worktrees")
-        .join(name)
+        .join(id)
         .to_string_lossy()
         .into_owned()
 }
 
-const ADJECTIVES: [&str; 16] = [
-    "amber", "brisk", "calm", "dusky", "eager", "fleet", "gentle", "hazy", "ivory", "jolly",
-    "keen", "lucid", "mellow", "noble", "opal", "quiet",
-];
-
-const COLORS: [&str; 16] = [
-    "azure", "bronze", "crimson", "denim", "emerald", "fuchsia", "gold", "hazel", "indigo", "jade",
-    "khaki", "lilac", "maroon", "navy", "olive", "plum",
-];
-
-const NOUNS: [&str; 16] = [
-    "atlas", "beacon", "cedar", "delta", "ember", "fjord", "grove", "harbor", "isle", "jetty",
-    "kite", "lantern", "meadow", "nimbus", "orchard", "pebble",
-];
-
-/// Three-word name from v7 UUID entropy — avoids a `rand` dependency, and
-/// collisions only matter against worktrees that already exist on disk.
-fn random_worktree_name() -> String {
-    let bytes = Uuid::now_v7().into_bytes();
-    let pick = |i: usize, list: &[&'static str; 16]| list[(bytes[i] as usize) % list.len()];
-
-    format!(
-        "{}-{}-{}",
-        pick(8, &ADJECTIVES),
-        pick(10, &COLORS),
-        pick(12, &NOUNS)
-    )
-}
-
-/// Worktrees outlive the sessions that made them, so a name already on disk
-/// would silently attach this session to someone else's tree.
-pub fn resolve_worktree_name(project_path: &str, requested: Option<&str>) -> Result<String> {
-    if let Some(name) = requested {
-        let path = worktree_path(project_path, name);
-        if PathBuf::from(&path).exists() {
-            bail!("a worktree named '{name}' already exists at {path}");
-        }
-        return Ok(name.to_string());
-    }
-
-    for _ in 0..16 {
-        let name = random_worktree_name();
-        if !PathBuf::from(worktree_path(project_path, &name)).exists() {
-            return Ok(name);
-        }
-    }
-
-    bail!("could not find an unused worktree name after 16 attempts")
+/// A worktree id is a random UUID-4.
+fn random_worktree_id() -> String {
+    Uuid::new_v4().to_string()
 }
 
 /// Char-based so a multi-byte prompt can't panic on a byte-index slice.
@@ -1104,13 +1049,13 @@ mod tests {
     fn forking_in_place_inherits_the_tree_without_owning_it() {
         let mut parent = SessionIndexItem::new(
             "parent",
-            Harness::ClaudeCode,
-            "/p/.claude/worktrees/wt",
+            Harness::Pi,
+            "/p/.dray/worktrees/wt",
             "/p",
             Some("wt"),
             None,
             "add the PR panel",
-            ModelId::Opus,
+            ModelId::Pi,
             Some(Effort::High),
             ApprovalPolicy::AcceptEdits,
             None,
@@ -1143,13 +1088,13 @@ mod tests {
     fn forking_a_relocated_session_in_place_keeps_its_branch_authoritative() {
         let mut parent = SessionIndexItem::new(
             "parent",
-            Harness::ClaudeCode,
+            Harness::Pi,
             "/p",
             "/p",
             Some("wt"),
             None,
             "add the PR panel",
-            ModelId::Opus,
+            ModelId::Pi,
             None,
             ApprovalPolicy::Auto,
             None,
@@ -1172,13 +1117,13 @@ mod tests {
     fn a_sessions_branch_reads_the_same_way_the_pr_tab_reads_it() {
         let worktree = SessionIndexItem::new(
             "a",
-            Harness::ClaudeCode,
-            "/p/.claude/worktrees/calm-owl",
+            Harness::Pi,
+            "/p/.dray/worktrees/calm-owl",
             "/p",
             Some("calm-owl"),
             Some("main"),
             "hi",
-            ModelId::Opus,
+            ModelId::Pi,
             None,
             ApprovalPolicy::Auto,
             None,
@@ -1197,13 +1142,13 @@ mod tests {
 
         let plain = SessionIndexItem::new(
             "b",
-            Harness::ClaudeCode,
+            Harness::Pi,
             "/p",
             "/p",
             None,
             Some("feature"),
             "hi",
-            ModelId::Opus,
+            ModelId::Pi,
             None,
             ApprovalPolicy::Auto,
             None,
@@ -1230,13 +1175,13 @@ mod tests {
     fn a_fork_keeps_its_source_place_in_the_spawn_chain() {
         let mut spawned = SessionIndexItem::new(
             "spawned",
-            Harness::ClaudeCode,
+            Harness::Pi,
             "/p",
             "/p",
             None,
             None,
             "work the issue",
-            ModelId::Opus,
+            ModelId::Pi,
             None,
             ApprovalPolicy::Auto,
             Some("orchestrator"),
@@ -1259,13 +1204,13 @@ mod tests {
     fn forking_into_a_worktree_takes_a_tree_and_branch_of_its_own() {
         let parent = SessionIndexItem::new(
             "parent",
-            Harness::ClaudeCode,
+            Harness::Pi,
             "/p",
             "/p",
             None,
             Some("main"),
             "add the PR panel",
-            ModelId::Opus,
+            ModelId::Pi,
             None,
             ApprovalPolicy::Auto,
             None,
@@ -1273,7 +1218,7 @@ mod tests {
 
         let fork = parent.fork("child", Some("bold-otter"));
 
-        assert_eq!(fork.cwd, worktree_path("/p", "bold-otter"));
+        assert_eq!(fork.cwd, worktree_path("bold-otter"));
         assert_eq!(fork.project_path, "/p", "it still groups under the project");
         assert_eq!(fork.worktree_name.as_deref(), Some("bold-otter"));
         assert_eq!(fork.branch.as_deref(), Some("worktree-bold-otter"));
@@ -1320,7 +1265,7 @@ mod tests {
         let event = |payload| AgentEvent {
             id: "e1".into(),
             session_id: "parent".into(),
-            harness: Harness::ClaudeCode,
+            harness: Harness::Pi,
             seq: 0,
             ts: "t".into(),
             turn_id: None,
@@ -1378,13 +1323,13 @@ mod tests {
         let item = |id: &str, archived: bool| {
             let mut i = SessionIndexItem::new(
                 id,
-                Harness::ClaudeCode,
+                Harness::Pi,
                 "/p",
                 "/p",
                 None,
                 None,
                 "hi",
-                ModelId::Opus,
+                ModelId::Pi,
                 None,
                 ApprovalPolicy::Auto,
                 None,
@@ -1421,13 +1366,13 @@ mod tests {
     fn a_worktree_session_records_the_branch_its_work_lands_on() {
         let item = SessionIndexItem::new(
             "a",
-            Harness::ClaudeCode,
-            "/p/.claude/worktrees/calm-owl",
+            Harness::Pi,
+            "/p/.dray/worktrees/calm-owl",
             "/p",
             Some("calm-owl"),
             Some("main"),
             "hi",
-            ModelId::Opus,
+            ModelId::Pi,
             None,
             ApprovalPolicy::Auto,
             None,
@@ -1444,8 +1389,8 @@ mod tests {
     fn an_index_entry_without_the_flag_reads_as_a_tree_still_there() {
         let item: SessionIndexItem = serde_json::from_value(serde_json::json!({
             "sessionId": "a",
-            "harness": "claude_code",
-            "cwd": "/p/.claude/worktrees/calm-owl",
+            "harness": "pi",
+            "cwd": "/p/.dray/worktrees/calm-owl",
             "projectPath": "/p",
             "branch": "worktree-calm-owl",
             "worktreeName": "calm-owl",
@@ -1470,13 +1415,13 @@ mod tests {
         let session = |cwd: &str, branch: Option<&str>, worktree: Option<&str>| {
             SessionIndexItem::new(
                 "a",
-                Harness::ClaudeCode,
+                Harness::Pi,
                 cwd,
                 "/p",
                 worktree,
                 branch,
                 "hi",
-                ModelId::Opus,
+                ModelId::Pi,
                 None,
                 ApprovalPolicy::Auto,
                 None,
@@ -1487,7 +1432,7 @@ mod tests {
             // Relocated: the tree is gone and the branch is all that is left.
             session("/p", Some("worktree-calm-owl"), None),
             // Still in its tree — its own HEAD is the right thing to read.
-            session("/p/.claude/worktrees/calm-owl", None, Some("calm-owl")),
+            session("/p/.dray/worktrees/calm-owl", None, Some("calm-owl")),
             // Never had one.
             session("/p", Some("main"), None),
         ];
@@ -1507,13 +1452,13 @@ mod tests {
     fn snapshot_flattens_index_fields_beside_events() {
         let item = SessionIndexItem::new(
             "a",
-            Harness::ClaudeCode,
+            Harness::Pi,
             "/p",
             "/p",
             None,
             Some("main"),
             "hi",
-            ModelId::Opus,
+            ModelId::Pi,
             Some(Effort::High),
             ApprovalPolicy::AcceptEdits,
             None,

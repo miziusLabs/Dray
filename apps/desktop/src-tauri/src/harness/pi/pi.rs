@@ -223,7 +223,6 @@ pub async fn init(
         events,
         seq,
         status,
-        pending_permissions: Default::default(),
         pi_ui_requests: pending_ui,
         queued,
     })

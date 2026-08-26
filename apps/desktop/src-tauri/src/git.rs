@@ -5,6 +5,7 @@ use std::{
     time::SystemTime,
 };
 
+use crate::store::worktree_path;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use tokio::{fs, io::AsyncWriteExt, process::Command};
@@ -1181,7 +1182,7 @@ pub async fn push_branch(cwd: &str) -> Result<()> {
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeDisposition {
-    /// `false` once the directory is gone — removed by hand, or by a `claude`
+    /// `false` once the directory is gone — removed by hand, or by a `Pi`
     /// run that did have an exit prompt. The caller skips the dialog and goes
     /// straight to relocating the session, so a half-dead tree tidies itself
     /// up rather than asking a question about a directory nobody can see.
@@ -1210,14 +1211,14 @@ pub struct WorktreeDisposition {
 
 /// The lock a `-p` session leaves behind.
 ///
-/// Claude Code locks a worktree at creation and — verified against v2.1.239 —
+/// Pi locks a worktree at creation and — verified against v2.1.239 —
 /// a `-p` run does not release it on exit, so nearly every worktree Dray
 /// creates is still locked by a dead process. `git worktree remove --force`
 /// refuses a locked tree outright (exit 128, "use 'remove -f -f' to override
 /// or unlock first"), which makes unlocking a required step here rather than a
 /// defensive one.
 ///
-/// The reason it writes is `claude session <name> (pid <N> start <date>)`, and
+/// The reason it writes is `pi session <name> (pid <N> start <date>)`, and
 /// the pid is the whole point: a live one means some other session is working
 /// in that directory right now, and unlocking would pull the tree out from
 /// under it.
@@ -1276,15 +1277,17 @@ fn resolved(path: &Path) -> PathBuf {
 ///
 /// The guard is the path shape, not the index: an index entry is a record of
 /// what we did, while this answers what we are about to delete. It has to be
-/// a direct child of `<project>/.claude/worktrees/`, so a `..` segment, an
-/// absolute detour, or the project root itself can never resolve into a
-/// removal target.
-fn is_managed_worktree(project_path: &Path, worktree_path: &Path) -> bool {
+/// a direct child of `~/.mizius/worktrees/`, so a `..` segment, an absolute
+/// detour, or the worktree root itself can never resolve into a removal target.
+fn is_managed_worktree(_project_path: &Path, worktree_path: &Path) -> bool {
     if worktree_path.components().any(|c| c.as_os_str() == "..") {
         return false;
     }
 
-    worktree_path.parent() == Some(&project_path.join(".claude").join("worktrees"))
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    worktree_path.parent() == Some(&home.join(".mizius").join("worktrees"))
         && worktree_path.file_name().is_some()
 }
 
@@ -1379,11 +1382,11 @@ pub async fn resolve_commit(cwd: &str, base: &str) -> Option<String> {
     .filter(|s| !s.is_empty())
 }
 
-/// Creates a worktree at `<project>/.claude/worktrees/<name>` on a new branch
+/// Creates a worktree at `~/.mizius/worktrees/<name>` on a new branch
 /// `worktree-<name>`, starting from `base`. Returns the path.
 ///
 /// The symmetric half of [`remove_worktree`], and it exists because the harness
-/// cannot do this: `claude -w` resolves the repo's default branch, fetches
+/// cannot do this: `Pi worktree mode` resolves the repo's default branch, fetches
 /// `origin/<it>` and passes *that* to `git worktree add`, and its flag surface
 /// exposes no base ref at all. So a session that has to start from existing
 /// work is one Dray makes the tree for and then spawns the child *into*, with
@@ -1407,10 +1410,7 @@ pub async fn resolve_commit(cwd: &str, base: &str) -> Option<String> {
 /// never releases the lock, which is the whole reason removal has to unlock
 /// first; a tree made here has no such lock to leave behind.
 pub async fn create_worktree(project_path: &str, name: &str, base: &str) -> Result<String> {
-    let path = PathBuf::from(project_path)
-        .join(".claude")
-        .join("worktrees")
-        .join(name);
+    let path = PathBuf::from(worktree_path(name));
 
     // Checked before the tree, not after: `worktree add` on an unresolvable
     // start point leaves the branch and directory behind on some git versions,
@@ -1418,6 +1418,8 @@ pub async fn create_worktree(project_path: &str, name: &str, base: &str) -> Resu
     if resolve_commit(project_path, base).await.is_none() {
         bail!("{base} is not a branch, tag or commit in this repository");
     }
+
+    fs::create_dir_all(path.parent().context("worktree path has no parent")?).await?;
 
     let path = path.to_string_lossy().into_owned();
     let branch = format!("worktree-{name}");
@@ -1530,12 +1532,12 @@ fn is_stale_worktree_error(stderr: &str) -> bool {
 mod tests {
     use super::*;
 
-    // The verbatim reason `claude -p --worktree` leaves behind, captured from
+    // The verbatim reason `pi -p --worktree` leaves behind, captured from
     // v2.1.239 — a `-p` run never releases it, so this is the string almost
     // every removal has to get past.
-    const LOCK_REASON: &str = "claude session locktest (pid 33393 start Sun Aug 23 07:44:13 2026)";
+    const LOCK_REASON: &str = "pi session locktest (pid 33393 start Sun Aug 23 07:44:13 2026)";
 
-    const WORKTREE_LIST: &str = "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\nworktree /repo/.claude/worktrees/one\nHEAD def\nbranch refs/heads/worktree-one\nlocked claude session locktest (pid 33393 start Sun Aug 23 07:44:13 2026)\n\nworktree /repo/.claude/worktrees/two\nHEAD 012\nbranch refs/heads/worktree-two\n";
+    const WORKTREE_LIST: &str = "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\nworktree /repo/.mizius/worktrees/one\nHEAD def\nbranch refs/heads/worktree-one\nlocked pi session locktest (pid 33393 start Sun Aug 23 07:44:13 2026)\n\nworktree /repo/.mizius/worktrees/two\nHEAD 012\nbranch refs/heads/worktree-two\n";
 
     #[test]
     fn reads_the_pid_out_of_a_lock_reason() {
@@ -1549,13 +1551,13 @@ mod tests {
     #[test]
     fn finds_the_lock_for_one_worktree_only() {
         assert_eq!(
-            parse_lock_reason(WORKTREE_LIST, Path::new("/repo/.claude/worktrees/one")),
+            parse_lock_reason(WORKTREE_LIST, Path::new("/repo/.mizius/worktrees/one")),
             Some(LOCK_REASON.to_string())
         );
         // The unlocked record sits after the locked one, so a parser that
         // didn't reset on each `worktree` line would report its neighbour's.
         assert_eq!(
-            parse_lock_reason(WORKTREE_LIST, Path::new("/repo/.claude/worktrees/two")),
+            parse_lock_reason(WORKTREE_LIST, Path::new("/repo/.mizius/worktrees/two")),
             None
         );
         assert_eq!(parse_lock_reason(WORKTREE_LIST, Path::new("/repo")), None);
@@ -1565,18 +1567,20 @@ mod tests {
     fn only_direct_children_of_the_worktrees_dir_are_removable() {
         let repo = Path::new("/repo");
 
-        assert!(is_managed_worktree(
-            repo,
-            Path::new("/repo/.claude/worktrees/one")
-        ));
+        let managed = dirs::home_dir()
+            .unwrap()
+            .join(".mizius")
+            .join("worktrees")
+            .join("one");
+        assert!(is_managed_worktree(repo, &managed));
 
         // Each of these once resolved into something that is not a worktree.
         for path in [
             "/repo",
-            "/repo/.claude/worktrees",
-            "/repo/.claude/worktrees/one/src",
-            "/repo/.claude/worktrees/../../etc",
-            "/elsewhere/.claude/worktrees/one",
+            "/repo/.mizius/worktrees",
+            "/repo/.mizius/worktrees/one/src",
+            "/repo/.mizius/worktrees/../../etc",
+            "/elsewhere/.mizius/worktrees/one",
             "/repo/src",
         ] {
             assert!(
@@ -1589,7 +1593,7 @@ mod tests {
     #[test]
     fn a_forgotten_registration_reads_as_already_gone() {
         assert!(is_stale_worktree_error(
-            "fatal: '/repo/.claude/worktrees/one' is not a working tree"
+            "fatal: '/repo/.mizius/worktrees/one' is not a working tree"
         ));
         // A locked tree is a refusal to respect, not a tree to prune.
         assert!(!is_stale_worktree_error(
@@ -1715,12 +1719,17 @@ mod tests {
         dir
     }
 
-    /// Adds a worktree the way Claude Code does — under `.claude/worktrees/`,
+    fn test_worktree_name(dir: &Path, name: &str) -> String {
+        format!("{name}-{}", dir.file_name().unwrap().to_string_lossy())
+    }
+
+    /// Adds a worktree the way Pi does — under `~/.mizius/worktrees/`,
     /// on a `worktree-<name>` branch — and locks it the way a `-p` session
     /// leaves it locked.
     async fn scratch_worktree(dir: &Path, name: &str, lock: Option<&str>) -> PathBuf {
         let at = dir.to_str().unwrap();
-        let path = dir.join(".claude").join("worktrees").join(name);
+        let name = test_worktree_name(dir, name);
+        let path = PathBuf::from(worktree_path(&name));
         let branch = format!("worktree-{name}");
 
         run(
@@ -1757,7 +1766,7 @@ mod tests {
 
     /// The whole point of the function: the tree holds the commits of the ref
     /// it was based on, not whatever the default branch is at. That is what
-    /// `claude -w` cannot be asked for.
+    /// `Pi worktree mode` cannot be asked for.
     #[tokio::test]
     async fn creates_a_worktree_at_the_ref_it_was_given() {
         let dir = scratch_repo().await;
@@ -1775,7 +1784,9 @@ mod tests {
         run(at, &["commit", "-qm", "the work"]).await.unwrap();
         run(at, &["checkout", "-q", "-"]).await.unwrap();
 
-        let path = create_worktree(at, "reviewer", "authors-work")
+        let name = test_worktree_name(&dir, "reviewer");
+        let branch = format!("worktree-{name}");
+        let path = create_worktree(at, &name, "authors-work")
             .await
             .expect("a branch that exists is a base");
 
@@ -1787,14 +1798,15 @@ mod tests {
         // out twice, and a session that shares a branch can move it.
         assert_eq!(
             current_branch(&path).await.as_deref(),
-            Some("worktree-reviewer")
+            Some(branch.as_str())
         );
         // `--no-track`, or every push from this session would aim at the base.
         assert_eq!(
-            git(at, &["config", "--get", "branch.worktree-reviewer.merge"]).await,
+            git(at, &["config", "--get", &format!("branch.{name}.merge")]).await,
             None
         );
 
+        remove_worktree(at, &path, Some(&branch)).await.unwrap();
         fs::remove_dir_all(&dir).await.ok();
     }
 
@@ -1813,7 +1825,8 @@ mod tests {
             "unhelpful: {err}"
         );
 
-        assert!(!dir.join(".claude").join("worktrees").join("nope").exists());
+        let name = test_worktree_name(&dir, "nope");
+        assert!(!PathBuf::from(worktree_path(&name)).exists());
         let branches = git(at, &["branch", "--list", "worktree-nope"])
             .await
             .unwrap();
@@ -1834,9 +1847,12 @@ mod tests {
         run(at, &["tag", "v1"]).await.unwrap();
 
         assert_eq!(resolve_commit(at, "v1").await.as_deref(), Some(head));
-        create_worktree(at, "at-a-commit", head)
+        let name = test_worktree_name(&dir, "at-a-commit");
+        let branch = format!("worktree-{name}");
+        let path = create_worktree(at, &name, head)
             .await
             .expect("a commit is a base");
+        remove_worktree(at, &path, Some(&branch)).await.unwrap();
 
         fs::remove_dir_all(&dir).await.ok();
     }
@@ -1850,20 +1866,24 @@ mod tests {
         let dir = scratch_repo().await;
         let at = dir.to_str().unwrap();
 
-        run(at, &["branch", "worktree-recycled"]).await.unwrap();
-        create_worktree(at, "recycled", "HEAD")
+        let name = test_worktree_name(&dir, "recycled");
+        let branch = format!("worktree-{name}");
+        run(at, &["branch", &branch]).await.unwrap();
+        create_worktree(at, &name, "HEAD")
             .await
             .expect("a branch with no worktree behind it is ours to reset");
 
         // And the live half: the same name a second time is git's refusal, not
         // a silent second checkout.
-        let err = create_worktree(at, "recycled", "HEAD")
+        let err = create_worktree(at, &name, "HEAD")
             .await
             .expect_err("a branch another worktree holds must not be reset");
         assert!(
             err.to_string().contains("already used"),
             "unexpected: {err}"
         );
+        let path = worktree_path(&name);
+        remove_worktree(at, &path, Some(&branch)).await.unwrap();
 
         fs::remove_dir_all(&dir).await.ok();
     }
@@ -1877,9 +1897,11 @@ mod tests {
         let dir = scratch_repo().await;
         let at = dir.to_str().unwrap();
 
-        let path = create_worktree(at, "rolled-back", "HEAD").await.unwrap();
+        let name = test_worktree_name(&dir, "rolled-back");
+        let branch = format!("worktree-{name}");
+        let path = create_worktree(at, &name, "HEAD").await.unwrap();
 
-        let deleted_branch = remove_worktree(at, &path, Some("worktree-rolled-back"))
+        let deleted_branch = remove_worktree(at, &path, Some(&branch))
             .await
             .expect("a tree we made a moment ago is ours to remove");
 
@@ -1893,9 +1915,10 @@ mod tests {
 
         // And the name is free again, which is what makes the rollback complete
         // rather than merely tidy.
-        create_worktree(at, "rolled-back", "HEAD")
+        create_worktree(at, &name, "HEAD")
             .await
             .expect("a rolled-back name must not be burned");
+        remove_worktree(at, &path, Some(&branch)).await.unwrap();
 
         fs::remove_dir_all(&dir).await.ok();
     }
@@ -1922,10 +1945,12 @@ mod tests {
         let at = dir.to_str().unwrap();
         // A pid that cannot be running, which is what a `-p` session leaves
         // behind once its process is gone.
+        let name = test_worktree_name(&dir, "one");
+        let branch = format!("worktree-{name}");
         let path = scratch_worktree(
             &dir,
             "one",
-            Some("claude session one (pid 4294967294 start Sun Aug 23 07:44:13 2026)"),
+            Some("pi session one (pid 4294967294 start Sun Aug 23 07:44:13 2026)"),
         )
         .await;
 
@@ -1933,7 +1958,7 @@ mod tests {
         // the reader was already told what would be lost.
         fs::write(path.join("scratch.txt"), "wip\n").await.unwrap();
 
-        let deleted_branch = remove_worktree(at, path.to_str().unwrap(), Some("worktree-one"))
+        let deleted_branch = remove_worktree(at, path.to_str().unwrap(), Some(&branch))
             .await
             .expect("a stale lock is ours to clear");
 
@@ -1956,10 +1981,12 @@ mod tests {
         let dir = scratch_repo().await;
         let at = dir.to_str().unwrap();
         // Our own pid: alive by definition, so the guard has to fire.
-        let reason = format!("claude session two (pid {} start now)", std::process::id());
+        let reason = format!("pi session two (pid {} start now)", std::process::id());
+        let name = test_worktree_name(&dir, "two");
+        let branch = format!("worktree-{name}");
         let path = scratch_worktree(&dir, "two", Some(&reason)).await;
 
-        let err = remove_worktree(at, path.to_str().unwrap(), Some("worktree-two"))
+        let err = remove_worktree(at, path.to_str().unwrap(), Some(&branch))
             .await
             .expect_err("a live lock must not be cleared");
         assert!(
@@ -1968,6 +1995,12 @@ mod tests {
         );
 
         assert!(path.exists(), "a live session's files were deleted");
+        run(at, &["worktree", "unlock", path.to_str().unwrap()])
+            .await
+            .unwrap();
+        remove_worktree(at, path.to_str().unwrap(), Some(&branch))
+            .await
+            .unwrap();
 
         fs::remove_dir_all(&dir).await.ok();
     }
@@ -1976,12 +2009,14 @@ mod tests {
     async fn a_directory_deleted_by_hand_still_reports_success() {
         let dir = scratch_repo().await;
         let at = dir.to_str().unwrap();
+        let name = test_worktree_name(&dir, "three");
+        let branch = format!("worktree-{name}");
         let path = scratch_worktree(&dir, "three", None).await;
 
         // What the reader does when they get tired of waiting for this button.
         fs::remove_dir_all(&path).await.unwrap();
 
-        remove_worktree(at, path.to_str().unwrap(), Some("worktree-three"))
+        remove_worktree(at, path.to_str().unwrap(), Some(&branch))
             .await
             .expect("an already-gone worktree is the outcome we wanted");
 
@@ -2000,6 +2035,8 @@ mod tests {
     async fn counts_what_removal_would_cost() {
         let dir = scratch_repo().await;
         let at = dir.to_str().unwrap();
+        let name = test_worktree_name(&dir, "four");
+        let branch = format!("worktree-{name}");
         let path = scratch_worktree(&dir, "four", None).await;
         let tree = path.to_str().unwrap();
 
@@ -2024,12 +2061,17 @@ mod tests {
         // A branch some other ref also holds is not work this removal loses.
         run(
             at,
-            &["update-ref", "refs/remotes/origin/four", "worktree-four"],
+            &[
+                "update-ref",
+                &format!("refs/remotes/origin/{name}"),
+                &branch,
+            ],
         )
         .await
         .unwrap();
         let pushed = worktree_disposition(tree, at).await;
         assert_eq!(pushed.unpushed_commits, 0, "a pushed branch still warned");
+        remove_worktree(at, tree, Some(&branch)).await.unwrap();
 
         fs::remove_dir_all(&dir).await.ok();
     }

@@ -3,7 +3,7 @@ use crate::{
     events::ApprovalPolicy,
     files::FileMatch,
     git::BranchList,
-    harness::claude_code::commands::SlashCommand,
+    harness::pi::commands::SlashCommand,
     models::{Effort, Model, ModelId, PiModel},
     projects::Project,
     session::{Harness, QueuedMessage, SendOutcome, SessionManager},
@@ -53,8 +53,6 @@ async fn send_msg(
     manager: State<'_, SessionManager>,
 ) -> Result<SendOutcome, String> {
     let harness = match harness {
-        "claude_code" => Harness::ClaudeCode,
-        "codex" => Harness::Codex,
         "pi" | "pi_coding_agent" => Harness::Pi,
         _ => return Err("invalid harness".into()),
     };
@@ -99,7 +97,7 @@ async fn read_attachments(paths: Vec<String>) -> Vec<Attachment> {
 #[tauri::command]
 async fn list_models(harness: Option<&str>, cwd: Option<&str>) -> Result<Vec<Model>, String> {
     match harness {
-        Some("pi") | Some("pi_coding_agent") => {
+        None | Some("pi") | Some("pi_coding_agent") => {
             match harness::pi::commands::list_models(cwd).await {
                 Ok(models) if !models.is_empty() => Ok(models),
                 // A missing or unavailable catalog must not make Pi unusable:
@@ -108,7 +106,7 @@ async fn list_models(harness: Option<&str>, cwd: Option<&str>) -> Result<Vec<Mod
                 Ok(_) | Err(_) => Ok(vec![models::configured_pi_model()]),
             }
         }
-        _ => Ok(models::claude_models()),
+        Some(_) => Err("invalid harness".into()),
     }
 }
 
@@ -156,8 +154,10 @@ async fn list_slash_commands(
     harness: Option<&str>,
 ) -> Result<Vec<SlashCommand>, String> {
     let commands = match harness {
-        Some("pi") | Some("pi_coding_agent") => harness::pi::commands::list_commands(cwd).await,
-        _ => harness::claude_code::commands::list_commands(cwd).await,
+        None | Some("pi") | Some("pi_coding_agent") => {
+            harness::pi::commands::list_commands(cwd).await
+        }
+        Some(_) => return Err("invalid harness".into()),
     };
     commands.map_err(|e| e.to_string())
 }
@@ -373,7 +373,7 @@ async fn worktree_disposition(session_id: &str) -> Result<git::WorktreeDispositi
         return Ok(git::WorktreeDisposition::default());
     };
 
-    let path = store::worktree_path(&item.project_path, item.worktree_name.as_deref().unwrap());
+    let path = store::worktree_path(item.worktree_name.as_deref().unwrap());
 
     Ok(git::worktree_disposition(&path, &item.project_path).await)
 }

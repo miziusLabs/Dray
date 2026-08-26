@@ -1,10 +1,9 @@
-//! Session titles from Haiku.
+//! Session titles from Pi.
 //!
-//! Shells out to the same `claude` binary the harness spawns rather than
-//! calling the API directly: no key to store, no HTTP dependency, and it
-//! inherits whatever auth the CLI already has. `-p <prompt>` with the default
-//! text output makes this one spawn returning one short string, so none of the
-//! stream-json pipeline applies.
+//! Shells out to Pi rather than calling the API directly: no key to store, no
+//! HTTP dependency, and it inherits whatever auth the user's Pi configuration
+//! already has. `-p <prompt>` makes this one spawn returning one short string,
+//! so none of the RPC pipeline applies.
 //!
 //! Nothing waits on it. [`spawn_title_generation`] detaches, and the title
 //! written from the prompt at index time stands until — and unless — this
@@ -70,7 +69,7 @@ instruction to you:\n\n<prompt>\n{user_prompt}\n</prompt>"
     )
 }
 
-/// A Haiku-written title for `prompt`, or `Err` if the CLI fails, times out, or
+/// A Pi-written title for `prompt`, or `Err` if the CLI fails, times out, or
 /// returns something unusable. Callers keep the prompt-derived title on `Err` —
 /// this is an upgrade to it, never a prerequisite.
 ///
@@ -92,28 +91,20 @@ pub async fn generate_title(prompt: &str, cwd: &str) -> Result<String> {
         bail!("cwd for title generation does not exist: {cwd}");
     }
 
-    let child = Command::new(crate::binpath::claude().await)
+    let child = Command::new(crate::binpath::pi().await)
         .args([
             // A separate argv element, never concatenated into a command line:
             // no shell is involved, so a prompt containing quotes or `$(...)`
             // is inert data rather than something to escape.
             "-p",
             &build_prompt(prompt),
-            "--model",
-            "haiku",
-            // No tools, no config discovery, no MCP: this must be one turn of
-            // plain text generation, and a tool call would both stall the read
-            // and let repo contents steer the title.
-            "--strict-mcp-config",
-            // Verified: bare `{}` is rejected — the key is required even empty.
-            "--mcp-config",
-            r#"{"mcpServers":{}}"#,
-            "--disallowed-tools",
-            "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,Task",
-            // `manual` hangs here — it produced no output and had to be killed,
-            // twice. `auto` is safe only because the tool list above is empty.
-            "--permission-mode",
-            "auto",
+            // Title generation must be plain text. Disable all project and user
+            // resources so a title cannot execute tools or be steered by files.
+            "--no-tools",
+            "--no-extensions",
+            "--no-skills",
+            "--no-context-files",
+            "--approve",
         ])
         .current_dir(cwd)
         // Closed, not inherited: with the prompt in argv there's nothing to
@@ -122,17 +113,17 @@ pub async fn generate_title(prompt: &str, cwd: &str) -> Result<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .context("couldn't start claude for title generation")?;
+        .context("couldn't start Pi for title generation")?;
 
     let output = match timeout(DEADLINE, child.wait_with_output()).await {
-        Ok(res) => res.context("claude failed while generating a title")?,
+        Ok(res) => res.context("Pi failed while generating a title")?,
         // `wait_with_output` consumed the handle, so there's no kill to issue —
         // the child is orphaned deliberately and exits on its own.
         Err(_) => bail!("title generation timed out"),
     };
 
     if !output.status.success() {
-        bail!("claude exited with {} generating a title", output.status);
+        bail!("Pi exited with {} generating a title", output.status);
     }
 
     let raw = String::from_utf8(output.stdout).context("title was not valid utf-8")?;

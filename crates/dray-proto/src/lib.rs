@@ -93,8 +93,8 @@ pub struct CreateSession {
     /// refuses.
     #[serde(default)]
     pub project_path: Option<String>,
-    /// `None` inherits the parent session's model, or the app's default with no
-    /// parent. A bare alias (`opus`), matching what the composer stores.
+    /// `None` inherits the parent session's model, or Pi's configured model with
+    /// no parent.
     #[serde(default)]
     pub model: Option<String>,
     /// `low`..`max`. `None` inherits the parent's, and failing that the model's
@@ -102,8 +102,7 @@ pub struct CreateSession {
     /// levels must be sent none at all.
     #[serde(default)]
     pub effort: Option<String>,
-    /// `claude_code` or `pi`. `None` inherits the parent's, and defaults to
-    /// Claude Code with no parent.
+    /// `pi`. `None` inherits the parent's, and defaults to Pi with no parent.
     #[serde(default)]
     pub harness: Option<String>,
     /// The session whose agent is making this call, from `DRAY_SESSION_ID`.

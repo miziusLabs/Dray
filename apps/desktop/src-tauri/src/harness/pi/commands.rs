@@ -4,9 +4,9 @@
 //! protocol. Asking Pi itself keeps this list aligned with the resources loaded
 //! from `~/.pi/agent` and the current project.
 
-use crate::harness::claude_code::commands::SlashCommand;
 use crate::models::{Effort, Model, PiModel};
 use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, process::Stdio, sync::OnceLock, time::Duration};
 use tokio::{
@@ -15,6 +15,7 @@ use tokio::{
     sync::Mutex,
     time::timeout,
 };
+use ts_rs::TS;
 
 const REQUEST_ID: &str = "dray-list-commands";
 const MODELS_REQUEST_ID: &str = "dray-list-models";
@@ -23,6 +24,21 @@ const HIDDEN: [&str; 4] = ["clear", "fast", "model", "rename"];
 
 static CACHE: OnceLock<Mutex<HashMap<String, Vec<SlashCommand>>>> = OnceLock::new();
 static EXTENSION_CACHE: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+
+/// One command the user may type. `name` carries no leading slash — the picker
+/// adds it — and may be namespaced by an extension.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommand {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub argument_hint: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+}
 
 /// Returns commands registered by Pi extensions, prompt templates, and skills.
 pub async fn list_commands(cwd: &str) -> Result<Vec<SlashCommand>> {

@@ -38,7 +38,7 @@ pub struct AgentEvent {
     /// Position in the session's event log, and the cursor for reconnecting a UI
     /// to a running session. One counter per session, shared by mapped stdout
     /// lines and events the app synthesizes itself, seeded from the persisted log
-    /// on resume. Never sort by `ts` — most Claude Code events omit it.
+    /// on resume. Never sort by `ts` — most Pi events omit it.
     pub seq: u64,
     pub ts: String,
     pub turn_id: Option<String>,
@@ -55,10 +55,10 @@ pub struct AgentEvent {
 /// A running subagent, whose events interleave with the main conversation's on
 /// one stdout stream.
 ///
-/// Claude Code identifies these by `parent_tool_use_id` — the id of the tool
+/// Pi identifies these by `parent_tool_use_id` — the id of the tool
 /// call that spawned it, so this equals the `call_id` of the corresponding
 /// [`AgentEventPayload::ToolCallStarted`] and is what nests a subagent's work
-/// under it. Codex uses `agent_path`.
+/// under it. Pi uses `agent_path`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
@@ -81,7 +81,7 @@ pub struct Subagent {
 )]
 pub enum AgentEventPayload {
     // ---------- session / turn lifecycle ----------
-    /// Claude Code emits one `init` per turn, not per session — the tool list
+    /// Pi emits one `init` per turn, not per session — the tool list
     /// grows between them as deferred tools load — so this carries whatever the
     /// turn was configured with. The first of a session is the session's.
     ///
@@ -150,15 +150,15 @@ pub enum AgentEventPayload {
     },
     AssistantText {
         /// `Some` only when this content was also streamed, naming the preview
-        /// it supersedes. `None` — the common case, covering Claude Code
-        /// subagents and all of Codex — means nothing was streamed and the
+        /// it supersedes. `None` — the common case, covering Pi
+        /// subagents and all of Pi — means nothing was streamed and the
         /// event simply appends in `seq` order.
         #[serde(default)]
         block: Option<BlockRef>,
         text: String,
     },
     /// `encrypted` records that a reasoning step happened but its content is
-    /// unreadable, which is how Codex reports reasoning it won't disclose.
+    /// unreadable, which is how Pi reports reasoning it won't disclose.
     Reasoning {
         #[serde(default)]
         block: Option<BlockRef>,
@@ -181,7 +181,7 @@ pub enum AgentEventPayload {
         /// Always an object. JSON-encoded argument strings are parsed here;
         /// unparseable input becomes `{"_unparsed": "…"}` rather than dropped.
         input: Value,
-        /// Input that isn't JSON at all — Codex's `custom_tool_call.input` is raw
+        /// Input that isn't JSON at all — Pi's `custom_tool_call.input` is raw
         /// JS source.
         raw_input: Option<String>,
         title: Option<String>,
@@ -190,7 +190,7 @@ pub enum AgentEventPayload {
         call_id: String,
         result: ToolResult,
     },
-    /// Structured file changes. Codex reports these first-class; Claude Code
+    /// Structured file changes. Pi reports these first-class; Pi
     /// does not, so its edits currently surface as ordinary
     /// [`ToolType::FileEdit`] calls.
     FileEdits {
@@ -211,7 +211,7 @@ pub enum AgentEventPayload {
     },
     SubagentProgress {
         agent_id: String,
-        /// What the subagent is doing right now — Claude Code rewrites this per
+        /// What the subagent is doing right now — Pi rewrites this per
         /// progress event, so it drives a live status line without expanding
         /// the subagent's own events.
         description: Option<String>,
@@ -523,8 +523,8 @@ pub struct BackgroundTask {
     pub description: String,
 }
 
-/// How a turn ended. Claude Code reports this as `is_error` on its result
-/// event; Codex live emits `turn.completed` (a failed turn is uncaptured so
+/// How a turn ended. Pi reports this as `is_error` on its result
+/// event; Pi live emits `turn.completed` (a failed turn is uncaptured so
 /// far). A user-abort outcome likely deserves its own variant once one has been
 /// captured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -536,7 +536,7 @@ pub enum TurnStatus {
 }
 
 /// Joins streamed content to its committed counterpart. A message is often
-/// `[text, tool_use, …]` and each block arrives as its own event; Claude Code's
+/// `[text, tool_use, …]` and each block arrives as its own event; Pi's
 /// committed events carry no index, so the mapper derives one by counting blocks
 /// per `message_id` in arrival order.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -551,7 +551,7 @@ pub struct BlockRef {
 ///
 /// **Deltas are a preview, never the source of truth**: the committed event for
 /// the same [`BlockRef`] supersedes whatever they accumulated. Absent deltas are
-/// the common case — Codex emits none, Claude Code none for subagent output — so
+/// the common case — Pi emits none, Pi none for subagent output — so
 /// consumers must render correctly without them.
 /// Tagged on `delta`, not `type`: [`AgentEventPayload::Delta`] is a newtype
 /// variant, so these fields flatten into the payload object alongside its own
@@ -739,8 +739,8 @@ pub struct McpServer {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub model: Option<String>,
-    /// How much the agent may do without asking. Modeled on Claude Code's
-    /// `permissionMode`, which is a closed set; Codex's `approval_policy` maps
+    /// How much the agent may do without asking. Modeled on Pi's
+    /// `permissionMode`, which is a closed set; Pi's `approval_policy` maps
     /// onto these, gaining variants if it turns out to need them.
     pub approval_policy: Option<PermissionMode>,
     pub sandbox: Option<String>,
@@ -814,7 +814,7 @@ pub fn now_rfc3339() -> String {
 }
 
 /// Unix seconds → RFC3339, for wire fields carrying an epoch timestamp where
-/// this model uses strings — Claude Code's `resetsAt`, notably.
+/// this model uses strings — Pi's `resetsAt`, notably.
 pub fn rfc3339_from_unix(secs: i64) -> String {
     rfc3339(secs, 0)
 }

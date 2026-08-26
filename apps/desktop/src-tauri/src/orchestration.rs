@@ -15,7 +15,7 @@
 
 use crate::{
     events::{ApprovalPolicy, MessageSender},
-    models::{default_model, find_model, Effort, ModelId},
+    models::{Effort, ModelId},
     session::{Harness, SessionManager},
     store::{self, SessionIndexItem},
 };
@@ -423,37 +423,23 @@ async fn depth_of(item: &SessionIndexItem) -> Result<usize> {
     Ok(depth)
 }
 
-/// The caller's alias if it gave one, else the parent's recorded model, else
-/// the app default. A parent indexed before models were recorded reads back as
-/// `Unknown`, which has no CLI alias — so that falls through to the default
-/// rather than failing a create for a field the user never chose.
+/// Pi owns the provider/model catalog. The request may name Pi explicitly,
+/// inherit it from the parent, or omit it and use Pi by default.
 fn resolve_model(
     requested: Option<&str>,
     parent: Option<&SessionIndexItem>,
-    harness: Harness,
+    _harness: Harness,
 ) -> Result<ModelId> {
-    if harness == Harness::Pi {
-        if let Some(alias) = requested {
-            if alias != "pi" {
-                bail!("Pi uses the provider and model configured in ~/.pi/agent/settings.json");
-            }
-        }
-        return Ok(ModelId::Pi);
-    }
-
     if let Some(alias) = requested {
-        let id = ModelId::from_arg(alias)
-            .filter(|id| *id != ModelId::Pi && find_model(*id, None).is_some())
-            .with_context(|| {
-                format!("unknown model {alias:?} — try opus, sonnet, fable or haiku")
-            })?;
-        return Ok(id);
+        if alias != "pi" {
+            bail!("Pi uses the provider and model configured in ~/.pi/agent/settings.json");
+        }
     }
 
     Ok(parent
         .map(|p| p.model)
-        .filter(|id| *id != ModelId::Pi && find_model(*id, None).is_some())
-        .unwrap_or_else(default_model))
+        .filter(|model| *model == ModelId::Pi)
+        .unwrap_or(ModelId::Pi))
 }
 
 /// Sends a prompt into a session that already exists.
@@ -522,8 +508,8 @@ async fn send_message(send: SendMessage, app: &AppHandle) -> Result<Response> {
 /// control-request subtype carries a setting (`set_model`,
 /// `set_permission_mode`, `interrupt`, `stop_task`, `initialize`) and none
 /// carries metadata, unknown fields are dropped in silence rather than
-/// refused, and `--append-system-prompt` is fixed at spawn. Codex is no
-/// different — `codex exec` takes a prompt and nothing beside it. So a prefix
+/// refused, and `--append-system-prompt` is fixed at spawn. Pi is no
+/// different — Pi takes a prompt and nothing beside it. So a prefix
 /// is not one option among several here; it is the only one.
 ///
 /// The transcript, meanwhile, has the field and so never parses this line back
@@ -563,14 +549,12 @@ async fn sender(send: &SendMessage) -> Option<MessageSender> {
         })
 }
 
-/// The caller's pick, else the parent's, else Claude Code.
+/// The caller's pick, else the parent's, else Pi.
 fn resolve_harness(requested: Option<&str>, parent: Option<&SessionIndexItem>) -> Result<Harness> {
     match requested {
-        Some("claude_code") => Ok(Harness::ClaudeCode),
-        Some("codex") => Ok(Harness::Codex),
+        None => Ok(parent.map(|p| p.harness).unwrap_or(Harness::Pi)),
         Some("pi") | Some("pi_coding_agent") => Ok(Harness::Pi),
-        Some(other) => bail!("unknown harness {other:?} — try claude_code or pi"),
-        None => Ok(parent.map(|p| p.harness).unwrap_or(Harness::ClaudeCode)),
+        Some(other) => bail!("unknown harness {other:?} — try pi"),
     }
 }
 
@@ -620,13 +604,13 @@ mod tests {
     fn item(id: &str, parent: Option<&str>) -> SessionIndexItem {
         SessionIndexItem::new(
             id,
-            Harness::ClaudeCode,
+            Harness::Pi,
             "/p",
             "/p",
             None,
             None,
             "hi",
-            ModelId::Opus,
+            ModelId::Pi,
             Some(Effort::High),
             ApprovalPolicy::Auto,
             parent,

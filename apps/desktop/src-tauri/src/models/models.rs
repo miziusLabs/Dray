@@ -1,8 +1,7 @@
-//! The model/effort menu the UI renders and the CLI accepts.
+//! The model/effort menu the UI renders and Pi accepts.
 //!
-//! Only aliases go on the wire — `claude --model opus` always resolves to the
-//! latest Opus, so pinning a dated id here would silently freeze sessions to an
-//! old model as new ones ship.
+//! Pi owns the provider catalog. Dray keeps only the selected provider/model
+//! pair and never maintains a second, stale model list.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -53,11 +52,8 @@ impl Effort {
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum ModelId {
-    Opus,
-    Sonnet,
-    Fable,
-    Haiku,
-    /// Uses the model/provider configured by Pi in `~/.pi/agent`.
+    /// Uses the model/provider configured by Pi in `~/.pi/agent`, or the
+    /// explicitly selected [`PiModel`].
     Pi,
     #[serde(other)]
     Unknown,
@@ -70,45 +66,15 @@ impl Default for ModelId {
 }
 
 impl ModelId {
-    /// `None` for [`ModelId::Unknown`] — there is no alias to pass the CLI.
-    /// Callers hold a [`Model`] by then, so this is unreachable in practice.
+    /// Pi resolves the concrete provider/model itself, so no CLI alias is
+    /// needed here. The field remains for the serialized model contract.
     pub fn as_arg(self) -> Option<&'static str> {
-        match self {
-            ModelId::Opus => Some("opus"),
-            ModelId::Sonnet => Some("sonnet"),
-            ModelId::Fable => Some("fable"),
-            ModelId::Haiku => Some("haiku"),
-            ModelId::Pi | ModelId::Unknown => None,
-        }
+        None
     }
 
-    /// The inverse of [`as_arg`](Self::as_arg), for an alias arriving from
-    /// outside the app — the `dray` CLI's `--model`. Deliberately not
-    /// `#[serde(other)]`-style forgiving: an unrecognized alias is a typo worth
-    /// reporting, where silently running a different model is not.
     pub fn from_arg(alias: &str) -> Option<Self> {
-        match alias {
-            "opus" => Some(ModelId::Opus),
-            "sonnet" => Some(ModelId::Sonnet),
-            "fable" => Some(ModelId::Fable),
-            "haiku" => Some(ModelId::Haiku),
-            "pi" => Some(ModelId::Pi),
-            _ => None,
-        }
+        (alias == "pi").then_some(ModelId::Pi)
     }
-}
-
-/// What an orchestrated session runs when nobody said. [`ModelId::default`]
-/// cannot serve here — it is `Unknown`, which exists so an old index entry
-/// still deserializes and which has no CLI alias at all.
-///
-/// Deliberately *not* the composer's seed. That one opens a picker the user is
-/// about to touch, so it starts cheap; this one is a session nobody is sitting
-/// in front of, doing a whole task unattended, and the cost of it being weak is
-/// work that has to be redone by hand. Effort follows from the model's own
-/// default, which is `High` for every model that has levels.
-pub fn default_model() -> ModelId {
-    ModelId::Opus
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -133,42 +99,6 @@ pub struct Model {
     /// persisted value honest rather than preventing a crash.
     pub efforts: Vec<Effort>,
     pub default_effort: Option<Effort>,
-}
-
-/// The full model list the UI's picker is built from.
-pub fn claude_models() -> Vec<Model> {
-    use Effort::*;
-
-    vec![
-        Model {
-            id: ModelId::Fable,
-            pi_model: None,
-            label: "Fable 5".into(),
-            efforts: vec![Low, Medium, High, Xhigh, Max],
-            default_effort: Some(High),
-        },
-        Model {
-            id: ModelId::Opus,
-            pi_model: None,
-            label: "Opus 5".into(),
-            efforts: vec![Low, Medium, High, Xhigh, Max],
-            default_effort: Some(High),
-        },
-        Model {
-            id: ModelId::Sonnet,
-            pi_model: None,
-            label: "Sonnet 5".into(),
-            efforts: vec![Low, Medium, High, Xhigh, Max],
-            default_effort: Some(High),
-        },
-        Model {
-            id: ModelId::Haiku,
-            pi_model: None,
-            label: "Haiku 4.5".into(),
-            efforts: Vec::new(),
-            default_effort: None,
-        },
-    ]
 }
 
 /// The model exposed by Pi when the user wants to keep model selection in
@@ -199,13 +129,7 @@ pub fn find_model(id: ModelId, pi_model: Option<&PiModel>) -> Option<Model> {
         });
     }
 
-    claude_models()
-        .into_iter()
-        .find(|m| m.id == id)
-        .map(|mut m| {
-            m.pi_model = None;
-            m
-        })
+    None
 }
 
 /// The effort actually sent for `(model, requested)`. `None` means omit the
@@ -225,22 +149,12 @@ pub fn resolve_effort(model: &Model, requested: Option<Effort>) -> Option<Effort
 mod tests {
     use super::*;
 
-    /// Verified against the CLI: `--effort` on Haiku is accepted and ignored,
-    /// so this pins a UI/persistence rule, not a spawn failure.
     #[test]
-    fn haiku_never_takes_an_effort() {
-        let haiku = find_model(ModelId::Haiku, None).unwrap();
+    fn configured_pi_model_does_not_take_an_effort() {
+        let pi = find_model(ModelId::Pi, None).unwrap();
 
-        assert_eq!(resolve_effort(&haiku, Some(Effort::Max)), None);
-        assert_eq!(resolve_effort(&haiku, None), None);
-    }
-
-    #[test]
-    fn unsupported_effort_falls_back_to_the_model_default() {
-        let opus = find_model(ModelId::Opus, None).unwrap();
-
-        assert_eq!(resolve_effort(&opus, Some(Effort::Low)), Some(Effort::Low));
-        assert_eq!(resolve_effort(&opus, None), Some(Effort::High));
+        assert_eq!(resolve_effort(&pi, Some(Effort::Max)), None);
+        assert_eq!(resolve_effort(&pi, None), None);
     }
 
     #[test]
@@ -255,18 +169,11 @@ mod tests {
         assert_eq!(model.id, ModelId::Pi);
     }
 
-    /// The serialized id is what `--model` receives, so it must stay a bare
-    /// alias — a dated name would freeze sessions to a model that stops
-    /// receiving updates.
     #[test]
-    fn model_ids_serialize_as_bare_aliases() {
-        for model in claude_models() {
-            let wire = serde_json::to_string(&model.id).unwrap();
-            assert!(
-                !wire.contains('-'),
-                "{wire} looks like a dated id; the CLI wants an alias"
-            );
-        }
+    fn pi_is_the_only_selectable_model() {
+        assert_eq!(ModelId::from_arg("pi"), Some(ModelId::Pi));
+        assert_eq!(ModelId::from_arg("opus"), None);
+        assert!(find_model(ModelId::Unknown, None).is_none());
     }
 
     /// An index entry naming a model this build dropped must not fail the whole

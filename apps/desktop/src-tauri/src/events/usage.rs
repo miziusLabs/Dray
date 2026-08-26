@@ -1,7 +1,7 @@
 //! Token and cost accounting.
 //!
-//! The harnesses report disjoint things — Claude Code gives cost in USD and no
-//! rate limits here, Codex gives rate limits and never a cost — so nearly every
+//! The harnesses report disjoint things — Pi gives cost in USD and no
+//! rate limits here, Pi gives rate limits and never a cost — so nearly every
 //! field is optional. Show cost only when [`Usage::cost_usd`] is set and a
 //! context gauge only when [`Usage::context_window`] is set; neither is
 //! universal.
@@ -56,7 +56,7 @@ impl Usage {
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsage {
-    /// The harness's own key — a dated id (`claude-haiku-4-5-20251001`), not the
+    /// The harness's own key — a dated id (`pi-haiku-4-5-20251001`), not the
     /// alias a session was started with.
     pub model: String,
     pub input_tokens: Option<u64>,
@@ -66,7 +66,7 @@ pub struct ModelUsage {
     pub web_search_requests: Option<u64>,
     pub cost_usd: Option<f64>,
     /// This model's context window. Also what the composer's gauge measures
-    /// against — see `context_window` in the Claude Code mapper.
+    /// against — see `context_window` in the Pi mapper.
     pub context_window: Option<u64>,
     pub max_output_tokens: Option<u64>,
 }
