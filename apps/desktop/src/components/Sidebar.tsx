@@ -526,11 +526,13 @@ function RowAction({
   label,
   active,
   onClick,
+  className,
   children,
 }: {
   label: string;
   active: boolean;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -549,6 +551,7 @@ function RowAction({
           // `button { cursor: default }` wins over an inherited value.
           className={cn(
             "cursor-pointer",
+            className,
             active ? "text-foreground" : "text-muted-foreground",
           )}
         >
@@ -824,7 +827,7 @@ function SessionRow({
           // indent that padding used to provide, so the title sits exactly where
           // it always did and the rail can still touch the row's edge. The one
           // gap that remains — title to hover controls — is `pl-2` on that slot.
-          "group relative flex min-h-7 w-full cursor-pointer items-center rounded-md pl-0 pr-1",
+          "group relative flex min-h-7 w-full cursor-pointer items-center rounded-md pl-0 pr-2",
           // Opacity is in the transition list for the faded rows below. It has
           // to ride the same declaration: `transition-colors` and
           // `transition-opacity` both set `transition-property`, so `cn` would
@@ -1050,6 +1053,9 @@ function SessionRow({
 
             <RowAction
               label={item.archived ? "Unsettle" : "Settle"}
+              // Keep this control at the previous right inset; the rest of the
+              // row uses the wider padding.
+              className="-mr-1"
               active={item.archived}
               onClick={() =>
                 onSetFlags(item.sessionId, { archived: !item.archived })
