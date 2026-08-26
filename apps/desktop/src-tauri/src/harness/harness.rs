@@ -5,6 +5,8 @@
 
 #[path = "claude_code/claude_code.rs"]
 pub mod claude_code;
+#[path = "pi/pi.rs"]
+pub mod pi;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -14,4 +16,5 @@ use ts_rs::TS;
 pub enum Harness {
     ClaudeCode,
     Codex,
+    Pi,
 }

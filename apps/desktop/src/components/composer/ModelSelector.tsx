@@ -15,7 +15,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { Effort, Model, ModelId } from "@/types/events";
+import type { Effort, Model, ModelId, PiModel } from "@/types/events";
 
 const EFFORT_LABELS: Record<Effort, string> = {
   low: "Low",
@@ -44,19 +44,29 @@ export function nextEffort(model: Model | undefined, current: Effort | null): Ef
 export default function ModelSelector({
   models,
   modelId,
+  piModel,
   effort,
   onChange,
 }: {
   models: Model[];
   modelId: ModelId;
+  piModel: PiModel | null;
   effort: Effort | null;
-  onChange: (modelId: ModelId, effort: Effort | null) => void;
+  onChange: (modelId: ModelId, effort: Effort | null, piModel: PiModel | null) => void;
 }) {
   // Controlled so a click on a submenu trigger can close the whole menu; Radix
   // otherwise keeps the parent open for the submenu it just opened on hover.
   const [open, setOpen] = useState(false);
 
-  const selected = models.find((m) => m.id === modelId) ?? null;
+  const selected = models.find(
+    (m) =>
+      m.id === modelId &&
+      (m.id !== "pi" ||
+        (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
+  ) ?? null;
+  const modelKey = (model: Model) =>
+    model.piModel ? `pi:${model.piModel.provider}/${model.piModel.id}` : model.id;
+  const modelLabel = (model: Model) => model.label || model.piModel?.id || model.id;
 
   /// What a row would resolve to if clicked: the live effort for the model
   /// already selected, each other model's own default. Mirrors the resolution
@@ -79,7 +89,9 @@ export default function ModelSelector({
             >
               {/* Effort is a qualifier on the model, not part of its name, so it's
                   held back a step rather than reading as one long label. */}
-              <span>{selected?.label ?? modelId}</span>
+              <span>
+                {selected ? modelLabel(selected) : modelId === "pi" && piModel ? piModel.id : modelId}
+              </span>
               {effort && (
                 <span className="text-muted-foreground/60">{EFFORT_LABELS[effort]}</span>
               )}
@@ -108,15 +120,15 @@ export default function ModelSelector({
             // One row: hover opens the effort submenu (Radix's own behaviour),
             // click picks the model and leaves its effort alone. Splitting the
             // two into separate items would give the row two hover states.
-            <DropdownMenuSub key={model.id}>
+            <DropdownMenuSub key={modelKey(model)}>
               <DropdownMenuSubTrigger
                 className="cursor-pointer gap-1 text-ui"
                 onClick={() => {
-                  onChange(model.id, null);
+                  onChange(model.id, null, model.piModel);
                   setOpen(false);
                 }}
               >
-                {model.label}
+                {modelLabel(model)}
                 {rowEffort(model) && (
                   <span className="text-muted-foreground/60">
                     {EFFORT_LABELS[rowEffort(model)!]}
@@ -129,7 +141,7 @@ export default function ModelSelector({
                     key={level}
                     className="text-ui"
                     onSelect={() => {
-                      onChange(model.id, level);
+                      onChange(model.id, level, model.piModel);
                       setOpen(false);
                     }}
                   >
@@ -141,11 +153,11 @@ export default function ModelSelector({
           ) : (
             // No submenu and no chevron for a model with no effort levels.
             <DropdownMenuItem
-              key={model.id}
+              key={modelKey(model)}
               className="text-ui"
-              onSelect={() => onChange(model.id, null)}
+              onSelect={() => onChange(model.id, null, model.piModel)}
             >
-              {model.label}
+              {modelLabel(model)}
             </DropdownMenuItem>
           ),
         )}

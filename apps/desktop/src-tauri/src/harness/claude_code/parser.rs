@@ -77,7 +77,9 @@ pub enum ClaudeCodeEvent {
     /// `interrupt`, `set_model`, `set_permission_mode`. Kept as a raw `Value`:
     /// the inner shape varies per request subtype, and nothing correlates
     /// request ids yet.
-    ControlResponse { response: Value },
+    ControlResponse {
+        response: Value,
+    },
     /// The only line that travels *into* the app expecting an answer: every
     /// other event is a report. The CLI blocks the tool call until a
     /// `control_response` carrying this `request_id` comes back on stdin, so an
@@ -1315,10 +1317,9 @@ mod tests {
                 if terminal_reason == "aborted_tools"
         )));
         // The narration turn closes normally after the aborted one.
-        assert!(events.iter().any(|event| matches!(
-            event,
-            ClaudeCodeEvent::Result(ResultEvent::Success { .. })
-        )));
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, ClaudeCodeEvent::Result(ResultEvent::Success { .. }))));
     }
 
     /// A `touch` under `--permission-mode manual --permission-prompt-tool
@@ -1410,10 +1411,9 @@ mod tests {
         assert!(tool_use_id.starts_with("toolu_"));
         assert!(message.contains("blocked"));
 
-        assert!(!events.iter().any(|event| matches!(
-            event,
-            ClaudeCodeEvent::ControlRequest { .. }
-        )));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, ClaudeCodeEvent::ControlRequest { .. })));
     }
 
     /// A live `/compact`. The replay log in `~/.claude/projects` writes this
@@ -1437,8 +1437,7 @@ mod tests {
             .iter()
             .find_map(|event| match event {
                 ClaudeCodeEvent::System(SystemEvent::CompactBoundary {
-                    compact_metadata,
-                    ..
+                    compact_metadata, ..
                 }) => Some(compact_metadata),
                 _ => None,
             })
@@ -1501,8 +1500,14 @@ mod tests {
             Some(ContentBlock::Text { text }) if text.contains("renamed")
         ));
 
-        let usage = message.usage.as_ref().expect("a synthetic message carries usage");
-        assert!(usage.iterations.is_empty(), "a null list reads as an empty one");
+        let usage = message
+            .usage
+            .as_ref()
+            .expect("a synthetic message carries usage");
+        assert!(
+            usage.iterations.is_empty(),
+            "a null list reads as an empty one"
+        );
         assert_eq!(usage.input_tokens, 0, "the CLI answered without the model");
     }
 
@@ -1722,20 +1727,23 @@ mod tests {
     /// nothing in it, so the image is the only thing the row can draw.
     #[test]
     fn parses_an_image_tool_result() {
-        let results: Vec<ToolResultContent> = parse_fixture(include_str!("fixtures/image_read.jsonl"))
-            .into_iter()
-            .filter_map(|event| match event {
-                ClaudeCodeEvent::User { message, .. } => Some(message),
-                _ => None,
-            })
-            .filter_map(|message| match message.content {
-                UserContent::Blocks(blocks) => blocks.into_iter().find_map(|block| match block {
-                    UserContentBlock::ToolResult { content, .. } => Some(content),
+        let results: Vec<ToolResultContent> =
+            parse_fixture(include_str!("fixtures/image_read.jsonl"))
+                .into_iter()
+                .filter_map(|event| match event {
+                    ClaudeCodeEvent::User { message, .. } => Some(message),
                     _ => None,
-                }),
-                UserContent::Text(_) => None,
-            })
-            .collect();
+                })
+                .filter_map(|message| match message.content {
+                    UserContent::Blocks(blocks) => {
+                        blocks.into_iter().find_map(|block| match block {
+                            UserContentBlock::ToolResult { content, .. } => Some(content),
+                            _ => None,
+                        })
+                    }
+                    UserContent::Text(_) => None,
+                })
+                .collect();
 
         assert_eq!(results.len(), 1);
         assert!(results[0].as_text().is_empty());

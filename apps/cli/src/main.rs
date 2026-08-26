@@ -70,7 +70,7 @@ struct New {
     #[arg(long)]
     project: Option<PathBuf>,
 
-    /// opus, sonnet, fable or haiku. Defaults to the calling session's model.
+    /// Claude model alias: opus, sonnet, fable or haiku. Pi uses ~/.pi/agent/settings.json.
     #[arg(long)]
     model: Option<String>,
 
@@ -79,13 +79,13 @@ struct New {
     #[arg(long)]
     effort: Option<String>,
 
-    /// Which agent runs it. claude_code today.
+    /// Which agent runs it: claude_code or pi.
     #[arg(long)]
     harness: Option<String>,
 
     /// Base the new session's worktree on existing work: a session id, a
-    /// branch, or any git ref. Committed work only. Defaults to
-    /// origin/<default>.
+    /// branch, or any git ref. Committed work only. Defaults to the
+    /// harness's default base.
     #[arg(long, value_name = "SESSION|REF")]
     from: Option<String>,
 }

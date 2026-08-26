@@ -13,7 +13,7 @@ import {
 import { isWindowFocused, onFocusChange } from "@/lib/focus";
 import { notifyOS } from "@/lib/notify";
 import { playNotification } from "@/lib/sound";
-import { AgentEvent, ApprovalPolicy, BackgroundTask, BranchList, Effort, Model, ModelId, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
+import { AgentEvent, ApprovalPolicy, BackgroundTask, BranchList, Effort, Harness, Model, ModelId, PiModel, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
 // "unknown". Everything else seeds from the user's stored prefs.
@@ -65,9 +65,11 @@ export function useSessions() {
     // archived is the exception view, so every launch starts on the active list.
     const [showArchived, setShowArchived] = useState(false);
     const [models, setModels] = useState<Model[]>([]);
+    const [harness, setHarnessState] = useState<Harness>(() => prefs.harness);
     // Seeded once from prefs, then free to diverge: selecting a session overwrites
     // these with what that session was started with, which must not feed back.
     const [modelId, setModelId] = useState<ModelId>(() => prefs.modelId);
+    const [piModel, setPiModel] = useState<PiModel | null>(() => prefs.piModel);
     const [effortByModel, setEffortByModel] = useState<EffortByModel>(() => prefs.effortByModel);
     const [permissionMode, setPermissionModeState] = useState<ApprovalPolicy>(() => prefs.permissionMode);
     const [projects, setProjects] = useState<Project[]>([]);
@@ -114,7 +116,12 @@ export function useSessions() {
 
 // What actually gets sent for the current model: its remembered pick, else its
 // own default, and null for a model that takes no effort flag at all.
-const model = models.find((m) => m.id === modelId) ?? null;
+const model = models.find(
+  (m) =>
+    m.id === modelId &&
+    (m.id !== "pi" ||
+      (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
+) ?? null;
 const effort: Effort | null = model
   ? model.efforts.length
     ? effortByModel[modelId] ?? model.defaultEffort ?? DEFAULT_EFFORT
@@ -124,15 +131,30 @@ const effort: Effort | null = model
 // A null effort means "just switch to this model" — it must leave the model's
 // remembered pick alone, or coming back to Sonnet would lose the Extra High set
 // on it earlier. Only an explicit level writes to the map.
-const handleModelChange = (nextModelId: ModelId, nextEffort: Effort | null) => {
+const handleHarnessChange = (nextHarness: Harness) => {
+  setHarnessState(nextHarness);
+  // Switch the model immediately as well as refreshing the picker. Without this
+  // a quick first send after choosing Pi could reach Rust with the previous
+  // harness's model while the async model list is still loading.
+  setModelId(nextHarness === "pi" ? "pi" : prefs.modelId === "pi" ? "haiku" : prefs.modelId);
+  setPiModel(nextHarness === "pi" ? prefs.piModel : null);
+  setPrefs({ harness: nextHarness });
+};
+
+const handleModelChange = (
+  nextModelId: ModelId,
+  nextEffort: Effort | null,
+  nextPiModel: PiModel | null,
+) => {
   setModelId(nextModelId);
+  setPiModel(nextPiModel);
   if (nextEffort) {
     const next = { ...effortByModel, [nextModelId]: nextEffort };
     setEffortByModel(next);
-    setPrefs({ modelId: nextModelId, effortByModel: next });
+    setPrefs({ modelId: nextModelId, piModel: nextPiModel, effortByModel: next });
     return;
   }
-  setPrefs({ modelId: nextModelId });
+  setPrefs({ modelId: nextModelId, piModel: nextPiModel });
 };
 
 // Wrapped rather than exported raw: picking a mode is a preference, and the
@@ -279,8 +301,9 @@ const handleSendMsg = async (
       sessionId,
       prompt: message,
       attachmentPaths,
-      harness: "claude_code",
+      harness,
       model: modelId,
+      piModel,
       effort,
       permissionMode,
       cwd,
@@ -325,7 +348,7 @@ const handleSendMsg = async (
     setSessionIndexItems((prev) =>
       prev.map((i) =>
         i.sessionId === sessionId
-          ? { ...i, model: modelId, effort, permissionMode, modified: new Date().toISOString() }
+          ? { ...i, model: modelId, piModel, effort, permissionMode, modified: new Date().toISOString() }
           : i,
       ),
     );
@@ -439,7 +462,15 @@ const handleAnswerQuestions = async (
 const handleNewSession = () => {
   selectionRequestRef.current = null;
   setSelectedSessionId(null);
-  setModelId(prefs.modelId);
+  setHarnessState(prefs.harness);
+  setModelId(
+    prefs.harness === "pi"
+      ? "pi"
+      : prefs.modelId === "pi"
+        ? "haiku"
+        : prefs.modelId,
+  );
+  setPiModel(prefs.harness === "pi" ? prefs.piModel : null);
   setEffortByModel(prefs.effortByModel);
   setPermissionModeState(prefs.permissionMode);
   setUseWorktreeState(prefs.useWorktree);
@@ -458,9 +489,11 @@ const handleNewSession = () => {
 // Project, branch, and the worktree flag aren't restored — the composer hides
 // all three once a session exists, and they'd only mislead the next new chat.
 const restoreSessionControls = (item: SessionIndexItem) => {
+  setHarnessState(item.harness);
   // Sessions indexed before the model was recorded read back as "unknown".
   const restored = item.model === "unknown" ? DEFAULT_MODEL : item.model;
   setModelId(restored);
+  setPiModel(item.piModel ?? null);
   // The index stores one model/effort pair, so it can only seed that model's
   // entry; the rest of the map falls back to per-model defaults.
   if (item.effort) {
@@ -734,8 +767,42 @@ useEffect(() => {
 }, [showArchived])
 
 useEffect(() => {
-  invoke<Model[]>("list_models").then(setModels);
-}, [])
+  let cancelled = false;
+  invoke<Model[]>("list_models", { harness, cwd: projectPath })
+    .then((next) => {
+      if (cancelled) return;
+      setModels(next);
+      setModelId((current) => {
+        const currentPi = current === "pi" ? piModel : null;
+        const stillAvailable = next.some(
+          (model) =>
+            model.id === current &&
+            (current !== "pi" ||
+              (model.piModel?.provider === currentPi?.provider &&
+                model.piModel?.id === currentPi?.id)),
+        );
+        if (stillAvailable) return current;
+        return next[0]?.id ?? current;
+      });
+      setPiModel((current) => {
+        if (modelId === "pi" && next.some(
+          (model) =>
+            model.id === "pi" &&
+            model.piModel?.provider === current?.provider &&
+            model.piModel?.id === current?.id,
+        )) {
+          return current;
+        }
+        return next[0]?.piModel ?? current;
+      });
+    })
+    .catch((e) => {
+      if (!cancelled) setError(String(e));
+    });
+  return () => {
+    cancelled = true;
+  };
+}, [harness, projectPath])
 
 useEffect(() => {
   invoke<Project[]>("list_projects")
@@ -1324,6 +1391,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, models, modelId, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession, removeWorktree};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleHarnessChange, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession, removeWorktree};
 
 }

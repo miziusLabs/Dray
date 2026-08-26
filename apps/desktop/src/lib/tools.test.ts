@@ -1,10 +1,28 @@
 import { describe, expect, it } from "vitest";
 
-import { isRoutineError } from "./tools";
+import { isRoutineError, toolLabel, toolSummary } from "./tools";
 
 // Every string here is a real `Bash` error taken out of `~/.dray/sessions`,
 // including the "Exit code N" prefix a shell failure actually arrives with —
 // the patterns have to match inside that, not against a bare message.
+describe("Pi extension tool labels", () => {
+  it("shows the useful argument for installed extension tools", () => {
+    expect(toolSummary("finder", "other", { query: "find the parser" })).toBe("find the parser");
+    expect(toolSummary("libarian", "other", { task: "research the protocol" })).toBe(
+      "research the protocol",
+    );
+    expect(toolSummary("background_command", "shell", { command: "npm run dev" })).toBe(
+      "npm run dev",
+    );
+  });
+
+  it("uses readable labels for Pi built-ins and extensions", () => {
+    expect(toolLabel("read", true)).toBe("Reading");
+    expect(toolLabel("edit", false)).toBe("Edited");
+    expect(toolLabel("libarian", false)).toBe("Researched");
+  });
+});
+
 describe("isRoutineError", () => {
   it("passes over a worktree isolation refusal", () => {
     expect(

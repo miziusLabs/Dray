@@ -330,7 +330,10 @@ mod archive_tests {
         archive_result_images(&session, &mut images).await;
 
         let stored = images[0].path.as_deref().expect("not archived");
-        assert!(stored.ends_with(".gif"), "{stored} took the wrong extension");
+        assert!(
+            stored.ends_with(".gif"),
+            "{stored} took the wrong extension"
+        );
         assert!(images[0].url.is_none(), "the bytes outlived the archive");
         assert_eq!(
             fs::read(stored).await.unwrap(),

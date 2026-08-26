@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { diffSide, diffSides } from "./diff";
+import { diffSide, diffSides, editSides } from "./diff";
+
+describe("Pi file edit arguments", () => {
+  it("understands Pi's path and oldText/newText edit shape", () => {
+    expect(
+      editSides({
+        path: "src/main.ts",
+        edits: [{ oldText: "before", newText: "after" }],
+      }),
+    ).toEqual({ path: "src/main.ts", oldText: "before", newText: "after" });
+  });
+});
 
 describe("diffSide", () => {
   it("keys on full path and content, names by basename", () => {

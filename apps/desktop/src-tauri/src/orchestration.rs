@@ -121,8 +121,8 @@ pub async fn serve(app: AppHandle) -> Result<()> {
     // running beside.
     tokio::fs::remove_file(&path).await.ok();
 
-    let listener = UnixListener::bind(&path)
-        .with_context(|| format!("could not bind {}", path.display()))?;
+    let listener =
+        UnixListener::bind(&path).with_context(|| format!("could not bind {}", path.display()))?;
 
     restrict(&path)?;
 
@@ -251,8 +251,8 @@ async fn create_session(create: CreateSession, app: &AppHandle) -> Result<Respon
     // session under an unattached repo is already reachable — while
     // `add_project` bumps `last_selected` and resorts the list, which would
     // let an agent's call quietly reorder the user's project picker.
-    let model = resolve_model(create.model.as_deref(), parent.as_ref())?;
     let harness = resolve_harness(create.harness.as_deref(), parent.as_ref())?;
+    let model = resolve_model(create.model.as_deref(), parent.as_ref(), harness)?;
 
     // The caller's pick, else whatever the parent ran at, else `None` — which
     // `send_msg` resolves to the model's own default through `resolve_effort`,
@@ -286,6 +286,7 @@ async fn create_session(create: CreateSession, app: &AppHandle) -> Result<Respon
             &[],
             harness,
             model,
+            None,
             effort,
             permission_mode,
             &project_path,
@@ -358,7 +359,10 @@ async fn resolve_base(from: &str, project_path: &str) -> Result<String> {
         // deleted — names a branch this one has never heard of. Said here
         // rather than left to git, whose error names the branch without saying
         // that a session was what asked for it.
-        if crate::git::resolve_commit(project_path, &branch).await.is_none() {
+        if crate::git::resolve_commit(project_path, &branch)
+            .await
+            .is_none()
+        {
             bail!(
                 "session {from} is on branch {branch}, which {project_path} does not have — \
                  check the two are the same repository, and that the branch still exists"
@@ -368,7 +372,10 @@ async fn resolve_base(from: &str, project_path: &str) -> Result<String> {
         return Ok(branch);
     }
 
-    if crate::git::resolve_commit(project_path, from).await.is_some() {
+    if crate::git::resolve_commit(project_path, from)
+        .await
+        .is_some()
+    {
         return Ok(from.to_string());
     }
 
@@ -420,10 +427,23 @@ async fn depth_of(item: &SessionIndexItem) -> Result<usize> {
 /// the app default. A parent indexed before models were recorded reads back as
 /// `Unknown`, which has no CLI alias — so that falls through to the default
 /// rather than failing a create for a field the user never chose.
-fn resolve_model(requested: Option<&str>, parent: Option<&SessionIndexItem>) -> Result<ModelId> {
+fn resolve_model(
+    requested: Option<&str>,
+    parent: Option<&SessionIndexItem>,
+    harness: Harness,
+) -> Result<ModelId> {
+    if harness == Harness::Pi {
+        if let Some(alias) = requested {
+            if alias != "pi" {
+                bail!("Pi uses the provider and model configured in ~/.pi/agent/settings.json");
+            }
+        }
+        return Ok(ModelId::Pi);
+    }
+
     if let Some(alias) = requested {
         let id = ModelId::from_arg(alias)
-            .filter(|id| find_model(*id).is_some())
+            .filter(|id| *id != ModelId::Pi && find_model(*id, None).is_some())
             .with_context(|| {
                 format!("unknown model {alias:?} — try opus, sonnet, fable or haiku")
             })?;
@@ -432,7 +452,7 @@ fn resolve_model(requested: Option<&str>, parent: Option<&SessionIndexItem>) -> 
 
     Ok(parent
         .map(|p| p.model)
-        .filter(|id| find_model(*id).is_some())
+        .filter(|id| *id != ModelId::Pi && find_model(*id, None).is_some())
         .unwrap_or_else(default_model))
 }
 
@@ -472,6 +492,7 @@ async fn send_message(send: SendMessage, app: &AppHandle) -> Result<Response> {
             &[],
             target.harness,
             target.model,
+            target.pi_model.clone(),
             target.effort,
             target.permission_mode,
             &target.cwd,
@@ -547,7 +568,8 @@ fn resolve_harness(requested: Option<&str>, parent: Option<&SessionIndexItem>) -
     match requested {
         Some("claude_code") => Ok(Harness::ClaudeCode),
         Some("codex") => Ok(Harness::Codex),
-        Some(other) => bail!("unknown harness {other:?} — try claude_code"),
+        Some("pi") | Some("pi_coding_agent") => Ok(Harness::Pi),
+        Some(other) => bail!("unknown harness {other:?} — try claude_code or pi"),
         None => Ok(parent.map(|p| p.harness).unwrap_or(Harness::ClaudeCode)),
     }
 }

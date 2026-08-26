@@ -57,6 +57,8 @@ pub enum ModelId {
     Sonnet,
     Fable,
     Haiku,
+    /// Uses the model/provider configured by Pi in `~/.pi/agent`.
+    Pi,
     #[serde(other)]
     Unknown,
 }
@@ -76,7 +78,7 @@ impl ModelId {
             ModelId::Sonnet => Some("sonnet"),
             ModelId::Fable => Some("fable"),
             ModelId::Haiku => Some("haiku"),
-            ModelId::Unknown => None,
+            ModelId::Pi | ModelId::Unknown => None,
         }
     }
 
@@ -90,6 +92,7 @@ impl ModelId {
             "sonnet" => Some(ModelId::Sonnet),
             "fable" => Some(ModelId::Fable),
             "haiku" => Some(ModelId::Haiku),
+            "pi" => Some(ModelId::Pi),
             _ => None,
         }
     }
@@ -108,12 +111,22 @@ pub fn default_model() -> ModelId {
     ModelId::Opus
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "events.ts")]
+#[serde(rename_all = "camelCase")]
+pub struct PiModel {
+    pub provider: String,
+    pub id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct Model {
-    /// What `--model` receives.
+    /// The harness-specific model family. Pi models carry their provider and
+    /// concrete id in [`pi_model`].
     pub id: ModelId,
+    pub pi_model: Option<PiModel>,
     pub label: String,
     /// Empty means the model has no effort levels. The CLI tolerates `--effort`
     /// on such a model and ignores it, so this drives the UI and keeps the
@@ -129,24 +142,28 @@ pub fn claude_models() -> Vec<Model> {
     vec![
         Model {
             id: ModelId::Fable,
+            pi_model: None,
             label: "Fable 5".into(),
             efforts: vec![Low, Medium, High, Xhigh, Max],
             default_effort: Some(High),
         },
         Model {
             id: ModelId::Opus,
+            pi_model: None,
             label: "Opus 5".into(),
             efforts: vec![Low, Medium, High, Xhigh, Max],
             default_effort: Some(High),
         },
         Model {
             id: ModelId::Sonnet,
+            pi_model: None,
             label: "Sonnet 5".into(),
             efforts: vec![Low, Medium, High, Xhigh, Max],
             default_effort: Some(High),
         },
         Model {
             id: ModelId::Haiku,
+            pi_model: None,
             label: "Haiku 4.5".into(),
             efforts: Vec::new(),
             default_effort: None,
@@ -154,11 +171,41 @@ pub fn claude_models() -> Vec<Model> {
     ]
 }
 
-/// `None` for anything this build doesn't list, including `Unknown` read back
-/// from an older index entry — so it fails loudly at the spawn rather than
-/// silently running a different model.
-pub fn find_model(id: ModelId) -> Option<Model> {
-    claude_models().into_iter().find(|m| m.id == id)
+/// The model exposed by Pi when the user wants to keep model selection in
+/// `~/.pi/agent/settings.json` and let Pi resolve its provider and model.
+pub fn configured_pi_model() -> Model {
+    Model {
+        id: ModelId::Pi,
+        pi_model: None,
+        label: "Pi (configured)".into(),
+        efforts: Vec::new(),
+        default_effort: None,
+    }
+}
+
+/// Returns the model specification for a selected id. Pi's catalog is loaded
+/// separately because its providers and model ids come from the user's config.
+pub fn find_model(id: ModelId, pi_model: Option<&PiModel>) -> Option<Model> {
+    if id == ModelId::Pi {
+        return Some(match pi_model {
+            Some(pi_model) => Model {
+                id,
+                pi_model: Some(pi_model.clone()),
+                label: format!("{}/{}", pi_model.provider, pi_model.id),
+                efforts: Vec::new(),
+                default_effort: None,
+            },
+            None => configured_pi_model(),
+        });
+    }
+
+    claude_models()
+        .into_iter()
+        .find(|m| m.id == id)
+        .map(|mut m| {
+            m.pi_model = None;
+            m
+        })
 }
 
 /// The effort actually sent for `(model, requested)`. `None` means omit the
@@ -182,7 +229,7 @@ mod tests {
     /// so this pins a UI/persistence rule, not a spawn failure.
     #[test]
     fn haiku_never_takes_an_effort() {
-        let haiku = find_model(ModelId::Haiku).unwrap();
+        let haiku = find_model(ModelId::Haiku, None).unwrap();
 
         assert_eq!(resolve_effort(&haiku, Some(Effort::Max)), None);
         assert_eq!(resolve_effort(&haiku, None), None);
@@ -190,10 +237,22 @@ mod tests {
 
     #[test]
     fn unsupported_effort_falls_back_to_the_model_default() {
-        let opus = find_model(ModelId::Opus).unwrap();
+        let opus = find_model(ModelId::Opus, None).unwrap();
 
         assert_eq!(resolve_effort(&opus, Some(Effort::Low)), Some(Effort::Low));
         assert_eq!(resolve_effort(&opus, None), Some(Effort::High));
+    }
+
+    #[test]
+    fn pi_model_keeps_provider_and_id_together() {
+        let selected = PiModel {
+            provider: "openai".into(),
+            id: "gpt-5".into(),
+        };
+        let model = find_model(ModelId::Pi, Some(&selected)).unwrap();
+
+        assert_eq!(model.pi_model, Some(selected));
+        assert_eq!(model.id, ModelId::Pi);
     }
 
     /// The serialized id is what `--model` receives, so it must stay a bare
@@ -217,7 +276,7 @@ mod tests {
         let id: ModelId = serde_json::from_str("\"opus-4-1-20250805\"").unwrap();
 
         assert_eq!(id, ModelId::Unknown);
-        assert!(find_model(id).is_none());
+        assert!(find_model(id, None).is_none());
     }
 }
 

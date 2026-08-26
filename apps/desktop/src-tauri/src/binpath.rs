@@ -17,6 +17,7 @@ use std::sync::OnceLock;
 use tokio::process::Command;
 
 static CLAUDE_PATH: OnceLock<PathBuf> = OnceLock::new();
+static PI_PATH: OnceLock<PathBuf> = OnceLock::new();
 static GH_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 /// The absolute path to `claude`, or the bare name as a last resort.
@@ -36,7 +37,44 @@ pub async fn claude() -> PathBuf {
     // A race here is harmless: both threads resolved the same binary, and the
     // loser just drops its copy.
     let _ = CLAUDE_PATH.set(resolved);
-    CLAUDE_PATH.get().cloned().unwrap_or_else(|| PathBuf::from("claude"))
+    CLAUDE_PATH
+        .get()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("claude"))
+}
+
+/// The absolute path to `pi`, or the bare name as a last resort.
+pub async fn pi() -> PathBuf {
+    if let Some(path) = PI_PATH.get() {
+        return path.clone();
+    }
+
+    let resolved = resolve("pi").await.unwrap_or_else(|| PathBuf::from("pi"));
+    let _ = PI_PATH.set(resolved);
+    PI_PATH
+        .get()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("pi"))
+}
+
+/// Reconstructs the PATH a child needs when the app was launched by Finder.
+///
+/// Bundled macOS apps inherit launchd's minimal PATH, which omits user-local
+/// binaries used by Pi extensions and their child processes. Existing entries
+/// stay first so an explicitly configured binary still wins.
+pub fn agent_path() -> String {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs: Vec<_> = std::env::split_paths(&inherited).collect();
+
+    for dir in known_dirs() {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+
+    std::env::join_paths(dirs)
+        .map(|joined| joined.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| inherited.to_string_lossy().into_owned())
 }
 
 /// The absolute path to `gh`, or `None` where it isn't installed.
@@ -94,14 +132,23 @@ pub fn known_dirs() -> Vec<PathBuf> {
         return Vec::new();
     };
 
-    vec![
+    let mut dirs = vec![
         home.join(".local/bin"),
         home.join(".claude/local"),
         home.join(".bun/bin"),
         home.join(".npm-global/bin"),
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
-    ]
+    ];
+
+    // Pi is commonly installed through npm under nvm. Those directories are
+    // not stable enough to list statically, but they must be in a child's PATH
+    // as well as in the resolver's search path because Pi is a Node script.
+    if let Ok(versions) = std::fs::read_dir(home.join(".nvm/versions/node")) {
+        dirs.extend(versions.flatten().map(|entry| entry.path().join("bin")));
+    }
+
+    dirs
 }
 
 /// The directories `claude` actually installs to, checked directly so the
@@ -182,6 +229,19 @@ mod tests {
     async fn finds_the_claude_binary() {
         let Some(found) = resolve("claude").await else {
             eprintln!("claude not installed; skipping");
+            return;
+        };
+
+        assert!(found.is_absolute(), "got a bare name: {found:?}");
+        assert!(is_executable(&found));
+    }
+
+    /// Pi is a Node entrypoint, so the same resolver must find it before a
+    /// bundled app tries to spawn its shebang.
+    #[tokio::test]
+    async fn finds_the_pi_binary() {
+        let Some(found) = resolve("pi").await else {
+            eprintln!("pi not installed; skipping");
             return;
         };
 

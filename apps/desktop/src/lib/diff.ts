@@ -46,7 +46,10 @@ export function editSides(input: JsonValue): EditSides | null {
     const pairs = edits
       .map(obj)
       .filter((e): e is Record<string, JsonValue> => e !== null)
-      .map((e) => [str(e, "old_string") ?? "", str(e, "new_string") ?? ""] as const)
+      .map((e) => [
+        str(e, "old_string") ?? str(e, "oldText") ?? "",
+        str(e, "new_string") ?? str(e, "newText") ?? "",
+      ] as const)
       .filter(([before, after]) => before !== "" || after !== "");
 
     if (!pairs.length) return null;

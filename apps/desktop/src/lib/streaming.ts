@@ -113,6 +113,7 @@ const TARGET_KEYS: [key: string, path: boolean][] = [
   ["query", false],
   ["url", false],
   ["description", false],
+  ["task", false],
 ];
 
 /// Where a whole-file payload lives: `Write` calls it `content`, `NotebookEdit`
@@ -126,6 +127,7 @@ const TARGET_KEYS: [key: string, path: boolean][] = [
 const CONTENT_KEY_BY_TOOL: Record<string, string> = {
   Write: "content",
   NotebookEdit: "new_source",
+  write: "content",
 };
 
 export type StreamingCall = {

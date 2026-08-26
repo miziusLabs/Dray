@@ -64,8 +64,10 @@ function App() {
     askingSessions,
     showArchived,
     setShowArchived,
+    harness,
     models,
     modelId,
+    piModel,
     effort,
     permissionMode,
     projects,
@@ -80,6 +82,7 @@ function App() {
     contextUsage,
     error,
     setError,
+    handleHarnessChange,
     handleModelChange,
     setPermissionMode,
     handleAttachProject,
@@ -359,7 +362,7 @@ function App() {
   // resolves against the same directory for the same reason, and off the same
   // expression so the two can't answer for different trees.
   const composerCwd = selectedSession?.cwd ?? projectPath;
-  const slashCommands = useSlashCommands(composerCwd);
+  const slashCommands = useSlashCommands(composerCwd, harness);
 
   const { baseline, head } = useMemo(
     () => changeRange(selectedSession?.events ?? []),
@@ -532,8 +535,16 @@ function App() {
   useHotkey(
     "Tab",
     () => {
-      const next = nextEffort(models.find((m) => m.id === modelId), effort);
-      if (next) handleModelChange(modelId, next);
+      const next = nextEffort(
+        models.find(
+          (m) =>
+            m.id === modelId &&
+            (m.id !== "pi" ||
+              (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
+        ),
+        effort,
+      );
+      if (next) handleModelChange(modelId, next, piModel);
     },
     { meta: false, shift: true },
   );
@@ -541,9 +552,14 @@ function App() {
   // model's own remembered effort alone, same as picking it from the menu.
   useDoubleTap("Shift", () => {
     if (models.length < 2) return;
-    const index = models.findIndex((m) => m.id === modelId);
+    const index = models.findIndex(
+      (m) =>
+        m.id === modelId &&
+        (m.id !== "pi" ||
+          (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
+    );
     const next = models[(index + 1) % models.length];
-    handleModelChange(next.id, null);
+    handleModelChange(next.id, null, next.piModel);
   });
   const fullscreen = useFullscreen();
   useVibrancy(fullscreen);
@@ -730,8 +746,11 @@ function App() {
           }
           toolbar={
             <ComposerToolbar
+              harness={harness}
+              onHarnessChange={handleHarnessChange}
               models={models}
               modelId={modelId}
+              piModel={piModel}
               effort={effort}
               onModelChange={handleModelChange}
               permissionMode={permissionMode}

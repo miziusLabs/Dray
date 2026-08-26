@@ -105,10 +105,7 @@ pub async fn list_commands(cwd: &str) -> Result<Vec<SlashCommand>> {
         .await
         .context("timed out asking the CLI for its slash commands")??;
 
-    cache
-        .lock()
-        .await
-        .insert(cwd.to_string(), commands.clone());
+    cache.lock().await.insert(cwd.to_string(), commands.clone());
 
     Ok(commands)
 }

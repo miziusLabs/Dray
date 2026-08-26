@@ -4,7 +4,7 @@ use crate::{
     files::FileMatch,
     git::BranchList,
     harness::claude_code::commands::SlashCommand,
-    models::{Effort, Model, ModelId},
+    models::{Effort, Model, ModelId, PiModel},
     projects::Project,
     session::{Harness, QueuedMessage, SendOutcome, SessionManager},
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot, SessionStatus},
@@ -41,6 +41,7 @@ async fn send_msg(
     attachment_paths: Vec<String>,
     harness: &str,
     model: ModelId,
+    pi_model: Option<PiModel>,
     effort: Option<Effort>,
     permission_mode: ApprovalPolicy,
     cwd: &str,
@@ -54,6 +55,7 @@ async fn send_msg(
     let harness = match harness {
         "claude_code" => Harness::ClaudeCode,
         "codex" => Harness::Codex,
+        "pi" | "pi_coding_agent" => Harness::Pi,
         _ => return Err("invalid harness".into()),
     };
 
@@ -64,6 +66,7 @@ async fn send_msg(
             &attachment_paths,
             harness,
             model,
+            pi_model,
             effort,
             permission_mode,
             cwd,
@@ -94,8 +97,19 @@ async fn read_attachments(paths: Vec<String>) -> Vec<Attachment> {
 }
 
 #[tauri::command]
-fn list_models() -> Vec<Model> {
-    models::claude_models()
+async fn list_models(harness: Option<&str>, cwd: Option<&str>) -> Result<Vec<Model>, String> {
+    match harness {
+        Some("pi") | Some("pi_coding_agent") => {
+            match harness::pi::commands::list_models(cwd).await {
+                Ok(models) if !models.is_empty() => Ok(models),
+                // A missing or unavailable catalog must not make Pi unusable:
+                // Pi can still resolve its configured default when no override
+                // is supplied.
+                Ok(_) | Err(_) => Ok(vec![models::configured_pi_model()]),
+            }
+        }
+        _ => Ok(models::claude_models()),
+    }
 }
 
 /// The preferences Rust owns. Everything else the settings dialog draws is the
@@ -137,10 +151,15 @@ fn settings_view() -> settings::SettingsView {
 /// The slash commands available in a directory. Cached per directory in the
 /// backend, so the composer may call this whenever the project changes.
 #[tauri::command]
-async fn list_slash_commands(cwd: &str) -> Result<Vec<SlashCommand>, String> {
-    harness::claude_code::commands::list_commands(cwd)
-        .await
-        .map_err(|e| e.to_string())
+async fn list_slash_commands(
+    cwd: &str,
+    harness: Option<&str>,
+) -> Result<Vec<SlashCommand>, String> {
+    let commands = match harness {
+        Some("pi") | Some("pi_coding_agent") => harness::pi::commands::list_commands(cwd).await,
+        _ => harness::claude_code::commands::list_commands(cwd).await,
+    };
+    commands.map_err(|e| e.to_string())
 }
 
 /// Starts indexing a directory's files so the `@` picker opens on a warm index.

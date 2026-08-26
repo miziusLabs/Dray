@@ -1,6 +1,7 @@
 import { Plus } from "lucide-react";
 
 import BranchSelector from "@/components/composer/BranchSelector";
+import HarnessSelector from "@/components/composer/HarnessSelector";
 import BranchSwitchDialog from "@/components/composer/BranchSwitchDialog";
 import ContextMeter from "@/components/composer/ContextMeter";
 import ModelSelector from "@/components/composer/ModelSelector";
@@ -13,17 +14,23 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type {
   ApprovalPolicy,
   BranchList,
+  Harness,
   Effort,
   Model,
   ModelId,
+  PiModel,
   Project,
 } from "@/types/events";
 
 export type ComposerToolbarProps = {
+  harness: Harness;
+  onHarnessChange: (harness: Harness) => void;
+
   models: Model[];
   modelId: ModelId;
+  piModel: PiModel | null;
   effort: Effort | null;
-  onModelChange: (modelId: ModelId, effort: Effort | null) => void;
+  onModelChange: (modelId: ModelId, effort: Effort | null, piModel: PiModel | null) => void;
 
   permissionMode: ApprovalPolicy;
   onPermissionModeChange: (mode: ApprovalPolicy) => void;
@@ -66,8 +73,11 @@ export type ComposerToolbarProps = {
 /// header already shows the project and branch. Its own spacing from the card is
 /// the caller's, since only the caller knows which side of it the row sits on.
 export default function ComposerToolbar({
+  harness,
+  onHarnessChange,
   models,
   modelId,
+  piModel,
   effort,
   onModelChange,
   permissionMode,
@@ -115,9 +125,12 @@ export default function ComposerToolbar({
         </TooltipContent>
       </Tooltip>
 
+      {isNewSession && <HarnessSelector value={harness} onChange={onHarnessChange} />}
+
       <ModelSelector
         models={models}
         modelId={modelId}
+        piModel={piModel}
         effort={effort}
         onChange={onModelChange}
       />
@@ -171,7 +184,9 @@ export default function ComposerToolbar({
 
       {/* Last of the pickers: it is the one control here most sessions set once
           and never touch, so it sits furthest from where the eye lands. */}
-      <PermissionSelector value={permissionMode} onChange={onPermissionModeChange} />
+      {harness !== "pi" && (
+        <PermissionSelector value={permissionMode} onChange={onPermissionModeChange} />
+      )}
 
       {/* `ml-auto` rather than a spacer, so a long branch name still gets the
           whole middle of the row and this stays pinned to the right edge. */}

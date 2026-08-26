@@ -11,9 +11,10 @@ use crate::{
             control::{ControlLine, ControlRequest},
             permissions::{answer_response, decision_response, PendingPermissions},
         },
-        Harness::ClaudeCode,
+        pi,
+        Harness::{ClaudeCode, Pi},
     },
-    models::{find_model, resolve_effort, Effort, Model, ModelId},
+    models::{default_model, find_model, resolve_effort, Effort, Model, ModelId, PiModel},
     store::{
         append_session_event, append_session_index_item, clear_fork_from, copy_session_log,
         delete_session, get_session_index_item, list_session_events, relocate_session_to_project,
@@ -312,6 +313,7 @@ impl SessionManager {
         attachment_paths: &[String],
         harness: Harness,
         model: ModelId,
+        pi_model: Option<PiModel>,
         effort: Option<Effort>,
         permission_mode: ApprovalPolicy,
         cwd: &str,
@@ -337,7 +339,25 @@ impl SessionManager {
         from: Option<MessageSender>,
         app: &AppHandle,
     ) -> Result<SendOutcome> {
-        let model_spec = find_model(model).with_context(|| format!("unknown model {model:?}"))?;
+        // An existing session's harness is durable state, just like its cwd;
+        // the frontend's control state can lag while a session is being opened.
+        let harness = if is_new_session {
+            harness
+        } else {
+            get_session_index_item(session_id)
+                .await?
+                .map(|item| item.harness)
+                .unwrap_or(harness)
+        };
+        let (model, pi_model) = if harness == Harness::Pi {
+            (ModelId::Pi, pi_model)
+        } else if model == ModelId::Pi {
+            (default_model(), None)
+        } else {
+            (model, None)
+        };
+        let model_spec = find_model(model, pi_model.as_ref())
+            .with_context(|| format!("unknown model {model:?}"))?;
         let effort = resolve_effort(&model_spec, effort);
 
         if is_new_session {
@@ -377,18 +397,25 @@ impl SessionManager {
             // Ahead of the index write, unlike the spawn below: a base git
             // cannot resolve has left nothing behind at all and the caller is
             // getting the error.
-            let owned_worktree = match (base_ref, &worktree_name) {
-                (Some(base), Some(name)) => {
+            let owned_worktree = match (base_ref, &worktree_name, harness) {
+                (Some(base), Some(name), _) => {
                     git::create_worktree(cwd, name, base).await?;
                     true
                 }
-                (Some(_), None) => bail!("a base ref needs a worktree to check it out into"),
-                (None, _) => false,
+                (Some(_), None, _) => bail!("a base ref needs a worktree to check it out into"),
+                (None, Some(name), Harness::Pi) => {
+                    let base = git::worktree_base_ref(cwd)
+                        .await
+                        .context("could not resolve Pi's worktree base")?;
+                    git::create_worktree(cwd, name, &base).await?;
+                    true
+                }
+                (None, _, _) => false,
             };
 
             // Indexed before the process spawns, so a session that fails to
             // start is still visible rather than vanishing without a trace.
-            let item = SessionIndexItem::new(
+            let mut item = SessionIndexItem::new(
                 session_id,
                 harness,
                 &session_cwd,
@@ -401,6 +428,7 @@ impl SessionManager {
                 permission_mode,
                 parent_session_id,
             );
+            item.pi_model = pi_model.clone();
 
             // The one failure that has to undo the tree, and the row that just
             // failed to be written is exactly why: removal is offered from a
@@ -540,6 +568,7 @@ impl SessionManager {
         // also where the baseline gets snapshotted, so a stale value would
         // diff the wrong tree.
         let indexed = get_session_index_item(session_id).await?;
+        let session_harness = indexed.as_ref().map(|item| item.harness).unwrap_or(harness);
         let session_cwd = match &indexed {
             Some(item) => item.cwd.clone(),
             None => cwd.to_string(),
@@ -548,7 +577,14 @@ impl SessionManager {
         if let Some(s) = sessions_guard.get_mut(session_id) {
             // Before the send, so the index reflects intent even if writing to
             // the child fails — the prompt event is persisted ahead of stdin too.
-            touch_session_index_item(session_id, model, effort, permission_mode).await?;
+            touch_session_index_item(
+                session_id,
+                model,
+                model_spec.pi_model.as_ref(),
+                effort,
+                permission_mode,
+            )
+            .await?;
 
             // A model call is open, so this prompt is held rather than sent, and
             // none of the live controls below fire with it. `set_model` and
@@ -585,7 +621,7 @@ impl SessionManager {
                 });
             }
 
-            if s.model != model {
+            if s.model != model || s.pi_model != model_spec.pi_model {
                 s.set_model(&model_spec).await?;
             }
             if s.permission_mode != permission_mode {
@@ -596,11 +632,19 @@ impl SessionManager {
             // but alive, so the narrower the gap the less of the user's own
             // editing lands on the turn's side of the diff.
             let baseline = git::snapshot_tree(&session_cwd).await;
-            s.send_msg(prompt, attachment_paths, baseline, from, app).await?;
+            s.send_msg(prompt, attachment_paths, baseline, from, app)
+                .await?;
             return Ok(SendOutcome::default());
         }
 
-        touch_session_index_item(session_id, model, effort, permission_mode).await?;
+        touch_session_index_item(
+            session_id,
+            model,
+            model_spec.pi_model.as_ref(),
+            effort,
+            permission_mode,
+        )
+        .await?;
 
         // A fork that hasn't spawned yet. The app's half happened when the user
         // asked for it — log copied, entry written — and this is the spawn that
@@ -617,23 +661,36 @@ impl SessionManager {
             .and(indexed.as_ref())
             .and_then(|i| i.worktree_name.clone());
 
-        let (spawn_cwd, baseline) = match (&pending_worktree, &indexed) {
-            (Some(_), Some(item)) => (
-                item.project_path.clone(),
-                git::base_ref_tree(&item.project_path).await,
-            ),
-            _ => (session_cwd.clone(), git::snapshot_tree(&session_cwd).await),
-        };
+        let (spawn_cwd, baseline, spawn_worktree) =
+            match (&pending_worktree, &indexed, session_harness) {
+                (Some(name), Some(item), Harness::Pi) => {
+                    let base = git::worktree_base_ref(&item.project_path)
+                        .await
+                        .context("could not resolve Pi's fork worktree base")?;
+                    git::create_worktree(&item.project_path, name, &base).await?;
+                    (item.cwd.clone(), git::snapshot_tree(&item.cwd).await, None)
+                }
+                (Some(_), Some(item), _) => (
+                    item.project_path.clone(),
+                    git::base_ref_tree(&item.project_path).await,
+                    pending_worktree.as_deref(),
+                ),
+                _ => (
+                    session_cwd.clone(),
+                    git::snapshot_tree(&session_cwd).await,
+                    None,
+                ),
+            };
 
         let mut session = Session::init(
             session_id,
-            harness,
+            session_harness,
             &model_spec,
             effort,
             permission_mode,
             &spawn_cwd,
             &session_cwd,
-            pending_worktree.as_deref(),
+            spawn_worktree,
             is_new_session,
             fork_from.as_deref(),
             app,
@@ -833,6 +890,12 @@ impl SessionManager {
 
         remove_session_worktree(&item).await?;
 
+        if item.harness == Pi {
+            if let Err(error) = pi::relocate_session_data(session_id, &item.project_path).await {
+                eprintln!("could not relocate Pi session data for {session_id}: {error}");
+            }
+        }
+
         relocate_session_to_project(session_id)
             .await?
             .with_context(|| format!("no session {session_id}"))
@@ -847,6 +910,13 @@ impl SessionManager {
         let running = self.sessions.lock().await.remove(session_id);
         if let Some(session) = running {
             session.kill().await?;
+        }
+
+        // Pi's context transcript lives beside Dray's data so it can resume
+        // across worktree moves; remove it with the Dray session rather than
+        // leaving a private copy behind after deletion.
+        if let Err(e) = pi::delete_session_data(session_id).await {
+            eprintln!("could not delete Pi session data for {session_id}: {e}");
         }
 
         // Best-effort for the same reason the attachments below are, and with
@@ -907,7 +977,11 @@ pub struct Session {
     /// since the CLI blocks its turn until something replies.
     pub stdin: Arc<Mutex<ChildStdin>>,
     pub harness: Harness,
+    /// The directory Pi uses to discover extension commands and the session's
+    /// own checkout for prompt delivery.
+    pub cwd: String,
     pub model: ModelId,
+    pub pi_model: Option<PiModel>,
     pub effort: Option<Effort>,
     pub permission_mode: ApprovalPolicy,
     pub events: Arc<Mutex<Vec<AgentEvent>>>,
@@ -917,14 +991,17 @@ pub struct Session {
     pub status: Arc<Mutex<StatusTracker>>,
     /// Permission requests the mapper has registered and nobody has answered.
     pub pending_permissions: PendingPermissions,
+    /// Pi extension dialogs waiting for an answer from the frontend. Claude
+    /// sessions keep this empty; the shared field lets the answer command route
+    /// without a second session type.
+    pub pi_ui_requests: pi::mapper::PendingUiRequests,
     /// Prompts typed during a running turn, waiting for the next boundary.
     /// Shared with the stdout task, which is what flushes them.
     pub queued: QueuedMessages,
 }
 
 impl Session {
-    /// Spawns the child process for the given harness. Only `ClaudeCode` is
-    /// implemented; other harnesses bail.
+    /// Spawns the child process for the selected harness.
     pub async fn init(
         session_id: &str,
         harness: Harness,
@@ -940,22 +1017,38 @@ impl Session {
         fork_from: Option<&str>,
         app: &AppHandle,
     ) -> Result<Session> {
-        if let Harness::ClaudeCode = harness {
-            claude_code::init(
-                session_id,
-                model,
-                effort,
-                permission_mode,
-                cwd,
-                session_cwd,
-                worktree_name,
-                is_new_session,
-                fork_from,
-                app,
-            )
-            .await
-        } else {
-            bail!("unsupported harness {harness:?}")
+        match harness {
+            ClaudeCode => {
+                claude_code::init(
+                    session_id,
+                    model,
+                    effort,
+                    permission_mode,
+                    cwd,
+                    session_cwd,
+                    worktree_name,
+                    is_new_session,
+                    fork_from,
+                    app,
+                )
+                .await
+            }
+            Pi => {
+                pi::init(
+                    session_id,
+                    model,
+                    effort,
+                    permission_mode,
+                    cwd,
+                    session_cwd,
+                    worktree_name,
+                    is_new_session,
+                    fork_from,
+                    app,
+                )
+                .await
+            }
+            Harness::Codex => bail!("unsupported harness {harness:?}"),
         }
     }
 
@@ -974,8 +1067,14 @@ impl Session {
         from: Option<MessageSender>,
         app: &AppHandle,
     ) -> Result<()> {
+        let extension_command = self.harness == Pi
+            && pi::commands::is_extension_command(&self.cwd, prompt)
+                .await
+                .unwrap_or(false);
+
         deliver_prompt(
             &self.id,
+            self.harness,
             prompt,
             attachment_paths,
             baseline,
@@ -988,9 +1087,16 @@ impl Session {
         )
         .await?;
 
-        // After the write: a prompt that never reached the child starts
-        // nothing, and the command's error is what the frontend acts on.
-        if let Some(next) = self.status.lock().await.on_send() {
+        // Extension commands can complete without entering Pi's agent loop;
+        // marking those as a turn would leave the session busy forever. Clear
+        // the frontend's optimistic busy state when no background work remains.
+        // If an extension starts its own agent run, its `agent_start` event still
+        // opens the status machine normally.
+        if extension_command {
+            if !self.status.lock().await.is_busy() {
+                publish_status(&self.id, SessionStatus::Idle, app).await;
+            }
+        } else if let Some(next) = self.status.lock().await.on_send() {
             publish_status(&self.id, next, app).await;
         }
 
@@ -1042,6 +1148,7 @@ impl Session {
         self.queue_msg(prompt, attachment_paths, from).await;
         flush_queued(
             &self.id,
+            self.harness,
             &self.queued,
             &self.seq,
             &self.events,
@@ -1057,6 +1164,25 @@ impl Session {
     /// There is no `set_effort` counterpart — the CLI rejects that subtype, and
     /// an `effort` field on this request is accepted but ignored.
     pub async fn set_model(&mut self, model: &Model) -> Result<()> {
+        if self.harness == Pi {
+            let pi_model = model
+                .pi_model
+                .as_ref()
+                .context("Pi model is missing its provider")?;
+            write_line(
+                &self.stdin,
+                &serde_json::json!({
+                    "type": "set_model",
+                    "provider": pi_model.provider,
+                    "modelId": pi_model.id,
+                }),
+            )
+            .await?;
+            self.model = model.id;
+            self.pi_model = Some(pi_model.clone());
+            return Ok(());
+        }
+
         let model_arg = model.id.as_arg().context("model has no CLI alias")?;
 
         write_line(
@@ -1065,6 +1191,7 @@ impl Session {
         )
         .await?;
         self.model = model.id;
+        self.pi_model = None;
 
         Ok(())
     }
@@ -1076,7 +1203,11 @@ impl Session {
     /// usually opens a follow-up turn to narrate the abort — so the status
     /// machine needs nothing special here, the resulting events drive it.
     pub async fn interrupt(&mut self) -> Result<()> {
-        write_line(&self.stdin, &ControlLine::new(ControlRequest::Interrupt)).await?;
+        if self.harness == Pi {
+            write_line(&self.stdin, &serde_json::json!({"type": "abort"})).await?;
+        } else {
+            write_line(&self.stdin, &ControlLine::new(ControlRequest::Interrupt)).await?;
+        }
 
         Ok(())
     }
@@ -1101,6 +1232,10 @@ impl Session {
     /// one would mean waking the model for a turn to announce something the
     /// harness deliberately keeps quiet.
     pub async fn stop_task(&mut self, task_id: &str) -> Result<()> {
+        if self.harness == Pi {
+            bail!("Pi does not expose background task controls for {task_id}");
+        }
+
         write_line(
             &self.stdin,
             &ControlLine::new(ControlRequest::StopTask { task_id }),
@@ -1113,6 +1248,13 @@ impl Session {
     /// Switches the permission stance of a running child. Unlike effort, the CLI
     /// does have a `set_permission_mode` subtype, so this needs no respawn.
     pub async fn set_permission_mode(&mut self, mode: ApprovalPolicy) -> Result<()> {
+        if self.harness == Pi {
+            // Pi permissions are configured by its global/project settings and
+            // extensions; it has no runtime permission-mode RPC command.
+            self.permission_mode = mode;
+            return Ok(());
+        }
+
         write_line(
             &self.stdin,
             &ControlLine::new(ControlRequest::SetPermissionMode {
@@ -1180,7 +1322,7 @@ impl Session {
         let decision = AgentEvent {
             id: Uuid::now_v7().to_string(),
             session_id: self.id.clone(),
-            harness: ClaudeCode,
+            harness: self.harness,
             seq: self.seq.fetch_add(1, Relaxed),
             ts: now_rfc3339(),
             turn_id: None,
@@ -1211,6 +1353,40 @@ impl Session {
         answers: HashMap<String, String>,
         app: &AppHandle,
     ) -> Result<()> {
+        if self.harness == Pi {
+            let pending = self
+                .pi_ui_requests
+                .lock()
+                .expect("Pi UI request mutex poisoned")
+                .remove(request_id)
+                .with_context(|| format!("no pending Pi UI request {request_id}"))?;
+            let label = answers
+                .get(&pending.question)
+                .cloned()
+                .unwrap_or_else(|| "Skipped".into());
+            write_line(&self.stdin, &pending.response(&answers)).await?;
+
+            let decision = AgentEvent {
+                id: Uuid::now_v7().to_string(),
+                session_id: self.id.clone(),
+                harness: self.harness,
+                seq: self.seq.fetch_add(1, Relaxed),
+                ts: now_rfc3339(),
+                turn_id: None,
+                subagent: None,
+                payload: AgentEventPayload::PermissionDecided {
+                    request_id: request_id.to_string(),
+                    tool_use_id: format!("pi-ui-{request_id}"),
+                    behavior: PermissionBehavior::Allow,
+                    label,
+                    automatic: false,
+                },
+                raw: None,
+            };
+            app.emit("agent_event", &decision)?;
+            return Ok(());
+        }
+
         let pending = {
             let mut guard = self
                 .pending_permissions
@@ -1222,7 +1398,11 @@ impl Session {
                 .with_context(|| format!("no pending permission request {request_id}"))?
         };
 
-        write_line(&self.stdin, &answer_response(request_id, &pending, &answers)).await?;
+        write_line(
+            &self.stdin,
+            &answer_response(request_id, &pending, &answers),
+        )
+        .await?;
 
         let payload = AgentEventPayload::PermissionDecided {
             request_id: request_id.to_string(),
@@ -1239,7 +1419,7 @@ impl Session {
         let decision = AgentEvent {
             id: Uuid::now_v7().to_string(),
             session_id: self.id.clone(),
-            harness: ClaudeCode,
+            harness: self.harness,
             seq: self.seq.fetch_add(1, Relaxed),
             ts: now_rfc3339(),
             turn_id: None,
@@ -1286,6 +1466,7 @@ pub async fn write_line(stdin: &Arc<Mutex<ChildStdin>>, value: &impl Serialize) 
 #[allow(clippy::too_many_arguments)]
 async fn deliver_prompt(
     session_id: &str,
+    harness: Harness,
     prompt: &str,
     attachment_paths: &[String],
     baseline: Option<String>,
@@ -1321,7 +1502,7 @@ async fn deliver_prompt(
     let agent_event = AgentEvent {
         id: Uuid::now_v7().to_string(),
         session_id: session_id.to_string(),
-        harness: ClaudeCode,
+        harness,
         seq,
         ts: now_rfc3339(),
         // Nothing tracks turns yet; Claude Code opens one per `init`.
@@ -1362,7 +1543,31 @@ async fn deliver_prompt(
         json!(blocks)
     };
 
-    let line = json!({"type":"user","message":{"role":"user","content": content}});
+    let line = match harness {
+        ClaudeCode => json!({"type":"user","message":{"role":"user","content": content}}),
+        Pi => {
+            let mut line = json!({"type": "prompt", "message": prepared.text});
+            if !prepared.images.is_empty() {
+                line["images"] = json!(prepared
+                    .images
+                    .iter()
+                    .map(|image| json!({
+                        "type": "image",
+                        "data": image.data,
+                        "mimeType": image.mime_type,
+                    }))
+                    .collect::<Vec<_>>());
+            }
+            if queued {
+                // Pi requires a delivery mode when a prompt arrives while its
+                // agent loop is active. Dray's queued prompts are steering
+                // messages, so they are delivered at the next tool boundary.
+                line["streamingBehavior"] = json!("steer");
+            }
+            line
+        }
+        Harness::Codex => bail!("unsupported harness {harness:?}"),
+    };
     write_line(stdin, &line).await
 }
 
@@ -1383,6 +1588,7 @@ async fn deliver_prompt(
 /// and a prompt that cannot be written is one the user can retype.
 pub async fn flush_queued(
     session_id: &str,
+    harness: Harness,
     queued: &QueuedMessages,
     seq: &Arc<AtomicU64>,
     events: &Arc<Mutex<Vec<AgentEvent>>>,
@@ -1407,6 +1613,7 @@ pub async fn flush_queued(
         // prompt. `None` makes `changeRange` walk past it to the real prompt.
         if let Err(err) = deliver_prompt(
             session_id,
+            harness,
             &message.text,
             &message.attachment_paths,
             None,

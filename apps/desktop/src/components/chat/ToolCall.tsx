@@ -24,6 +24,8 @@ const SUMMARY_FIELDS = [
   "query",
   "url",
   "description",
+  "task",
+  "id",
   "timeout",
 ];
 
@@ -35,6 +37,8 @@ const EDIT_FIELDS = [
   ...SUMMARY_FIELDS,
   "old_string",
   "new_string",
+  "oldText",
+  "newText",
   "content",
   "new_source",
   "edits",

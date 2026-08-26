@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 
-import type { SlashCommand } from "@/types/events";
+import type { Harness, SlashCommand } from "@/types/events";
 
 /// Kept across mounts, keyed by directory. The backend caches these too, so this
 /// only saves the round trip — but the composer remounts on every session
@@ -14,9 +14,10 @@ const cache = new Map<string, SlashCommand[]>();
 /// A failed probe resolves to no commands rather than surfacing an error: the
 /// picker is an accelerator for text the user can always type by hand, so it
 /// staying shut is a smaller failure than an error banner over the composer.
-export function useSlashCommands(cwd: string | null): SlashCommand[] {
+export function useSlashCommands(cwd: string | null, harness: Harness): SlashCommand[] {
+  const cacheKey = cwd ? `${harness}\0${cwd}` : null;
   const [commands, setCommands] = useState<SlashCommand[]>(
-    () => (cwd ? cache.get(cwd) : undefined) ?? [],
+    () => (cacheKey ? cache.get(cacheKey) : undefined) ?? [],
   );
 
   useEffect(() => {
@@ -25,7 +26,7 @@ export function useSlashCommands(cwd: string | null): SlashCommand[] {
       return;
     }
 
-    const hit = cache.get(cwd);
+    const hit = cacheKey ? cache.get(cacheKey) : undefined;
     if (hit) {
       setCommands(hit);
       return;
@@ -39,9 +40,9 @@ export function useSlashCommands(cwd: string | null): SlashCommand[] {
     // commands is worse than offering none.
     setCommands([]);
 
-    invoke<SlashCommand[]>("list_slash_commands", { cwd })
+    invoke<SlashCommand[]>("list_slash_commands", { cwd, harness })
       .then((list) => {
-        cache.set(cwd, list);
+        if (cacheKey) cache.set(cacheKey, list);
         if (!cancelled) setCommands(list);
       })
       .catch((e) => {
@@ -52,7 +53,7 @@ export function useSlashCommands(cwd: string | null): SlashCommand[] {
     return () => {
       cancelled = true;
     };
-  }, [cwd]);
+  }, [cwd, harness]);
 
   return commands;
 }

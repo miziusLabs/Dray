@@ -43,7 +43,7 @@ Options:
 | `--project <path>` | Repo to run in. Defaults to the current session's, or the repo you are in. |
 | `--model <alias>` | `opus`, `sonnet`, `fable`, `haiku`. Defaults to the current session's model. |
 | `--effort <level>` | `low`, `medium`, `high`, `xhigh`, `max`. Defaults to the current session's. |
-| `--harness <name>` | `claude_code`. Defaults to the current session's. |
+| `--harness <name>` | `claude_code` or `pi`. Defaults to the current session's. |
 | `--from <session\|ref>` | Start the worktree on existing work instead of `origin/<default>`. |
 
 ### Each session gets its own worktree

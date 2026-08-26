@@ -229,9 +229,18 @@ mod tests {
 
     #[test]
     fn strips_the_wrapping_a_model_adds() {
-        assert_eq!(clean_title("\"Fix the auth redirect\"\n").unwrap(), "Fix the auth redirect");
-        assert_eq!(clean_title("**Fix the auth redirect**").unwrap(), "Fix the auth redirect");
-        assert_eq!(clean_title("Fix the auth redirect.").unwrap(), "Fix the auth redirect");
+        assert_eq!(
+            clean_title("\"Fix the auth redirect\"\n").unwrap(),
+            "Fix the auth redirect"
+        );
+        assert_eq!(
+            clean_title("**Fix the auth redirect**").unwrap(),
+            "Fix the auth redirect"
+        );
+        assert_eq!(
+            clean_title("Fix the auth redirect.").unwrap(),
+            "Fix the auth redirect"
+        );
     }
 
     /// Real output from `--append-system-prompt`: the child stayed a coding
@@ -345,7 +354,10 @@ mod cli_tests {
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("/nonexistent/worktrees/blue-kite"), "got: {err}");
+        assert!(
+            err.contains("/nonexistent/worktrees/blue-kite"),
+            "got: {err}"
+        );
     }
 }
 

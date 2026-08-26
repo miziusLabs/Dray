@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     events::{now_rfc3339, AgentEvent, ApprovalPolicy},
-    models::{Effort, ModelId},
+    models::{Effort, ModelId, PiModel},
     session::Harness,
 };
 
@@ -61,6 +61,9 @@ pub struct SessionIndexItem {
     /// the user last picked instead of resetting to a default.
     #[serde(default)]
     pub model: ModelId,
+    /// The concrete provider/model selected when the harness is Pi.
+    #[serde(default)]
+    pub pi_model: Option<PiModel>,
     /// `None` for models that take no effort flag.
     #[serde(default)]
     pub effort: Option<Effort>,
@@ -190,9 +193,7 @@ pub async fn list_session_index_items() -> Result<Vec<SessionIndexItem>> {
 /// of the two at a time, so a parameter keeps it to one function rather than a
 /// pair that would drift. Callers that need every entry (`set_*`, `get_*`) still
 /// use [`list_session_index_items`] directly.
-pub async fn list_session_index_items_by_archived(
-    archived: bool,
-) -> Result<Vec<SessionIndexItem>> {
+pub async fn list_session_index_items_by_archived(archived: bool) -> Result<Vec<SessionIndexItem>> {
     Ok(filter_by_archived(
         list_session_index_items().await?,
         archived,
@@ -201,7 +202,10 @@ pub async fn list_session_index_items_by_archived(
 
 /// Split out from the async read so it can be tested without an `index.json`.
 fn filter_by_archived(items: Vec<SessionIndexItem>, archived: bool) -> Vec<SessionIndexItem> {
-    items.into_iter().filter(|i| i.archived == archived).collect()
+    items
+        .into_iter()
+        .filter(|i| i.archived == archived)
+        .collect()
 }
 
 /// All sessions, bucketed by `project_path` — the sidebar's project grouping.
@@ -259,6 +263,7 @@ impl SessionIndexItem {
             worktree_removed: false,
             title: title_from_prompt(first_prompt),
             model,
+            pi_model: None,
             effort,
             permission_mode,
             status: SessionStatus::default(),
@@ -306,6 +311,7 @@ impl SessionIndexItem {
             worktree_removed: worktree_name.is_none() && self.worktree_removed,
             title: fork_title(&self.title),
             model: self.model,
+            pi_model: self.pi_model.clone(),
             effort: self.effort,
             permission_mode: self.permission_mode,
             status: SessionStatus::default(),
@@ -514,6 +520,7 @@ pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> 
 pub async fn touch_session_index_item(
     session_id: &str,
     model: ModelId,
+    pi_model: Option<&PiModel>,
     effort: Option<Effort>,
     permission_mode: ApprovalPolicy,
 ) -> Result<()> {
@@ -526,6 +533,7 @@ pub async fn touch_session_index_item(
 
     item.modified = now_rfc3339();
     item.model = model;
+    item.pi_model = pi_model.cloned();
     item.effort = effort;
     item.permission_mode = permission_mode;
 
@@ -676,9 +684,7 @@ pub async fn set_session_status(
 /// checkout of its own", which is the fact that settles which of the two wins.
 ///
 /// Returns the entry as written, or `None` for an id the index doesn't hold.
-pub async fn relocate_session_to_project(
-    session_id: &str,
-) -> Result<Option<SessionIndexItem>> {
+pub async fn relocate_session_to_project(session_id: &str) -> Result<Option<SessionIndexItem>> {
     let _guard = INDEX_LOCK.lock().await;
 
     let mut sessions = list_session_index_items().await?;
@@ -1071,7 +1077,7 @@ mod tests {
         assert_eq!(item.status, SessionStatus::Idle);
         // Reads back as a model no build lists, so it can never reach a spawn.
         assert_eq!(item.model, ModelId::Unknown);
-        assert!(crate::models::find_model(item.model).is_none());
+        assert!(crate::models::find_model(item.model, item.pi_model.as_ref()).is_none());
         // Absent reads as the composer's own default, so an old session resumes
         // under the mode its picker would show.
         assert_eq!(item.permission_mode, ApprovalPolicy::Auto);

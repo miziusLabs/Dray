@@ -102,7 +102,7 @@ pub struct CreateSession {
     /// levels must be sent none at all.
     #[serde(default)]
     pub effort: Option<String>,
-    /// `claude_code` today. `None` inherits the parent's, and defaults to
+    /// `claude_code` or `pi`. `None` inherits the parent's, and defaults to
     /// Claude Code with no parent.
     #[serde(default)]
     pub harness: Option<String>,
@@ -111,8 +111,8 @@ pub struct CreateSession {
     #[serde(default)]
     pub parent_session_id: Option<String>,
     /// Where the new session's worktree starts from: a session id, a branch, or
-    /// any git ref. `None` is the ordinary case and means `origin/<default>`,
-    /// which is what the harness would have picked on its own.
+    /// any git ref. `None` is the ordinary case and means the harness's default
+    /// base.
     ///
     /// A session id is resolved to the branch that session's work lands on, and
     /// that resolution is the app's — the CLI has no index to read and no

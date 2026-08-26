@@ -111,6 +111,17 @@ export default function EventRow({
         </div>
       );
 
+    case "extension_notification":
+      return (
+        <Notice
+          icon={CircleAlert}
+          tone={payload.level === "error" ? "destructive" : "muted"}
+          wrap
+        >
+          {payload.message}
+        </Notice>
+      );
+
     case "turn_completed":
       // Only a failure earns a line. Cost and token counts are accounting, not
       // conversation, and belong in a session-level surface rather than after

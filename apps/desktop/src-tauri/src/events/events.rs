@@ -364,6 +364,13 @@ pub enum AgentEventPayload {
         exit_code: Option<i32>,
         outcome: Option<String>,
     },
+    /// A fire-and-forget notification emitted by a Pi extension through its
+    /// host UI API. It is live-only because it has no meaning after the process
+    /// that produced it is gone.
+    ExtensionNotification {
+        message: String,
+        level: String,
+    },
     /// The harness has sent a request to the model and is waiting on its first
     /// token. Drives the working indicator and nothing else.
     ///

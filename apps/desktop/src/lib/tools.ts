@@ -19,6 +19,10 @@ export function toolSummary(
 ): string | null {
   const path = field(input, "file_path") ?? field(input, "path") ?? field(input, "notebook_path");
   if (path) return shortenPath(path);
+  if (name === "libarian") return field(input, "task");
+  if (name === "background_command") {
+    return field(input, "command") ?? field(input, "id");
+  }
 
   switch (toolType) {
     case "shell":
@@ -39,6 +43,7 @@ export function toolSummary(
     field(input, "description") ??
     field(input, "command") ??
     field(input, "query") ??
+    field(input, "task") ??
     field(input, "prompt") ??
     (name ? null : null)
   );
@@ -69,6 +74,16 @@ const TOOL_VERBS: Record<string, Verbs> = {
   WebFetch: ["Fetching", "Fetched", "page"],
   WebSearch: ["Searching web", "Searched web", "query"],
   AskUserQuestion: ["Asking", "Asked", "question"],
+  read: ["Reading", "Read", "file"],
+  write: ["Writing", "Wrote", "file"],
+  edit: ["Editing", "Edited", "file"],
+  bash: ["Running", "Ran", "command"],
+  background_command: ["Running", "Ran", "command"],
+  grep: ["Searching", "Searched", "pattern"],
+  find: ["Searching", "Searched", "path"],
+  finder: ["Exploring", "Explored", "codebase"],
+  libarian: ["Researching", "Researched", "task"],
+  web_search: ["Searching web", "Searched web", "query"],
 };
 
 /// The label for a single tool-call row. `pending` picks the tense — a live call
@@ -88,6 +103,11 @@ const GROUP_VERBS: Record<string, [running: string, done: string]> = {
   BashOutput: ["Reading", "Read"],
   KillShell: ["Killing", "Killed"],
   WebSearch: ["Searching", "Searched"],
+  bash: ["Running", "Ran"],
+  background_command: ["Running", "Ran"],
+  finder: ["Exploring", "Explored"],
+  libarian: ["Researching", "Researched"],
+  web_search: ["Searching web", "Searched web"],
 };
 
 /// English plurals only where the nouns here need it — a trailing `y` after a

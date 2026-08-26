@@ -194,7 +194,7 @@ label: string,
  * True when the app answered on its own — an unsupported request
  * subtype, or a shutdown clearing what it could not ask about.
  */
-automatic: boolean, } | { "type": "permission_denied", toolName: string, toolUseId: string, message: string, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "model_request_started" } | { "type": "context_compaction_started" } | { "type": "context_compacted", 
+automatic: boolean, } | { "type": "permission_denied", toolName: string, toolUseId: string, message: string, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "extension_notification", message: string, level: string, } | { "type": "model_request_started" } | { "type": "context_compaction_started" } | { "type": "context_compacted", 
 /**
  * `manual` or `auto`.
  */
@@ -417,7 +417,7 @@ newText: string | null,
  */
 unreadable: Unreadable | null, };
 
-export type Harness = "claude_code" | "codex";
+export type Harness = "claude_code" | "codex" | "pi";
 
 export type HookPhase = "started" | "finished";
 
@@ -454,9 +454,10 @@ export type MessageSender = { sessionId: string, title: string, };
 
 export type Model = { 
 /**
- * What `--model` receives.
+ * The harness-specific model family. Pi models carry their provider and
+ * concrete id in [`pi_model`].
  */
-id: ModelId, label: string, 
+id: ModelId, piModel: PiModel | null, label: string, 
 /**
  * Empty means the model has no effort levels. The CLI tolerates `--effort`
  * on such a model and ignores it, so this drives the UI and keeps the
@@ -470,7 +471,7 @@ efforts: Array<Effort>, defaultEffort: Effort | null, };
  * model beats failing the whole index read and emptying the sidebar. It maps
  * to no alias, so [`find_model`] rejects it and it can't reach a spawn.
  */
-export type ModelId = "opus" | "sonnet" | "fable" | "haiku" | "unknown";
+export type ModelId = "opus" | "sonnet" | "fable" | "haiku" | "pi" | "unknown";
 
 /**
  * What one model has consumed **for the session so far** — cumulative and
@@ -537,6 +538,8 @@ behavior: PermissionBehavior, };
  * than shown as a button whose effect can't be described.
  */
 export type PermissionOptionKind = "once" | "always_rule" | "always_directory" | "switch_mode" | "deny";
+
+export type PiModel = { provider: string, id: string, };
 
 export type PrCheck = { name: string, state: CheckState, 
 /**
@@ -803,6 +806,10 @@ worktreeRemoved: boolean, title: string,
  */
 model: ModelId, 
 /**
+ * The concrete provider/model selected when the harness is Pi.
+ */
+piModel: PiModel | null, 
+/**
  * `None` for models that take no effort flag.
  */
 effort: Effort | null, 
@@ -872,6 +879,10 @@ worktreeRemoved: boolean, title: string,
  * the user last picked instead of resetting to a default.
  */
 model: ModelId, 
+/**
+ * The concrete provider/model selected when the harness is Pi.
+ */
+piModel: PiModel | null, 
 /**
  * `None` for models that take no effort flag.
  */

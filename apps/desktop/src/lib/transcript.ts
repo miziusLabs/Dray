@@ -190,6 +190,7 @@ const RENDERS = new Set([
   "tool_call_started",
   "file_edits",
   "error",
+  "extension_notification",
   "context_compacted",
   "rate_limited",
   "permission_denied",

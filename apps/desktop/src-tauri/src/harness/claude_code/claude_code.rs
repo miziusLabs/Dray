@@ -41,30 +41,6 @@ const APPEND_SYSTEM_PROMPT: &str = include_str!("system_prompt.md");
 /// reports success for a pattern that matches nothing.
 const ALLOWED_TOOLS: &str = "Bash(dray:*)";
 
-/// The child's `PATH`: the inherited one with the user-bin directories put
-/// back.
-///
-/// Load-bearing rather than defensive. A bundled `.app` launched from Finder
-/// inherits launchd's `PATH` — `/usr/bin:/bin:/usr/sbin:/sbin` — so a `dray`
-/// installed to `~/.local/bin` is simply not there for the agent, and the
-/// failure reads as "the CLI is broken" rather than "the CLI is unreachable".
-/// Appended, not prepended: the user's own `PATH` should still win where the
-/// two name the same binary.
-fn agent_path() -> String {
-    let inherited = std::env::var_os("PATH").unwrap_or_default();
-    let mut dirs: Vec<_> = std::env::split_paths(&inherited).collect();
-
-    for dir in crate::binpath::known_dirs() {
-        if !dirs.contains(&dir) {
-            dirs.push(dir);
-        }
-    }
-
-    std::env::join_paths(dirs)
-        .map(|joined| joined.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| inherited.to_string_lossy().into_owned())
-}
-
 /// Takes a resolved [`Model`] rather than an id: there's no way to build one
 /// outside `models`, so an unknown model can't reach the spawn and this doesn't
 /// re-validate what the caller already checked.
@@ -166,14 +142,16 @@ pub async fn init(
         // How the CLI knows which session is calling it, which is what links a
         // spawned session to its parent and what the depth cap reads.
         .env("DRAY_SESSION_ID", session_id)
-        .env("PATH", agent_path())
+        .env("PATH", crate::binpath::agent_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .context("couldn't start claude")?;
 
-    let stdin = Arc::new(Mutex::new(child.stdin.take().context("failed to take stdin")?));
+    let stdin = Arc::new(Mutex::new(
+        child.stdin.take().context("failed to take stdin")?,
+    ));
     let stdout = child.stdout.take().context("failed to take stdout")?;
     let stderr = child.stderr.take().context("failed to take stderr")?;
 
@@ -244,13 +222,16 @@ pub async fn init(
         child,
         stdin,
         harness: ClaudeCode,
+        cwd: session_cwd.to_string(),
         model: model.id,
+        pi_model: None,
         effort,
         permission_mode,
         events,
         seq,
         status,
         pending_permissions,
+        pi_ui_requests: Default::default(),
         queued,
     })
 }
@@ -316,7 +297,13 @@ async fn read_stdout(
         // has never seen. Recorded alongside outright failures because it is
         // the same coverage gap; the catch-all only stops it costing the line.
         if let ClaudeCodeEvent::System(parser::SystemEvent::Unrecognized) = &claude_event {
-            record_failure(session_id, "unknown_subtype", "unmodeled system subtype", &line).await;
+            record_failure(
+                session_id,
+                "unknown_subtype",
+                "unmodeled system subtype",
+                &line,
+            )
+            .await;
         }
 
         let mut agent_event = match mapper.map(claude_event) {
@@ -442,6 +429,7 @@ async fn read_stdout(
         if at_boundary {
             flush_queued(
                 session_id,
+                ClaudeCode,
                 &queued,
                 &flush_seq,
                 &flush_events,

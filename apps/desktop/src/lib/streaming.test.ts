@@ -48,6 +48,20 @@ describe("streamingCall", () => {
     );
   });
 
+  it("supports Pi's lower-case write tool", () => {
+    expect(streamingCall("write", '{"path":"src/main.ts","content":"one\\ntwo"}')).toEqual({
+      target: "src/main.ts",
+      added: 2,
+    });
+  });
+
+  it("shows a Pi research task while its arguments stream", () => {
+    expect(streamingCall("libarian", '{"task":"research the protocol"}')).toEqual({
+      target: "research the protocol",
+      added: null,
+    });
+  });
+
   it("does not open a line a trailing newline hasn't started", () => {
     expect(streamingCall("Write", '{"file_path":"/a/c.py","content":"one\\ntwo\\n"').added).toBe(2);
   });
