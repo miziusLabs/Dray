@@ -23,14 +23,7 @@ second description of it. GitHub's generated commit list is appended below it.
 
 ### Added
 
-- **A settings dialog, and analytics behind a switch in it.** Dray now reports
-  one event — `app_started`, carrying no properties — so there is a count of
-  how many people run it. Nothing about your sessions, prompts, repositories or
-  files is collected, and there is no second event.
-
-  **It is on by default.** Turn it off in Settings, or set `DRAY_NO_ANALYTICS`
-  in the environment, which wins over the stored setting in one direction: it
-  can switch reporting off, never on.
+- **A settings dialog** for app-wide preferences.
 
 ### Fixed
 

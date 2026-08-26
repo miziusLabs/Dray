@@ -12,7 +12,6 @@ use crate::{
 use std::collections::HashMap;
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
-pub mod analytics;
 pub mod attachments;
 pub mod binpath;
 #[path = "events/events.rs"]
@@ -29,7 +28,6 @@ pub mod orchestration;
 pub mod projects;
 pub mod quit;
 pub mod session;
-pub mod settings;
 pub mod store;
 pub mod title;
 pub mod updater;
@@ -107,42 +105,6 @@ async fn list_models(harness: Option<&str>, cwd: Option<&str>) -> Result<Vec<Mod
             }
         }
         Some(_) => Err("invalid harness".into()),
-    }
-}
-
-/// The preferences Rust owns. Everything else the settings dialog draws is the
-/// frontend's own local storage — see [`settings`].
-///
-/// Answers with the **effective** state, off `analytics::enabled`, not with
-/// what is on disk. The two differ whenever `DRAY_NO_ANALYTICS` is set, and a
-/// switch drawn from the file there would sit at `on` while nothing was being
-/// sent.
-#[tauri::command]
-fn get_settings() -> settings::SettingsView {
-    settings_view()
-}
-
-/// Persists the analytics opt-out and applies it to this run at once, so the
-/// switch does not need a restart to mean anything.
-///
-/// Read-modify-write rather than a fresh struct: with a second field here one
-/// day, building this from `enabled` alone would reset whatever the caller did
-/// not name.
-#[tauri::command]
-async fn set_analytics_enabled(enabled: bool) -> Result<settings::SettingsView, String> {
-    let mut next = settings::read().await;
-    next.analytics_enabled = enabled;
-
-    settings::write(&next).await.map_err(|e| e.to_string())?;
-    analytics::set_enabled(enabled && !analytics::env_opt_out());
-
-    Ok(settings_view())
-}
-
-fn settings_view() -> settings::SettingsView {
-    settings::SettingsView {
-        analytics_enabled: analytics::enabled(),
-        analytics_locked: analytics::env_opt_out(),
     }
 }
 
@@ -528,7 +490,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(analytics::plugin())
         .manage(SessionManager::default())
         .manage(updater::PendingUpdate::default())
         .manage(quit::PendingQuit::default())
@@ -576,23 +537,12 @@ pub fn run() {
                 }
             });
 
-            // Spawned rather than awaited, but the two halves inside it are
-            // ordered: the launch is reported only once the persisted opt-out
-            // has been read, or an opted-out install would still send the one
-            // event it opted out of.
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                analytics::start(&handle).await;
-            });
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             send_msg,
             read_attachments,
             list_models,
-            get_settings,
-            set_analytics_enabled,
             list_slash_commands,
             warm_file_index,
             search_files,

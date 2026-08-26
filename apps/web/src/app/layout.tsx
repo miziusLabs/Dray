@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Analytics } from "@vercel/analytics/next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "react-tweet/theme.css";
 import "./globals.css";
@@ -48,10 +47,7 @@ export default function RootLayout({
       data-theme="dark"
       className={`${geistSans.variable} ${geistMono.variable}`}
     >
-      <body className="font-sans">
-        {children}
-        <Analytics />
-      </body>
+      <body className="font-sans">{children}</body>
     </html>
   );
 }
