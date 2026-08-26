@@ -2,7 +2,7 @@ import { Image } from "lucide-react";
 
 import SessionAvatar from "@/components/SessionAvatar";
 import ImageRow from "@/components/chat/ImageRow";
-import { SEGMENT_COLOR, highlightSegments, splitMention } from "@/lib/highlight";
+import { Markdown } from "@/components/chat/Markdown";
 import { stripSenderPrefix } from "@/lib/relay";
 import { shortenPath } from "@/lib/tools";
 import type { ImageRef, MessageSender } from "@/types/events";
@@ -10,11 +10,8 @@ import type { ImageRef, MessageSender } from "@/types/events";
 /// The user's own text, echoed from the event log rather than local state — the
 /// backend synthesizes and persists it, so this renders the same live or replayed.
 ///
-/// A slash command and a file mention are coloured and nothing more — same size,
-/// same weight, same line. Each stays part of the sentence it sits in, which a
-/// chip or a monospace run made them stop being. The segments come from the same
-/// function the composer's overlay uses, so a word coloured while typing is
-/// still coloured once sent.
+/// Markdown is rendered with the same safe renderer as assistant output, so sent
+/// prompts preserve formatting instead of displaying their source syntax.
 ///
 /// Images sit **outside the bubble**. The bubble is a container for speech, and
 /// a picture given a fill and a padding reads as speech with a frame drawn round
@@ -44,8 +41,6 @@ export default function UserMessage({
   onOpenSession?: (sessionId: string) => void;
 }) {
   const body = stripSenderPrefix(text, from);
-  const segments = highlightSegments(body);
-
   // An image with neither an archived copy nor bytes of its own — the file was
   // cleared out from under a transcript that still names it. `ImageRow` drops
   // those, so this row is what is left to say about them.
@@ -77,38 +72,11 @@ export default function UserMessage({
 
       {body && (
         <div className="max-w-[85%] rounded-xl bg-card px-3 py-2 text-card-foreground">
-          {/* `wrap-anywhere` because a pasted path or URL has no whitespace to
-              wrap at, and the bubble's `max-w` caps the box and not what is
-              drawn in it — so the glyphs run out over the transcript's own
-              background and set the scroll width of the whole column, moving
-              every other message sideways. Anywhere rather than `break-words`:
-              only `anywhere` shrinks min-content width, which is the part that
-              sets that scroll width. */}
-          <span className="text-chat whitespace-pre-wrap wrap-anywhere">
-            {/* Plain runs concatenate back to `text` exactly, so the spacing the
-                user typed survives — nothing here is rebuilt from a parse.
-                A mention is the one run drawn shorter than it was sent: the
-                directory is dropped and kept on the tooltip, since a deep path
-                is most of a line and says little the filename doesn't. The
-                composer can't do this — see `splitMention`. */}
-            {segments.map((segment, i) => {
-              if (segment.kind === "mention") {
-                const { name } = splitMention(segment.text);
-
-                return (
-                  <span key={i} className={SEGMENT_COLOR.mention} title={segment.text.slice(1)}>
-                    @{name}
-                  </span>
-                );
-              }
-
-              return (
-                <span key={i} className={SEGMENT_COLOR[segment.kind]}>
-                  {segment.text}
-                </span>
-              );
-            })}
-          </span>
+          <Markdown
+            className="text-card-foreground [&_p]:whitespace-pre-wrap"
+          >
+            {body}
+          </Markdown>
         </div>
       )}
 
