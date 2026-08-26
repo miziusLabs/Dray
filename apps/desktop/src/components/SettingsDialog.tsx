@@ -19,9 +19,13 @@ import type { SettingsView } from "@/types/events";
 export default function SettingsDialog({
   open,
   onOpenChange,
+  showArchived,
+  onShowArchivedChange,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
+  showArchived: boolean;
+  onShowArchivedChange: (next: boolean) => void;
 }) {
   const { settings, setAnalyticsEnabled } = useAppSettings(open);
 
@@ -36,9 +40,35 @@ export default function SettingsDialog({
           <DialogTitle>Settings</DialogTitle>
         </DialogHeader>
 
-        <AnalyticsRow view={settings} onChange={setAnalyticsEnabled} />
+        <div className="flex flex-col gap-6">
+          <AnalyticsRow view={settings} onChange={setAnalyticsEnabled} />
+          <SettledSessionsRow
+            checked={showArchived}
+            onChange={onShowArchivedChange}
+          />
+        </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SettledSessionsRow({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const id = useId();
+
+  return (
+    <SettingRow
+      id={id}
+      label="Show settled sessions"
+      description="Show settled sessions instead of active sessions."
+    >
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+    </SettingRow>
   );
 }
 

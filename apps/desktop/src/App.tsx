@@ -108,13 +108,6 @@ function App() {
   } = useSessions();
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
-  // The sidebar's scope, not the composer's: `projectPath` decides where a new
-  // session runs, and switching what you're *looking at* must not quietly move
-  // where the next prompt would land.
-  const [projectFilter, setProjectFilter] = useLocalStorage<string | null>(
-    "ade.projectFilter",
-    null,
-  );
   const {
     status: updateStatus,
     manual: updateManual,
@@ -226,16 +219,9 @@ function App() {
     busy,
   );
 
-  // Filtered here rather than inside the sidebar, so the list and the ⌘⇧↑/↓ walk
-  // read one array. `projectPath` on the item is the repo root, so a worktree
-  // session stays under the project it forked from.
-  const visibleSessions = useMemo(
-    () =>
-      projectFilter
-        ? sessionIndexItems.filter((i) => i.projectPath === projectFilter)
-        : sessionIndexItems,
-    [sessionIndexItems, projectFilter],
-  );
+  // The sidebar always shows every session so its project headings remain the
+  // stable way to scan work across repositories.
+  const visibleSessions = sessionIndexItems;
 
   // The sidebar's marks: one `gh` per repo on screen rather than one per row —
   // see `usePrMarks`. Distinct paths, and the *active* list's only: a settled
@@ -572,8 +558,6 @@ function App() {
         <Sidebar
           items={visibleSessions}
           projects={projects}
-          projectFilter={projectFilter}
-          onProjectFilterChange={setProjectFilter}
           statusBySession={statusBySession}
           askingSessions={askingSessions}
           prFor={prMarks.prFor}
@@ -613,7 +597,6 @@ function App() {
           onFork={forkSession}
           onDelete={deleteSession}
           showArchived={showArchived}
-          onToggleArchived={() => setShowArchived((v) => !v)}
           updateStatus={updateStatus}
           updateBlocked={anyRunning}
           updateManual={updateManual}
@@ -832,7 +815,12 @@ function App() {
     <QuitDialog />
     {/* Mounted here rather than in the sidebar, which unmounts whole when it
         collapses and would take ⌘, with it. */}
-    <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+    <SettingsDialog
+      open={settingsOpen}
+      onOpenChange={setSettingsOpen}
+      showArchived={showArchived}
+      onShowArchivedChange={setShowArchived}
+    />
     <WorktreeDialog
       prompt={worktreePrompt}
       onConfirm={(sessionId) => removeWorktree(sessionId)}

@@ -1,12 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
-  CheckCheck,
-  ChevronDown,
   CircleDashed,
   GitBranchPlus,
   Unlink,
-  Inbox,
   // Pin,
   Plus,
   Search,
@@ -29,13 +26,6 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import {
   Tooltip,
@@ -57,8 +47,6 @@ import type {
 } from "@/types/events";
 
 type SidebarProps = {
-  // Already scoped to `projectFilter` by the caller, so the list and the ⌘⇧↑/↓
-  // walk step through exactly the same rows.
   items: SessionIndexItem[];
   // The live status of every session the app has heard about this run. Wins over
   // the item's own field, which is only as fresh as the last list fetch.
@@ -86,11 +74,7 @@ type SidebarProps = {
   onDelete: (sessionId: string) => Promise<void>;
   onDetach: (sessionId: string) => Promise<void>;
   showArchived: boolean;
-  onToggleArchived: () => void;
   projects: Project[];
-  // `null` is every project, and it is the entry the filter opens on.
-  projectFilter: string | null;
-  onProjectFilterChange: (path: string | null) => void;
   updateStatus: UpdateStatus | null;
   // Any session mid-turn, not just the open one — installing relaunches the
   // whole app.
@@ -313,8 +297,7 @@ export function SidebarToggle({
 /// Opens the settings dialog.
 ///
 /// Shares the titlebar strip with the sidebar toggle rather than sitting in the
-/// filter row below it: settings are app-wide, and every control in that row
-/// scopes the list under it.
+/// session list below it: settings are app-wide, and the list is app-local.
 ///
 /// Gone with a collapsed sidebar, since the sidebar is. ⌘, is the route that
 /// survives that, which is why the tooltip names it.
@@ -373,11 +356,8 @@ export default function Sidebar({
   onFork,
   onDelete,
   showArchived,
-  onToggleArchived,
   projects,
-  projectFilter,
   onDetach,
-  onProjectFilterChange,
   updateStatus,
   updateBlocked,
   updateManual,
@@ -389,8 +369,8 @@ export default function Sidebar({
   // Recency-ordered, with agent-spawned sessions nested under the one that
   // spawned them, and each row carrying the flags its connector rails are drawn
   // from — then gathered under the project it belongs to, in the project list's
-  // own order, so the all-projects view reads as one list per repo and the
-  // headings hold still while its sessions work.
+  // own order, so the list reads as one group per repo and the headings hold
+  // still while its sessions work.
   const groups = useMemo(() => sessionGroups(items, projects), [items, projects]);
   const rowCount = useMemo(
     () => groups.reduce((n, group) => n + group.rows.length, 0),
@@ -406,15 +386,8 @@ export default function Sidebar({
       named.get(path) ?? path.split("/").filter(Boolean).pop() ?? path;
   }, [projects]);
 
-  // A filtered list that comes up empty is a different fact from an empty app,
-  // and saying "No tasks yet" over a filter reads as data loss.
-  const emptyText = projectFilter
-    ? showArchived
-      ? "Nothing settled in this project."
-      : "No tasks in this project."
-    : showArchived
-      ? "Nothing settled yet."
-      : "No tasks yet.";
+  // Keep the empty state specific to the active or settled session list.
+  const emptyText = showArchived ? "Nothing settled yet." : "No tasks yet.";
 
   // Collapsed is nothing at all, not a rail. The toggle moves to the app header
   // in that state, which is the one row present either way.
@@ -479,65 +452,26 @@ export default function Sidebar({
         </Button>
       </div>
 
-      {/* The filter is where project grouping went. */}
-      <div className="mt-4 flex items-start justify-between py-1 pr-2 pl-3">
-        <ProjectFilter
-          projects={projects}
-          value={projectFilter}
-          onChange={onProjectFilterChange}
-        />
-
-        <div className="flex items-center gap-0.5">
-          {/* The icon names the destination, not the current view: `CheckCheck`
-              (the row control's single `Check`, doubled — every settled one) goes
-              to the settled list, `Inbox` comes back. A pressed state on one icon
-              can't say that on its own, so the glyph swaps instead. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={showArchived ? "Show active" : "Show settled"}
-                onClick={onToggleArchived}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                {showArchived ? <Inbox /> : <CheckCheck />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              {showArchived ? "Show active" : "Show settled"}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
       {/* Keep the session cards clear of the scrollbar edge. */}
-      <div className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 pl-2 pr-1">
+      <div className="scrollbar-overlay mt-4 flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 pl-2 pr-1">
         {rowCount === 0 ? (
           <p className="px-2 py-6 text-ui text-muted-foreground">{emptyText}</p>
         ) : (
           groups.map((group, index) => (
             <Fragment key={group.projectPath}>
-              {/* Only where the list spans projects. Under a filter the label
-                  above already names the one project every row belongs to, and
-                  a heading repeating it would be a second copy of the same
-                  fact. Name only — no icon, no count: the heading says which
-                  repo the run below it is, and anything else on it competes
-                  with the titles it introduces. Full path on hover, since two
-                  projects can share a folder name. */}
-              {projectFilter === null && (
-                <div
-                  title={group.projectPath}
-                  className={cn(
-                    "flex min-h-6 items-center truncate pr-2 pl-2 text-ui text-muted-foreground/70",
-                    // The first heading sits under the filter's own row, which
-                    // already carries the gap; the rest open a run and need it.
-                    index > 0 && "mt-3",
-                  )}
-                >
-                  {projectName(group.projectPath)}
-                </div>
-              )}
+              {/* Name only — no icon, no count: the heading says which repo the
+                  run below it is, and anything else on it competes with the
+                  titles it introduces. Full path on hover, since two projects
+                  can share a folder name. */}
+              <div
+                title={group.projectPath}
+                className={cn(
+                  "flex min-h-6 items-center truncate pr-2 pl-2 text-ui text-muted-foreground/70",
+                  index > 0 && "mt-3",
+                )}
+              >
+                {projectName(group.projectPath)}
+              </div>
 
               {group.rows.map(({ item, depth, guides, opens }) => (
                 <SessionRow
@@ -583,236 +517,6 @@ export default function Sidebar({
         onInstall={onInstallUpdate}
       />
     </aside>
-  );
-}
-
-/// From this many projects a tap opens a menu instead of stepping one. Tapping
-/// through a long list is a scrub rather than a pick, and the dots stop being
-/// countable.
-const PROJECT_MENU_FROM = 5;
-
-// Dot geometry, in px, kept here because the track's offset is computed from it
-// rather than measured: `size-1` plus `gap-1`.
-const DOT = 4;
-const DOT_GAP = 4;
-const DOT_PITCH = DOT + DOT_GAP;
-// Five slots. Odd, so there is a real middle for the active dot to sit in.
-const DOT_TRACK_W = DOT_PITCH * 5 - DOT_GAP;
-
-// How far a swipe must travel before it counts as one. Momentum keeps firing
-// `wheel` long after the fingers lift, so a gesture ends on one of two signs
-// that the push is over: a stretch of quiet, or deltas decayed to the tail.
-// Quiet alone was not enough — the tail can outlast a second deliberate swipe,
-// which is what made every other swipe do nothing.
-const SWIPE_PX = 36;
-const SWIPE_END_MS = 120;
-const SWIPE_TAIL = 2;
-
-/// The project filter. The label names the current scope and the dots under it
-/// are the map: one per entry, **the active one always in the middle**, so the
-/// row slides under a fixed centre rather than a marker travelling along a fixed
-/// row. That is what keeps the indicator readable once there are more projects
-/// than dots that fit.
-///
-/// Switching is a two-finger swipe or a tap, both anywhere over the band. Swipe
-/// means the same thing in both modes — the menu is what a *tap* becomes once
-/// there are enough projects to pick from, not a replacement for the gesture.
-function ProjectFilter({
-  projects,
-  value,
-  onChange,
-}: {
-  projects: Project[];
-  value: string | null;
-  onChange: (path: string | null) => void;
-}) {
-  // "All" is an entry rather than a special case, so the swipe, the dots and
-  // the menu all walk one list and can't disagree about what's next.
-  const entries = useMemo(
-    () => [
-      { path: null as string | null, name: "All Projects" },
-      ...projects.map((p) => ({ path: p.path as string | null, name: p.name })),
-    ],
-    [projects],
-  );
-
-  // A detached project leaves its path behind in the stored filter. Falling back
-  // to All is the only honest answer, and the dot track needs a real index.
-  const found = entries.findIndex((e) => e.path === value);
-  const activeIndex = found === -1 ? 0 : found;
-  const active = entries[activeIndex];
-
-  const ref = useRef<HTMLDivElement>(null);
-  const travel = useRef(0);
-  const armed = useRef(true);
-  const idle = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const endGesture = () => {
-      travel.current = 0;
-      armed.current = true;
-    };
-
-    const onWheel = (e: WheelEvent) => {
-      // Vertical wins. The session list scrolls right below this, and a swipe
-      // that is mostly down must not be read as a sideways one.
-      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-      // Claimed so the webview can't read it as an overscroll gesture. Bound
-      // natively because React's own wheel listener is passive, where
-      // `preventDefault` is a no-op.
-      e.preventDefault();
-
-      window.clearTimeout(idle.current);
-      idle.current = window.setTimeout(endGesture, SWIPE_END_MS);
-
-      // One step per gesture: momentum alone is enough to cross the threshold
-      // several more times, which would fling the filter past what was aimed at.
-      if (!armed.current) {
-        if (Math.abs(e.deltaX) <= SWIPE_TAIL) endGesture();
-        return;
-      }
-
-      // A reversal starts the count over rather than subtracting from it. A
-      // swipe is rarely one clean direction, and letting the two cancel is what
-      // made a real push sometimes add up to nothing.
-      if (Math.sign(e.deltaX) !== Math.sign(travel.current)) travel.current = 0;
-      travel.current += e.deltaX;
-      if (Math.abs(travel.current) < SWIPE_PX) return;
-
-      const next = activeIndex + Math.sign(travel.current);
-      armed.current = false;
-      travel.current = 0;
-      // Clamped, not wrapped — the track is a line, and jumping it end to end
-      // would read as the dots losing their place.
-      if (next >= 0 && next < entries.length) onChange(entries[next].path);
-    };
-
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [activeIndex, entries, onChange]);
-
-  useEffect(() => () => window.clearTimeout(idle.current), []);
-
-  const menuMode = projects.length >= PROJECT_MENU_FROM;
-
-  // Wraps, since a tap has no direction and no dot to slide — a dead end at the
-  // last entry would just look broken.
-  const cycle = () => onChange(entries[(activeIndex + 1) % entries.length].path);
-
-  // The band is the control, not the label: the swipe only fires where the
-  // cursor is, and aiming at 20 characters of text to start a gesture is what
-  // read as the swipe working only sometimes. Tap answers on the same surface,
-  // so both gestures have the same target. Nothing inside is a button — one
-  // click target, so there is no inner element to swallow a tap or fire twice.
-  const band = (
-    <div
-      ref={ref}
-      role="button"
-      tabIndex={0}
-      // In menu mode the trigger's own handlers arrive through `asChild`.
-      onClick={menuMode ? undefined : cycle}
-      onKeyDown={
-        menuMode
-          ? undefined
-          : (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                cycle();
-              }
-            }
-      }
-      // The negative margin gives the band height without moving anything:
-      // `items-center` keeps the column itself where it was. No focus ring: the
-      // band is a strip of empty space, so a box drawn around it reads as a
-      // stray frame rather than as the label being focused.
-      className="group/projects -my-1 flex min-w-0 flex-1 cursor-pointer flex-col items-start py-1 pl-1 focus-visible:outline-none"
-    >
-      {/* Hugs its own contents, so the dots stay centred under the label rather
-          than under the band. */}
-      <div className="flex max-w-full flex-col items-center gap-1">
-        {/* Lit from the band's hover rather than its own, so reaching anywhere
-            on the strip says the strip is what answers. */}
-        <span className="flex items-center gap-1 text-ui text-muted-foreground transition-colors group-hover/projects:text-foreground">
-          <span className="max-w-40 truncate">{active.name}</span>
-          {/* The one mark that says a tap opens a list rather than stepping one.
-              Menu mode is otherwise invisible — same label, same dots. */}
-          {menuMode && <ChevronDown className="size-3 shrink-0 opacity-60" />}
-        </span>
-
-        {/* Reserved height, so revealing the dots never shifts the list below.
-            One entry is the whole story already — a lone dot would offer a
-            gesture that can't go anywhere. */}
-        <div className="h-1.5">
-          {entries.length > 1 && (
-            <div
-              className="flex h-full items-center overflow-hidden opacity-0 transition-opacity duration-150 group-hover/projects:opacity-100"
-              style={{
-                width: DOT_TRACK_W,
-                // Faded at both ends, so a dot leaving the track reads as
-                // sliding out rather than as being cut off.
-                maskImage:
-                  "linear-gradient(to right, transparent, black 30%, black 70%, transparent)",
-              }}
-            >
-              <div
-                className="flex items-center transition-transform duration-200 ease-out"
-                style={{
-                  gap: DOT_GAP,
-                  // Puts the active dot's centre on the track's centre.
-                  transform: `translateX(${DOT_TRACK_W / 2 - DOT / 2 - activeIndex * DOT_PITCH}px)`,
-                }}
-              >
-                {entries.map((entry, i) => (
-                  <span
-                    key={entry.path ?? ""}
-                    className={cn(
-                      "size-1 shrink-0 rounded-full transition-colors",
-                      i === activeIndex
-                        ? "bg-foreground/80"
-                        : "bg-muted-foreground/30",
-                    )}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  if (!menuMode) return band;
-
-  // The band is the trigger, so a tap anywhere on it opens the list — the same
-  // surface the swipe answers on, rather than a second smaller one on the label.
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{band}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-52">
-        <DropdownMenuRadioGroup
-          // Radix radio values are strings, so All rides on the empty one — no
-          // path is ever empty, so the two can't collide.
-          value={value ?? ""}
-          onValueChange={(next) => onChange(next === "" ? null : next)}
-        >
-          {entries.map((entry) => (
-            // Two projects can share a folder name, so the full path is the
-            // tooltip rather than the label.
-            <DropdownMenuRadioItem
-              key={entry.path ?? ""}
-              value={entry.path ?? ""}
-              title={entry.path ?? undefined}
-              className="text-ui"
-            >
-              <span className="truncate">{entry.name}</span>
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
