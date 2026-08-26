@@ -5,6 +5,17 @@ The release job reads the matching section into the GitHub release notes and the
 updater carries it, so this file is what a release says about itself — not a
 second description of it. GitHub's generated commit list is appended below it.
 
+## 0.7.1
+
+### Changed
+
+- **The sidebar groups sessions by project.** All Projects used to interleave
+  rows from every repo with nothing saying which one a row belonged to. Rows
+  now gather under a muted project name, taken from the sessions actually
+  present — so an idle project draws no heading at all. A spawned session stays
+  under its parent whatever its own project says, and ⌘⇧↑/↓ still walks the
+  order you see.
+
 ## 0.7.0
 
 ### Upgrading
