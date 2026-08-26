@@ -202,8 +202,7 @@ export default function Chat({
 
   // A tool call the model is still composing. Unlike the two above this is
   // non-empty from the first frame — the block announces its tool before any
-  // argument arrives, and having only the name is exactly the case the preview
-  // exists to cover.
+  // argument arrives, so the tool row can appear immediately.
   const streamingTool =
     streamingBlock?.type === "tool_use" && streamingBlock.name
       ? { name: streamingBlock.name, partialJson: streamingBlock.text }
@@ -457,8 +456,8 @@ export default function Chat({
                 // Both cover the wait for output, and never at once —
                 // `waitingTurn` requires no streaming text. Inside the block so
                 // they sit at the gap the committed event will occupy, rather
-                // than the wider one between turns: the preview belongs to this
-                // turn, not after it.
+                // than the wider one between turns: the thinking section belongs
+                // to this turn, not after it.
                 footer={
                   turn === waitingTurn ? (
                     <WorkingIndicator tokens={working?.tokens ?? 0} />
@@ -466,9 +465,8 @@ export default function Chat({
                     undefined
                   ) : streamingThinking ? (
                     // The same component the committed `reasoning` event renders
-                    // with, in its `streaming` presentation — the multi-line
-                    // preview keeps growing live; it collapses to one line once
-                    // committed.
+                    // with, in its `streaming` presentation — details stay hidden
+                    // until the user opens the thinking section.
                     <Reasoning text={streamingThinking} encrypted={false} streaming />
                   ) : streamingTool ? (
                     // Must come before the text arm: a tool block leaves
