@@ -4,6 +4,20 @@ File give Claude Code (claude.ai/code) guidance for work with code in this repo.
 
 ## Working practices
 
+**Every piece of work = Linear issue, and issue come first.** Brainstorm and plan freely, but before first edit land, create issue through Linear MCP. Work started from existing issue skip creation and use that one.
+
+**Status track the work:**
+
+- Start work → `In Progress`.
+- PR opened → `In Review`.
+- PR merged, or commit pushed straight to `main` → `Done`.
+
+**PR carry issue id, so Linear link two itself.** Put id in PR body (`Fixes ENG-123`) or in branch name where branch ours to name — Linear's GitHub integration connected on this workspace, and it read branch, title and body alike. Worktree session's branch = `worktree-<name>` minted by CLI, so there body = the reliable slot. Linked PR also move status on own; still set `In Review` by hand, since link can lag and duplicate move cost nothing.
+
+**Every issue assign to `yogesh`.**
+
+Linear MCP need auth. Not connected → say so and stop, don't carry on without issue.
+
 **Don't commit unprompted.** Stage + describe change, then wait — even when finished and passing. Asked = approval for that commit only, not ones after. Same for `git push`, branches, anything rewriting history.
 
 **Always write commit message with `caveman-commit` skill.** Invoke it, don't imitate — skill carry format and it can change under you. Every commit here, amend included.
@@ -379,7 +393,7 @@ If it come back: commit = `add -A -- <paths>` then `commit -m … -- <paths>`, b
 
 **Almost every button send prompt.** Click = reader typing "commit" without typing it, straight through `handleSendMsg`. So no confirm dialog and no error surface — agent write message with context it already have, and whatever go wrong report in transcript like any other tool failure. This a shortcut *into* conversation, not around it.
 
-**Prompt = one to three word**, literally `"commit"`, `"commit and push"`, `"create a PR"`, `"create a draft PR"`. Model know how to commit and whether branch have upstream better than sentence written here do — and longer prompt = spec competing with repo's own instruction, which firm about commit message. Pinned by test (≤4 words).
+**Prompt = few word**, literally `"commit your changes"`, `"commit and push your changes"`, `"create a PR"`, `"create a draft PR"`. Model know how to commit and whether branch have upstream better than sentence written here do — and longer prompt = spec competing with repo's own instruction, which firm about commit message. Pinned by test (≤5 words).
 
 **Push the exception, and run git direct.** Line = whether there a judgement to make. Push have exactly one correct implementation and nothing to decide, so it call `push_branch` — which already both case, `git push` with upstream and `git push -u origin <branch>` without. Hence no separate **Publish branch** action: one button, count dropped from label when no upstream since "Push 0" answer question nobody asked.
 
