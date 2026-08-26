@@ -83,7 +83,7 @@ export function handoffActions(
       id: "commit",
       label: "Commit",
       kind: "prompt",
-      prompt: "commit your changes",
+      prompt: "Commit (don’t push) your changes.",
     });
     local.push({
       id: "commitPush",
