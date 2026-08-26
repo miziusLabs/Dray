@@ -4,7 +4,9 @@ import {
   firstLine,
   isReadyToMerge,
   isSettling,
+  markDisagrees,
   readyTransitions,
+  sameMark,
   mergeReadiness,
   pickPrMark,
   prBadgeCount,
@@ -387,5 +389,89 @@ describe("pickPrMark", () => {
     const newer = mark({ number: 9 });
     const older = mark({ number: 2 });
     expect(pickPrMark([newer, older])).toBe(newer);
+  });
+});
+
+describe("markDisagrees", () => {
+  const mark = (over: Partial<PrMark> = {}): PrMark => ({
+    number: 1,
+    headRefName: "feature",
+    isDraft: false,
+    state: "OPEN",
+    checksState: "CLEAR",
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    ...over,
+  });
+
+  it("agrees where the panel says what the mark says", () => {
+    expect(markDisagrees(mark(), [pr()])).toBe(false);
+    expect(markDisagrees(undefined, [])).toBe(false);
+    // Closed without merging is outside the marks' vocabulary, so it is what
+    // the marks would have seen: nothing.
+    expect(markDisagrees(undefined, [pr({ state: "CLOSED" })])).toBe(false);
+  });
+
+  it("disagrees on the fields both carry", () => {
+    expect(markDisagrees(mark(), [pr({ state: "MERGED" })])).toBe(true);
+    expect(markDisagrees(mark(), [pr({ mergeStateStatus: "BLOCKED" })])).toBe(true);
+    expect(markDisagrees(mark(), [pr({ isDraft: true })])).toBe(true);
+    expect(markDisagrees(mark(), [])).toBe(true);
+    expect(markDisagrees(undefined, [pr()])).toBe(true);
+  });
+
+  it("picks the same pull request the mark would", () => {
+    const merged = pr({ number: 1, state: "MERGED" });
+    const open = pr({ number: 2 });
+    expect(markDisagrees(mark({ number: 2 }), [open, merged])).toBe(false);
+    const landed = mark({ number: 1, state: "MERGED", mergeable: null, mergeStateStatus: null });
+    expect(markDisagrees(landed, [open, merged])).toBe(true);
+  });
+
+  it("breaks ties the way the marks do, newest-updated first", () => {
+    // The panel lists by number; the marks arrive by update. Two open PRs on
+    // one branch must pick the same one on both sides or every panel poll
+    // forces a marks read.
+    const older = pr({ number: 1, updatedAt: "2026-01-01T00:00:00Z" });
+    const newer = pr({ number: 2, updatedAt: "2026-02-01T00:00:00Z" });
+    expect(markDisagrees(mark({ number: 2 }), [older, newer])).toBe(false);
+    expect(markDisagrees(mark({ number: 1 }), [older, newer])).toBe(true);
+  });
+
+  it("compares checks loosely, in the two directions a row shows", () => {
+    const running = mark({ checksState: "RUNNING" });
+    const failing = mark({ checksState: "FAILING" });
+    expect(markDisagrees(running, [pr({ checks: [check("pending")] })])).toBe(false);
+    expect(markDisagrees(running, [pr({ checks: [check("success")] })])).toBe(true);
+    expect(markDisagrees(failing, [pr({ checks: [check("failure")] })])).toBe(false);
+    expect(markDisagrees(failing, [pr({ checks: [check("success")] })])).toBe(true);
+    expect(markDisagrees(mark(), [pr({ checks: [check("failure")] })])).toBe(true);
+    // A failure with something still pending is not settled; the rollup may
+    // still say pending.
+    expect(markDisagrees(mark(), [pr({ checks: [check("failure"), check("pending")] })])).toBe(
+      false,
+    );
+    expect(markDisagrees(mark(), [pr({ checks: [check("success")] })])).toBe(false);
+  });
+});
+
+describe("sameMark", () => {
+  const mark = (over: Partial<PrMark> = {}): PrMark => ({
+    number: 1,
+    headRefName: "feature",
+    isDraft: false,
+    state: "OPEN",
+    checksState: "CLEAR",
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    ...over,
+  });
+
+  it("reads every field a row or notice does", () => {
+    expect(sameMark(mark(), mark())).toBe(true);
+    expect(sameMark(mark(), mark({ checksState: "RUNNING" }))).toBe(false);
+    expect(sameMark(mark(), mark({ mergeStateStatus: "BLOCKED" }))).toBe(false);
+    expect(sameMark(mark(), undefined)).toBe(false);
+    expect(sameMark(undefined, undefined)).toBe(true);
   });
 });
