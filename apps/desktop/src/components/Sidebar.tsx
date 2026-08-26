@@ -43,7 +43,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
-import { burstConfetti } from "@/lib/confetti";
 import type { ManualCheck } from "@/hooks/useUpdater";
 import { isToday, relativeTime } from "@/lib/format";
 import { sessionBranch } from "@/lib/pr";
@@ -1380,14 +1379,9 @@ function SessionRow({
             <RowAction
               label={item.archived ? "Unsettle" : "Settle"}
               active={item.archived}
-              onClick={(e) => {
-                // Fired on the click, not after the write lands: the burst is
-                // the button's own answer, and the row is gone from this list a
-                // frame later. The celebration sound stays with the write in
-                // `App`, where the flag is confirmed.
-                if (!item.archived) burstConfetti(e.currentTarget);
-                onSetFlags(item.sessionId, { archived: !item.archived });
-              }}
+              onClick={() =>
+                onSetFlags(item.sessionId, { archived: !item.archived })
+              }
             >
               {/* Settle reads as "check this off"; unsettle isn't a second
                   checkmark, it's undoing the first one. */}
