@@ -4,19 +4,19 @@ File give Claude Code (claude.ai/code) guidance for work with code in this repo.
 
 ## Working practices
 
-**Every piece of work = Linear issue, and issue come first.** Brainstorm and plan freely, but before first edit land, create issue through Linear MCP. Work started from existing issue skip creation and use that one.
+**Product work = Linear issue, before first edit.** Feature, bug fix, UX change, refactor. Plan freely without one; create through Linear MCP before code land. Existing issue = use that one.
 
-**Status track the work:**
+**Housekeeping take no issue.** CLAUDE.md, plan note, tooling config — thing changing how we work, not what ship. Issue there = noise.
 
-- Start work → `In Progress`.
-- PR opened → `In Review`.
-- PR merged, or commit pushed straight to `main` → `Done`.
+**Description over ~1000 character open with `## TLDR for human`, closed by `---`.** One line per thing worked on, even when only one. Shorter description need none — it already scan faster than its own summary.
 
-**PR carry issue id, so Linear link two itself.** Put id in PR body (`Fixes ENG-123`) or in branch name where branch ours to name — Linear's GitHub integration connected on this workspace, and it read branch, title and body alike. Worktree session's branch = `worktree-<name>` minted by CLI, so there body = the reliable slot. Linked PR also move status on own; still set `In Review` by hand, since link can lag and duplicate move cost nothing.
+**Status:** start → `In Progress`. PR opened → `In Review`. Merged, or pushed straight to `main` → `Done`.
 
-**Every issue assign to `yogesh`.**
+**PR carry issue id so Linear link itself.** Body (`Fixes DRA-123`) or branch name — integration read both. Worktree branch = `worktree-<name>` minted by CLI, so body = reliable slot. Link move status on own but can lag, so set `In Review` by hand too.
 
-Linear MCP need auth. Not connected → say so and stop, don't carry on without issue.
+**One team, `Dray`. Prefix `DRA-`. Assign every issue to `yogesh`.**
+
+Linear MCP not connected → say so and stop. No issue, no work.
 
 **Don't commit unprompted.** Stage + describe change, then wait — even when finished and passing. Asked = approval for that commit only, not ones after. Same for `git push`, branches, anything rewriting history.
 
