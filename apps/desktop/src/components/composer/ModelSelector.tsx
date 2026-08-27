@@ -15,6 +15,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { IS_MAC } from "@/lib/platform";
 import type { Effort, Model, ModelId, PiModel } from "@/types/events";
 
 const EFFORT_LABELS: Record<Effort, string> = {
@@ -107,8 +108,8 @@ export default function ModelSelector({
         <TooltipContent side="top" className="max-w-none whitespace-nowrap">
           Switch model
           <KbdGroup>
-            <Kbd>Shift</Kbd>
-            <Kbd>Shift</Kbd>
+            <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+            <Kbd>M</Kbd>
           </KbdGroup>
           <span className="text-muted-foreground">Effort</span>
           <KbdGroup>

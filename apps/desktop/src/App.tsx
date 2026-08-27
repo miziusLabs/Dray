@@ -40,7 +40,6 @@ import ViewTabs, { type ViewTab } from "@/components/layout/ViewTabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { pickAttachments } from "@/hooks/useAttachments";
 import { useCodeTheme } from "@/hooks/useCodeTheme";
-import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { useVibrancy } from "@/hooks/useVibrancy";
 import { warmHighlighter } from "@/hooks/useHighlighter";
@@ -507,9 +506,9 @@ function App() {
     },
     { meta: false, shift: true },
   );
-  // Double-tap Shift cycles the model, JetBrains-search style — leaves each
-  // model's own remembered effort alone, same as picking it from the menu.
-  useDoubleTap("Shift", () => {
+  // Ctrl+M cycles the model, leaving each model's own remembered effort alone,
+  // same as picking it from the menu.
+  useHotkey("m", () => {
     if (models.length < 2) return;
     const index = models.findIndex(
       (m) =>
