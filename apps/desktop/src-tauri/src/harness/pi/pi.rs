@@ -120,9 +120,14 @@ pub async fn init(
         command
     };
 
-    let child = command
-        .current_dir(cwd)
-        .stdin(Stdio::piped());
+    // The Docker command's host working directory is unrelated to the
+    // container. Cloud sessions must start in the persistent workspace inside
+    // the container, which is set by sandbox::pi_command; do not apply the
+    // host-side marker directory here.
+    if !cloud {
+        command.current_dir(cwd);
+    }
+    let child = command.stdin(Stdio::piped());
     if !cloud {
         child.env("PATH", crate::binpath::agent_path());
     }

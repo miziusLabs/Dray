@@ -10,6 +10,7 @@ use anyhow::{bail, Context, Result};
 use std::process::Stdio;
 use tokio::process::Command;
 
+const CLOUD_WORKSPACE: &str = "/home/agent/workspace";
 const DEFAULT_IMAGE: &str = "dray-cloud:latest";
 const VOLUME_PREFIX: &str = "dray-cloud-";
 const CONTAINER_PREFIX: &str = "dray-cloud-";
@@ -90,7 +91,7 @@ pub async fn pi_command(session_id: &str, cloud_name: &str, pi_args: &[String]) 
         "--name",
         &container,
         "--workdir",
-        "/home/agent/workspace",
+        CLOUD_WORKSPACE,
         "--mount",
         &format!("type=volume,source={volume},target=/home/agent"),
     ]);
