@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import ModelSelector from "@/components/composer/ModelSelector";
 import { Switch } from "@/components/ui/switch";
-import type { WorktreeBranchMode } from "@/hooks/useComposerPrefs";
+import type { CloudBranchMode } from "@/hooks/useComposerPrefs";
 import type { Effort, Model, ModelId, PiModel } from "@/types/events";
 
 /// The app's preferences, such as they are.
@@ -22,8 +22,8 @@ export default function SettingsDialog({
   onOpenChange,
   showArchived,
   onShowArchivedChange,
-  worktreeBranchMode,
-  onWorktreeBranchModeChange,
+  cloudBranchMode,
+  onCloudBranchModeChange,
   titleModels,
   titleModelId,
   titlePiModel,
@@ -34,8 +34,8 @@ export default function SettingsDialog({
   onOpenChange: (next: boolean) => void;
   showArchived: boolean;
   onShowArchivedChange: (next: boolean) => void;
-  worktreeBranchMode: WorktreeBranchMode;
-  onWorktreeBranchModeChange: (next: WorktreeBranchMode) => void;
+  cloudBranchMode: CloudBranchMode;
+  onCloudBranchModeChange: (next: CloudBranchMode) => void;
   titleModels: Model[];
   titleModelId: ModelId;
   titlePiModel: PiModel | null;
@@ -62,9 +62,9 @@ export default function SettingsDialog({
             checked={showArchived}
             onChange={onShowArchivedChange}
           />
-          <WorktreeBranchModeRow
-            value={worktreeBranchMode}
-            onChange={onWorktreeBranchModeChange}
+          <CloudBranchModeRow
+            value={cloudBranchMode}
+            onChange={onCloudBranchModeChange}
           />
           <TitleGenerationRow
             models={titleModels}
@@ -112,20 +112,20 @@ function TitleGenerationRow({
   );
 }
 
-function WorktreeBranchModeRow({
+function CloudBranchModeRow({
   value,
   onChange,
 }: {
-  value: WorktreeBranchMode;
-  onChange: (next: WorktreeBranchMode) => void;
+  value: CloudBranchMode;
+  onChange: (next: CloudBranchMode) => void;
 }) {
   const id = useId();
 
   return (
     <SettingRow
       id={id}
-      label="Create new worktree branches"
-      description="Off: stay on the branch the worktree was created from. On: create a new branch."
+      label="Create new Cloud branches"
+      description="Off: use the selected branch. On: ask the agent to create a new branch based on it."
     >
       <Switch
         id={id}

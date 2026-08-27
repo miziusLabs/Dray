@@ -11,7 +11,6 @@ import DiffWorkerPool from "@/components/DiffWorkerPool";
 import NoticeStack from "@/components/NoticeStack";
 import QuitDialog from "@/components/QuitDialog";
 import SettingsDialog from "@/components/SettingsDialog";
-import WorktreeDialog, { type WorktreePrompt } from "@/components/WorktreeDialog";
 import PrPanel from "@/components/PrPanel";
 import { useChanges } from "@/hooks/useChanges";
 import { usePrMarks } from "@/hooks/usePrMarks";
@@ -47,16 +46,14 @@ import { useVibrancy } from "@/hooks/useVibrancy";
 import { warmHighlighter } from "@/hooks/useHighlighter";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
-import { pushNotice } from "@/hooks/useNotices";
 import { titleModels, useTitlePrefs } from "@/hooks/useTitlePrefs";
 import { useSessions } from "@/hooks/useSessions";
-import type { Effort, Model, PiModel, WorktreeDisposition } from "@/types/events";
+import type { Effort, Model, PiModel } from "@/types/events";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
 import { useUpdater } from "@/hooks/useUpdater";
 import { changeRange, turnChangedTree } from "@/lib/changes";
 import { prBadgeCount, sessionBranch } from "@/lib/pr";
 import { playCelebration } from "@/lib/sound";
-import { worktreeNoticeDetail } from "@/lib/worktree";
 import { buildTranscript } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 
@@ -81,8 +78,8 @@ function App() {
     projectPath,
     branches,
     branch,
-    useWorktree,
-    worktreeBranchMode,
+    useCloud,
+    cloudBranchMode,
     busy,
     backgroundTasks,
     compacting,
@@ -98,8 +95,8 @@ function App() {
     pendingBranch,
     setPendingBranch,
     runCheckout,
-    setUseWorktree,
-    setWorktreeBranchMode,
+    setUseCloud,
+    setCloudBranchMode,
     handleSendMsg,
     handleInterrupt,
     handleStopTask,
@@ -113,7 +110,6 @@ function App() {
     forkSession,
     detachSession,
     deleteSession,
-    removeWorktree,
   } = useSessions(titlePrefs);
 
   const titleModelOptions = useMemo(() => titleModels(models), [models]);
@@ -168,59 +164,6 @@ function App() {
   // a session.
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const [worktreePrompt, setWorktreePrompt] = useState<WorktreePrompt | null>(null);
-
-  // Reads what the removal would cost *before* deciding whether to ask, so a
-  // worktree that isn't there any more — deleted by hand, or by a `Pi` run
-  // that had an exit prompt of its own — is tidied up silently. Asking about a
-  // directory the reader can no longer see is a question with one answer.
-  //
-  // `ask` is the whole difference between the two routes in. Settling raises a
-  // notice that expires into "keep it", because the reader was doing something
-  // else and this is an offer. The settled bar's own button raises the dialog,
-  // because there the reader asked for the deletion and is owed a confirm
-  // naming what it costs.
-  const askAboutWorktree = async (
-    sessionId: string,
-    worktreeName: string,
-    title: string,
-    ask: "notice" | "dialog",
-  ) => {
-    let disposition: WorktreeDisposition;
-    try {
-      disposition = await invoke<WorktreeDisposition>("worktree_disposition", { sessionId });
-    } catch {
-      // An offer, not a step: a session whose state can't be read keeps its
-      // worktree and says nothing. The button on the settled bar is still
-      // there to try again.
-      return;
-    }
-
-    if (!disposition.exists) {
-      void removeWorktree(sessionId);
-      return;
-    }
-
-    if (ask === "dialog") {
-      setWorktreePrompt({ sessionId, worktreeName, disposition });
-      return;
-    }
-
-    pushNotice({
-      sessionId,
-      kind: "worktree",
-      // The action leads. This card arrives unasked-for while the reader is
-      // doing something else, so the first line has to be what it wants rather
-      // than what happened — "Settled …" reads as a receipt, and a receipt is
-      // something you look away from.
-      label: "Delete worktree?",
-      detail: worktreeNoticeDetail(disposition),
-      // Which task, named by its own title rather than the generated worktree
-      // name: `calm-navy-beacon` names a directory the reader never chose,
-      // where the title is the work they just settled.
-      subject: title,
-    });
-  };
   const viewTab: ViewTab = selectedSessionId ? viewTabs[selectedSessionId] ?? "chat" : "chat";
   const setViewTab = (tab: ViewTab) => {
     if (selectedSessionId) setViewTabs((prev) => ({ ...prev, [selectedSessionId]: tab }));
@@ -264,7 +207,16 @@ function App() {
   // already fetched still draw over there, since the cache outlives this — what
   // is dropped is the spending, not the answer.
   const repoPaths = useMemo(
-    () => (showArchived ? [] : [...new Set(visibleSessions.map((i) => i.projectPath))]),
+    () =>
+      showArchived
+        ? []
+        : [
+            ...new Set(
+              visibleSessions
+                .filter((item) => !item.cloudName)
+                .map((item) => item.projectPath),
+            ),
+          ],
     [showArchived, visibleSessions],
   );
   const prMarks = usePrMarks(repoPaths);
@@ -282,9 +234,11 @@ function App() {
   // `workStatus.branch` is git's own reading of HEAD and outranks the name the
   // index carries, which is only ever a guess made at creation — see
   // `sessionBranch`. It lands a frame late and the fallback covers that frame.
-  const prBranch = selectedSession
-    ? sessionBranch(selectedSession, workStatus?.branch)
-    : null;
+  const prBranch = selectedSession?.cloudName
+    ? null
+    : selectedSession
+      ? sessionBranch(selectedSession, workStatus?.branch)
+      : null;
   // "The PR tab is on screen", read off the *pick* rather than off `activeTab`,
   // which cannot exist yet — it is derived from this hook's own answer. An
   // unset pick counts, since the derived default is the PR tab whenever there
@@ -293,7 +247,7 @@ function App() {
   // reads true — harmless, because a merged PR never settles and the poll is
   // gated on that too.
   const pullRequests = usePullRequest(
-    selectedSession?.cwd ?? "",
+    selectedSession?.cloudName ? "" : selectedSession?.cwd ?? "",
     prBranch,
     panelOpen && (panelTab === "pr" || panelTab === null),
     // A pull request appearing is the moment the session stops being about the
@@ -377,10 +331,10 @@ function App() {
 
   // An open session's own directory, since project- and local-scoped commands
   // differ per repo and a session can be running somewhere the picker isn't
-  // pointed — a worktree, or a project switched away from since. The `@` picker
+  // pointed — a cloud, or a project switched away from since. The `@` picker
   // resolves against the same directory for the same reason, and off the same
   // expression so the two can't answer for different trees.
-  const composerCwd = selectedSession?.cwd ?? projectPath;
+  const composerCwd = selectedSession?.cwd ?? projectPath ?? (useCloud ? "." : null);
   const slashCommands = useSlashCommands(composerCwd, harness);
 
   const { baseline, head } = useMemo(
@@ -609,14 +563,6 @@ function App() {
             if (flags.archived === true) {
               playCelebration();
 
-              // Settling is the reader saying this work is done, which is the
-              // one moment the worktree behind it is provably spare. Asked
-              // after the flag write lands, so the question is about a task
-              // that is already settled rather than a condition of settling it.
-              const item = sessionIndexItems.find((i) => i.sessionId === sessionId);
-              if (item?.worktreeName) {
-                void askAboutWorktree(sessionId, item.worktreeName, item.title, "notice");
-              }
             }
             // Settling the open session leaves nothing to look at but the
             // unsettle bar, so it goes back to the empty composer instead.
@@ -740,17 +686,6 @@ function App() {
           onUnarchive={() =>
             selectedSessionId && setSessionFlags(selectedSessionId, { archived: false })
           }
-          onRemoveWorktree={
-            selectedSessionId && selectedSession?.worktreeName
-              ? () =>
-                  void askAboutWorktree(
-                    selectedSessionId,
-                    selectedSession.worktreeName as string,
-                    selectedSession.title,
-                    "dialog",
-                  )
-              : undefined
-          }
           handoff={
             <HandoffRow
               actions={handoffActions(workStatus, sessionHasPr)}
@@ -784,8 +719,8 @@ function App() {
                 pendingBranch && runCheckout(pendingBranch, stash)
               }
               onCancelBranchSwitch={() => setPendingBranch(null)}
-              useWorktree={useWorktree}
-              onToggleWorktree={() => setUseWorktree((v) => !v)}
+              useCloud={useCloud}
+              onToggleCloud={() => setUseCloud((v) => !v)}
               onAttach={() => void pickAttachments(selectedSessionId)}
               contextUsage={contextUsage}
               isNewSession={!selectedSessionId}
@@ -846,7 +781,6 @@ function App() {
         setPanelTab("pr");
         setPanelOpen(true);
       }}
-      onDeleteWorktree={(id) => removeWorktree(id)}
     />
     <QuitDialog />
     {/* Mounted here rather than in the sidebar, which unmounts whole when it
@@ -856,18 +790,13 @@ function App() {
       onOpenChange={setSettingsOpen}
       showArchived={showArchived}
       onShowArchivedChange={setShowArchived}
-      worktreeBranchMode={worktreeBranchMode}
-      onWorktreeBranchModeChange={setWorktreeBranchMode}
+      cloudBranchMode={cloudBranchMode}
+      onCloudBranchModeChange={setCloudBranchMode}
       titleModels={titleModelOptions}
       titleModelId={titlePrefs.modelId}
       titlePiModel={titlePrefs.piModel}
       titleEffort={titlePrefs.effort}
       onTitleModelChange={handleTitleModelChange}
-    />
-    <WorktreeDialog
-      prompt={worktreePrompt}
-      onConfirm={(sessionId) => removeWorktree(sessionId)}
-      onClose={() => setWorktreePrompt(null)}
     />
     </DiffWorkerPool>
     </TooltipProvider>

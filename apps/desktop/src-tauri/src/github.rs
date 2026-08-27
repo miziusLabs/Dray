@@ -1045,7 +1045,7 @@ struct MarksRepository {
 /// One call for a whole sidebar's worth of rows — see [`QUERY_MARKS`]. The
 /// caller matches a session to its entry by branch, so this answers a list
 /// rather than a map: which branch a session lands on is the frontend's own
-/// rule (a worktree session's is rebuilt from its worktree name), and building
+/// rule (a Cloud session's branch is recorded at creation), and building
 /// the map here would be a second copy of it. One branch can carry several, so
 /// picking which one a row draws is the caller's too.
 #[tauri::command]
@@ -1112,9 +1112,9 @@ fn read_pr_marks(out: &str) -> Result<Vec<PrMark>, String> {
 /// Merges the PR. Returns once `gh` has, so the caller can refetch and show
 /// the landed state rather than guess at it.
 ///
-/// The branch is deliberately left behind — no `--delete-branch`. A worktree
+/// The branch is deliberately left behind — no `--delete-branch`. A Cloud
 /// session has its own branch checked out, so `git branch -D` refuses it and
-/// the cleanup fails after the merge has already landed; cleaning up worktrees
+/// the cleanup fails after the merge has already landed; cleaning up Cloud state
 /// is its own job, not a checkbox on this one.
 ///
 /// A failure is still checked against the PR before being reported: `gh pr
@@ -1453,12 +1453,12 @@ mod tests {
     fn pr_marks_carry_their_branch_and_draft_flag() {
         let out = r#"{"data":{"repository":{
             "open":{"nodes":[
-              {"number":9,"headRefName":"worktree-calm-navy-beacon","isDraft":true},
+              {"number":9,"headRefName":"cloud-calm-navy-beacon","isDraft":true},
               {"number":8,"headRefName":"fix/thing","isDraft":false}]},
             "merged":{"nodes":[]}}}}"#;
         let prs = read_pr_marks(out).expect("pr marks parse");
         assert_eq!(prs.len(), 2);
-        assert_eq!(prs[0].head_ref_name, "worktree-calm-navy-beacon");
+        assert_eq!(prs[0].head_ref_name, "cloud-calm-navy-beacon");
         assert!(prs[0].is_draft);
         assert!(!prs[1].is_draft);
     }

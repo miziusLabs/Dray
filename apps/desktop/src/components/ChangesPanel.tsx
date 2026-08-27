@@ -10,8 +10,8 @@ import { cn } from "@/lib/utils";
 import type { ChangedFile, FileVersions } from "@/types/events";
 
 type ChangesPanelProps = ReturnType<typeof useChanges> & {
-  /// Where the agent runs. The snapshot is taken here, so for a worktree
-  /// session this is the tree, not the project root.
+  /// Where the agent runs. Cloud sessions use an empty host-side marker here;
+  /// their actual workspace is inside Docker and has no local Git snapshot.
   cwd: string;
   /// The tree id to diff against, or null when the session recorded none.
   baseline: string | null;

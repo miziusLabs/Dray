@@ -83,8 +83,8 @@ describe("changeRange", () => {
 
   it("falls through a prompt that took no snapshot rather than giving up", () => {
     // Otherwise the newest prompt would answer null and hide a diff the
-    // previous baseline can still produce. Reachable on a worktree session,
-    // whose first prompt has no tree to snapshot yet.
+    // previous baseline can still produce. Cloud prompts have no host Git tree
+    // to snapshot.
     expect(changeRange([prompt("aaa"), prompt(null)]).baseline).toBe("aaa");
     expect(changeRange([prompt(null), prompt("bbb")]).baseline).toBe("bbb");
   });

@@ -6,6 +6,8 @@ import tailwindcss from "@tailwindcss/vite";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+// @ts-expect-error process is a nodejs global
+const noWatch = process.env.DRAY_NO_WATCH === "1";
 
 const url = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
@@ -53,9 +55,9 @@ export default defineConfig(async () => ({
   worker: { format: "es" as const },
 
   test: {
-    // `.dray/worktrees` holds live agent worktrees — full checkouts of this
-    // repo. Their test files resolve `@` against *this* tree's src, so a stale
-    // copy fails against code it was never written for.
+    // `.dray/cloud` holds Cloud session markers and Docker-backed state. Their
+    // test files resolve `@` against *this* tree's src, so a stale copy fails
+    // against code it was never written for.
     exclude: [...configDefaults.exclude, "**/.dray/**"],
   },
 
@@ -68,16 +70,20 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
-    },
+    hmr: noWatch
+      ? false
+      : host
+        ? {
+            protocol: "ws",
+            host,
+            port: 1421,
+          }
+        : undefined,
+    watch: noWatch
+      ? null
+      : {
+          // 3. tell Vite to ignore watching `src-tauri`
+          ignored: ["**/src-tauri/**"],
+        },
   },
 }));

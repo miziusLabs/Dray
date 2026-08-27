@@ -269,12 +269,6 @@ export type BranchList = {
  */
 current: string | null, branches: Array<string>, 
 /**
- * What a `-w` worktree forks from, resolved the way the CLI resolves it.
- * Shown in place of the branch picker in worktree mode, where the picked
- * branch has no effect. `None` when the repo has no remote.
- */
-defaultBase: string | null, 
-/**
  * Uncommitted changes, counted for the switch dialog's "you have N
  * changes". Zero switches without asking.
  */
@@ -769,26 +763,18 @@ queued: QueuedMessage | null, };
 export type SessionIndexItem = { sessionId: string, harness: Harness, 
 /**
  * Where the agent actually runs. Equals `project_path` for a normal
- * session; points inside `~/.mizius/worktrees/<id>` for a worktree one.
+ * session; points inside `~/.dray/cloud/<id>` for a Cloud one.
  */
 cwd: string, 
 /**
- * Repo root — the grouping key, so worktree sessions still list under
- * their project rather than each becoming a project of their own.
+ * Project metadata used for grouping; a Cloud does not mount or clone it.
  */
 projectPath: string, branch: string | null, 
 /**
- * `Some` marks this a worktree session. The branch is either the source
- * branch or a generated branch named exactly like the worktree UUID.
+ * `Some` marks this a Cloud session. The branch is either the source
+ * branch or a generated branch named for the Cloud session.
  */
-worktreeName: string | null, 
-/**
- * This session ran in a worktree and that tree has since been deleted, so
- * `cwd` is the project root it was moved back to. The distinction is what
- * keeps `branch` above authoritative: the shared checkout's HEAD describes
- * whatever else is going on in it, not this session's work.
- */
-worktreeRemoved: boolean, title: string, 
+cloudName: string | null, title: string,
 /**
  * Remembered per session so switching between sessions restores the model
  * the user last picked instead of resetting to a default.
@@ -843,26 +829,18 @@ export type SessionInfo = { cwd: string | null, model: string | null, harnessVer
 export type SessionSnapshot = { events: Array<AgentEvent>, sessionId: string, harness: Harness, 
 /**
  * Where the agent actually runs. Equals `project_path` for a normal
- * session; points inside `~/.mizius/worktrees/<id>` for a worktree one.
+ * session; points inside `~/.dray/cloud/<id>` for a Cloud one.
  */
 cwd: string, 
 /**
- * Repo root — the grouping key, so worktree sessions still list under
- * their project rather than each becoming a project of their own.
+ * Project metadata used for grouping; a Cloud does not mount or clone it.
  */
 projectPath: string, branch: string | null, 
 /**
- * `Some` marks this a worktree session. The branch is either the source
- * branch or a generated branch named exactly like the worktree UUID.
+ * `Some` marks this a Cloud session. The branch is either the source
+ * branch or a generated branch named for the Cloud session.
  */
-worktreeName: string | null, 
-/**
- * This session ran in a worktree and that tree has since been deleted, so
- * `cwd` is the project root it was moved back to. The distinction is what
- * keeps `branch` above authoritative: the shared checkout's HEAD describes
- * whatever else is going on in it, not this session's work.
- */
-worktreeRemoved: boolean, title: string, 
+cloudName: string | null, title: string,
 /**
  * Remembered per session so switching between sessions restores the model
  * the user last picked instead of resetting to a default.
@@ -1097,42 +1075,3 @@ defaultBranch: string | null,
  * over-offering costs a wasted click and under-offering hides the action.
  */
 aheadOfBase: number | null, };
-
-/**
- * What removing this worktree would cost, read once so the dialog and the
- * removal agree about what is in the way.
- */
-export type WorktreeDisposition = { 
-/**
- * `false` once the directory is gone — removed by hand, or by a `Pi`
- * run that did have an exit prompt. The caller skips the dialog and goes
- * straight to relocating the session, so a half-dead tree tidies itself
- * up rather than asking a question about a directory nobody can see.
- */
-exists: boolean, 
-/**
- * `git status --porcelain` lines: modified, staged, and untracked alike.
- */
-changedFiles: number, 
-/**
- * Commits **only this branch holds** — reachable from its HEAD and from
- * no other branch, remote or tag. That is the question the reader is
- * actually asking, since a commit some other ref also holds survives the
- * branch being deleted.
- *
- * Counting against remotes alone was the first version and was wrong in
- * the plainest case: a repo with no remote at all reported every commit
- * in its history as at risk, so a spotless worktree warned about the
- * initial commit.
- *
- * A squash-merged PR still counts, since its commits are genuinely on no
- * other ref whatever landed on `main`. The CLI's own exit prompt has the
- * same blind spot; it over-warns, which is the safe direction.
- */
-unpushedCommits: number, 
-/**
- * The reason string on git's own lock, when one is held by a **live**
- * process. `None` covers both the unlocked tree and the far commoner
- * case of a lock left behind by a session that has since exited.
- */
-lockedBy: string | null, };

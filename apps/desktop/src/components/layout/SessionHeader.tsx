@@ -29,8 +29,8 @@ export default function SessionHeader({ session, branch, className }: SessionHea
     );
   }
 
-  // A worktree session's `cwd` is the tree, not the repo, so the project name
-  // has to come off `projectPath` or every worktree reads as its own project.
+  // A Cloud session's `cwd` is an empty host marker, not the project, so the
+  // project name has to come off `projectPath`.
   const project = basename(session.projectPath);
 
   return (

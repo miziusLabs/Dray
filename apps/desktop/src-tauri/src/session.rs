@@ -6,12 +6,13 @@ use crate::{
     },
     git,
     harness::{pi, Harness::Pi},
+    sandbox,
     models::{find_model, resolve_effort, Effort, Model, ModelId, PiModel},
     store::{
         append_session_event, append_session_index_item, clear_fork_from, copy_session_log,
-        delete_session, get_session_index_item, list_session_events, relocate_session_to_project,
-        resolve_unclaimed_worktree_name, set_session_status, touch_session_index_item,
-        worktree_path, SessionIndexItem, SessionSnapshot, SessionStatus,
+        delete_session, get_session_index_item, list_session_events,
+        resolve_unclaimed_cloud_name, set_session_status, touch_session_index_item,
+        cloud_path, SessionIndexItem, SessionSnapshot, SessionStatus,
     },
 };
 use anyhow::{bail, Context, Result};
@@ -244,32 +245,18 @@ impl StatusTracker {
     }
 }
 
-/// Deletes the worktree an index entry names, if it names one.
+/// Removes the Docker volume and empty host-side marker for a Cloud session.
 ///
-/// A session that never had a worktree is a no-op rather than an error: this
-/// sits on the delete path too, where most sessions have no tree to remove.
-///
-/// The path is rebuilt from `project_path` and the name rather than read off
-/// `cwd`. The two agree today, but `cwd` is a field the agent can move —
-/// `EnterWorktree` relocates a live session — and the one argument this must
-/// never get wrong is which directory to delete.
-async fn remove_session_worktree(item: &SessionIndexItem) -> Result<()> {
-    let Some(name) = item.worktree_name.as_deref() else {
-        return Ok(());
+/// This is best-effort on the delete path: the session row and transcript are
+/// more important than reclaiming a Docker volume, and Docker may already have
+/// removed a volume after an interrupted container.
+async fn remove_session_cloud(item: &SessionIndexItem) {
+    let Some(name) = item.cloud_name.as_deref() else {
+        return;
     };
 
-    let path = worktree_path(name);
-    // New worktree branches use the worktree UUID itself. A source-branch
-    // worktree must leave that user's branch intact; the legacy prefix is
-    // retained here only so older sessions can still be cleaned up safely.
-    let branch = item
-        .branch
-        .as_deref()
-        .filter(|branch| *branch == name || *branch == format!("worktree-{name}"));
-
-    git::remove_worktree(&item.project_path, &path, branch).await?;
-
-    Ok(())
+    sandbox::remove_volume(name).await;
+    let _ = tokio::fs::remove_dir_all(cloud_path(name)).await;
 }
 
 /// Persists a status change and tells the frontend. Failures are logged, not
@@ -343,17 +330,15 @@ impl SessionManager {
         title_effort: Option<Effort>,
         permission_mode: ApprovalPolicy,
         cwd: &str,
-        // Recorded, not acted on: the picker checks the branch out when the
-        // user picks it, so by here the tree is already on it.
+        // Recorded, not acted on for Cloud sessions. The branch picker supplies
+        // metadata and never changes the host checkout when Cloud is enabled.
         branch: Option<&str>,
-        use_worktree: bool,
-        create_worktree_branch: bool,
-        worktree_name: Option<&str>,
-        // Where the worktree starts from, already resolved to a git ref by the
-        // caller — the orchestration socket turns a session id into one, and
-        // nothing below here knows sessions. `None` is the ordinary case and
-        // the composer supplies the currently checked-out branch when it uses
-        // a worktree.
+        use_cloud: bool,
+        create_cloud_branch: bool,
+        cloud_name: Option<&str>,
+        // Branch metadata supplied by the orchestration socket. It resolves a
+        // session id before calling here; Cloud itself does not resolve or
+        // validate Git refs.
         base_ref: Option<&str>,
         is_new_session: bool,
         // Set only for a session created over the orchestration socket. The
@@ -384,81 +369,59 @@ impl SessionManager {
         let effort = resolve_effort(&model_spec, effort);
 
         if is_new_session {
-            let worktree_name = if use_worktree {
-                Some(resolve_unclaimed_worktree_name(cwd, worktree_name).await?)
+            let cloud_name = if use_cloud {
+                Some(resolve_unclaimed_cloud_name(cwd, cloud_name).await?)
             } else {
                 None
             };
 
-            let session_cwd = match &worktree_name {
-                Some(name) => worktree_path(name),
+            let session_cwd = match &cloud_name {
+                Some(name) => {
+                    let path = cloud_path(name);
+                    tokio::fs::create_dir_all(&path).await?;
+                    sandbox::ensure_image().await?;
+                    path
+                }
                 None => cwd.to_string(),
             };
 
-            // Read back rather than taken from the caller: the picker sends
-            // `None` when the user didn't touch it, and the repo is still on
-            // some branch worth recording. Non-repos report `None` and stay that
-            // way.
-            //
-            // Ahead of the worktree below, though it reads the project root and
-            // `worktree add` never moves that HEAD: it is one more fallible step
-            // that would otherwise sit inside the window the rollback has to
-            // cover, and the shortest window is the one least able to go wrong.
-            let branch = match branch {
-                Some(b) => Some(b.to_string()),
-                // The full branch list is already loaded by the composer. If
-                // the send wins that race, only the current branch is needed
-                // here; listing refs, status, and the remote default would put
-                // several extra git processes on the startup critical path.
+            // A Cloud has no checkout to inspect or modify. The selected branch
+            // is metadata for the prompt and UI only; no local branch is
+            // created, checked out, fetched, or mounted into the container.
+            let selected_branch = match branch
+                .map(str::to_string)
+                .or_else(|| base_ref.map(str::to_string))
+            {
+                Some(branch) => Some(branch),
+                None if cloud_name.is_some() => None,
                 None => git::current_branch(cwd).await,
             };
-
-            // Dray creates the tree itself because the harness cannot be told
-            // which source branch to use. The child is spawned into the created
-            // tree with no `-w`. A source-branch worktree deliberately checks
-            // out the selected branch again; a new-branch worktree gives it a
-            // private UUID branch.
-            //
-            // Ahead of the index write, unlike the spawn below: a base git
-            // cannot resolve has left nothing behind at all and the caller is
-            // getting the error.
-            let owned_worktree = match (base_ref, &worktree_name, harness) {
-                (Some(base), Some(name), _) => {
-                    git::create_worktree_with_mode(cwd, name, base, true).await?;
-                    true
-                }
-                (Some(_), None, _) => bail!("a base ref needs a worktree to check it out into"),
-                (None, Some(name), Harness::Pi) => {
-                    let base = match (branch.as_deref(), create_worktree_branch) {
-                        (Some(branch), _) => branch.to_string(),
-                        (None, true) => git::worktree_base_ref(cwd)
-                            .await
-                            .context("could not resolve Pi's worktree base")?,
-                        (None, false) => {
-                            bail!("stay-on-source worktrees require a checked-out branch")
-                        }
-                    };
-                    git::create_worktree_with_mode(cwd, name, &base, create_worktree_branch)
-                        .await?;
-                    true
-                }
-                (None, _, _) => false,
-            };
-
-            // Indexed before the process spawns, so a session that fails to
-            // start is still visible rather than vanishing without a trace.
-            let recorded_branch = if worktree_name.is_some() && create_worktree_branch {
-                worktree_name.as_deref()
+            let base_branch = selected_branch
+                .clone()
+                .unwrap_or_else(|| "main".to_string());
+            let recorded_branch = if cloud_name.is_some() && create_cloud_branch {
+                cloud_name
+                    .as_deref()
+                    .map(|name| format!("cloud/{name}"))
             } else {
-                branch.as_deref()
+                selected_branch.clone()
             };
+            let starting_prompt = match (
+                cloud_name.as_deref(),
+                create_cloud_branch,
+                recorded_branch.as_deref(),
+            ) {
+                (Some(_), true, Some(target)) => cloud_start_prompt(prompt, target, &base_branch),
+                _ => prompt.to_string(),
+            };
+
             let mut item = SessionIndexItem::new(
                 session_id,
                 harness,
                 &session_cwd,
                 cwd,
-                worktree_name.as_deref(),
-                recorded_branch,
+                cloud_name.as_deref(),
+                recorded_branch.as_deref(),
                 prompt,
                 model,
                 effort,
@@ -467,97 +430,62 @@ impl SessionManager {
             );
             item.pi_model = pi_model.clone();
 
-            // The one failure that has to undo the tree, and the row that just
-            // failed to be written is exactly why: removal is offered from a
-            // session's own row, so an orphan here is one nothing in the app can
-            // ever reach and `git worktree remove` by hand is the only recovery.
-            // The spawn below is deliberately *not* covered — by then the row
-            // exists, and deleting the session already takes the tree with it.
-            //
-            // Only a tree Dray made. A `-w` one does not exist yet, and the
-            // failed create above left nothing to undo.
-            if let Err(e) = append_session_index_item(item.clone()).await {
-                if owned_worktree {
-                    // Logged, not propagated: the caller has to see what
-                    // actually failed, not how the tidy-up went.
-                    if let Err(undo) =
-                        git::remove_worktree(cwd, &session_cwd, item.branch.as_deref()).await
-                    {
-                        eprintln!("could not roll back {session_cwd}: {undo}");
-                    }
+            // Index before the process starts, so startup failures remain
+            // visible and the user can retry after building/fixing Docker.
+            if let Err(error) = append_session_index_item(item.clone()).await {
+                if let Some(name) = cloud_name.as_deref() {
+                    sandbox::remove_volume(name).await;
                 }
-                return Err(e);
+                let _ = tokio::fs::remove_dir_all(&session_cwd).await;
+                return Err(error);
             }
-
-            // The index is now durable, so let the sidebar render the session
-            // before the baseline snapshot and Pi startup finish. This is also
-            // useful when startup fails: the indexed row remains the recovery
-            // path instead of being invisible until the invoke returns.
             app.emit(crate::orchestration::SESSION_CREATED, &item).ok();
 
-            // Taken before the child exists, so nothing it does can end up
-            // inside its own baseline. A worktree the CLI has yet to create has
-            // no directory to snapshot, so that case resolves the fork point the
-            // tree will start from instead — slightly approximate, since the CLI
-            // fetches `origin/<default>` first and an upstream commit landing in
-            // between would read as this turn's work. A tree created above has
-            // none of that: it is on disk and clean, so its snapshot is exact.
-            let baseline = match (owned_worktree, worktree_name.is_some()) {
-                (false, true) => git::base_ref_tree(cwd).await,
-                _ => git::snapshot_tree(&session_cwd).await,
-            };
-
-            // A tree we made is a directory that already exists and a checkout
-            // already on the right commit, so the child starts in it and is told
-            // nothing about worktrees at all. Every other creation spawns at the
-            // project root, because the directory `-w` is about to make cannot
-            // be `chdir`ed into before it exists.
-            let (spawn_cwd, spawn_worktree) = if owned_worktree {
-                (session_cwd.as_str(), None)
+            // Cloud work is inside a Docker volume, not the host project, so
+            // its changes must never be presented as local Git changes.
+            let baseline = if cloud_name.is_none() {
+                git::snapshot_tree(&session_cwd).await
             } else {
-                (cwd, worktree_name.as_deref())
+                None
             };
 
+            let launch_cwd = if cloud_name.is_some() {
+                session_cwd.as_str()
+            } else {
+                cwd
+            };
             let mut session = Session::init(
                 session_id,
                 harness,
                 &model_spec,
                 effort,
                 permission_mode,
-                spawn_cwd,
+                launch_cwd,
                 &session_cwd,
-                spawn_worktree,
+                cloud_name.as_deref(),
                 is_new_session,
                 None,
                 app,
             )
             .await?;
             session
-                .send_msg(prompt, attachment_paths, baseline, from, app)
+                .send_msg(&starting_prompt, attachment_paths, baseline, from, app)
                 .await?;
-            // The prompt event is synthesized by `send_msg`, so read the log
-            // back rather than returning empty — otherwise the frontend's first
-            // render drops the user's own message.
             let events = list_session_events(session_id).await?;
             self.sessions
                 .lock()
                 .await
                 .insert(session_id.to_string(), session);
 
-            // Title generation is cosmetic and starts only after the main Pi
-            // process has received its prompt, so its extra Windows process
-            // cannot compete with startup Git work or the first turn.
             crate::title::spawn_title_generation(
                 session_id,
                 prompt,
-                cwd,
+                launch_cwd,
                 title_model.as_ref(),
                 title_effort,
                 app,
             );
 
-            // Returned so the frontend learns the resolved worktree name and
-            // the backend-truncated title rather than guessing either.
             return Ok(SendOutcome {
                 snapshot: Some(SessionSnapshot {
                     index_item: item,
@@ -691,47 +619,68 @@ impl SessionManager {
         )
         .await?;
 
-        // A fork that hasn't spawned yet. The app's half happened when the user
-        // asked for it — log copied, entry written — and this is the spawn that
-        // carries out the CLI's, after which the session resumes like any other.
+        // A fork that has not spawned yet. Cloud forks get a fresh private
+        // volume; the app transcript is still copied immediately, while the
+        // next Pi process starts clean because the parent's Docker volume is
+        // deliberately never mounted into another session.
         let fork_from = indexed.as_ref().and_then(|i| i.fork_from.clone());
-
-        // A fork into a *new* worktree is the one resume whose tree does not
-        // exist yet, so it needs the creation treatment: `-w` to make the tree,
-        // the project root to spawn in because a missing directory cannot be
-        // `chdir`ed into, and the fork point as a baseline because there is no
-        // tree to snapshot. Every other resume runs in a directory already there.
-        let pending_worktree = fork_from
-            .as_ref()
-            .and(indexed.as_ref())
-            .and_then(|i| i.worktree_name.clone());
-
-        let (spawn_cwd, baseline, spawn_worktree) = match (&pending_worktree, &indexed) {
-            (Some(name), Some(item)) => {
-                let base = git::worktree_base_ref(&item.project_path)
-                    .await
-                    .context("could not resolve Pi's fork worktree base")?;
-                git::create_worktree(&item.project_path, name, &base).await?;
-                (item.cwd.clone(), git::snapshot_tree(&item.cwd).await, None)
+        let cloud_name = indexed.as_ref().and_then(|i| i.cloud_name.clone());
+        let session_cwd = match &cloud_name {
+            Some(name) => {
+                let path = cloud_path(name);
+                tokio::fs::create_dir_all(&path).await?;
+                sandbox::ensure_image().await?;
+                path
             }
-            _ => (
-                session_cwd.clone(),
-                git::snapshot_tree(&session_cwd).await,
-                None,
-            ),
+            None => session_cwd,
+        };
+        let baseline = if cloud_name.is_none() {
+            git::snapshot_tree(&session_cwd).await
+        } else {
+            None
         };
 
+        let starting_prompt = if let (Some(parent_id), Some(target)) = (
+            fork_from.as_deref(),
+            indexed.as_ref().and_then(|item| item.branch.as_deref()),
+        ) {
+            if create_cloud_branch {
+                let based_on = get_session_index_item(parent_id)
+                    .await?
+                    .and_then(|item| item.branch)
+                    .unwrap_or_else(|| "main".to_string());
+                cloud_start_prompt(prompt, target, &based_on)
+            } else {
+                prompt.to_string()
+            }
+        } else {
+            prompt.to_string()
+        };
+
+        let launch_cwd = if cloud_name.is_some() {
+            session_cwd.as_str()
+        } else {
+            cwd
+        };
         let mut session = Session::init(
             session_id,
             session_harness,
             &model_spec,
             effort,
             permission_mode,
-            &spawn_cwd,
+            launch_cwd,
             &session_cwd,
-            spawn_worktree,
+            cloud_name.as_deref(),
             is_new_session,
-            fork_from.as_deref(),
+            // A Cloud fork's application transcript is preserved, but its
+            // Pi context lives in the parent's private Docker volume. Starting
+            // a fresh Pi context is safer than mounting another session's
+            // volume or accidentally sharing mutable state.
+            if cloud_name.is_none() {
+                fork_from.as_deref()
+            } else {
+                None
+            },
             app,
         )
         .await?;
@@ -745,14 +694,14 @@ impl SessionManager {
         }
 
         session
-            .send_msg(prompt, attachment_paths, baseline, from, app)
+            .send_msg(&starting_prompt, attachment_paths, baseline, from, app)
             .await?;
         sessions_guard.insert(session_id.to_string(), session);
         Ok(SendOutcome::default())
     }
 
     /// Copies a session onto a new id, to be continued separately from the one
-    /// it came from. `worktree` puts the fork in a tree of its own rather than
+    /// it came from. `cloud` puts the fork in a tree of its own rather than
     /// leaving it in the parent's directory.
     ///
     /// Nothing spawns here. The CLI's fork only happens on a spawn, and spawning
@@ -769,7 +718,7 @@ impl SessionManager {
         &self,
         session_id: &str,
         fork_id: &str,
-        worktree: bool,
+        cloud: bool,
     ) -> Result<SessionSnapshot> {
         let parent = get_session_index_item(session_id)
             .await?
@@ -785,8 +734,12 @@ impl SessionManager {
         // fork of a fork can't collide with the tree it came from — and against
         // the index as well as disk, since a fork's tree does not exist until
         // its first send.
-        let worktree_name = if worktree {
-            Some(resolve_unclaimed_worktree_name(&parent.project_path, None).await?)
+        // A Cloud cannot be forked into the host checkout: doing so would
+        // turn a Cloud fork into a different kind of session. Both menu
+        // choices therefore remain Cloud sessions when the parent is Cloud.
+        let cloud = cloud || parent.cloud_name.is_some();
+        let cloud_name = if cloud {
+            Some(resolve_unclaimed_cloud_name(&parent.project_path, None).await?)
         } else {
             None
         };
@@ -803,7 +756,7 @@ impl SessionManager {
             bail!("this session has no conversation to fork yet");
         }
 
-        let item = parent.fork(fork_id, worktree_name.as_deref());
+        let item = parent.fork(fork_id, cloud_name.as_deref());
         append_session_index_item(item.clone()).await?;
 
         Ok(SessionSnapshot {
@@ -892,45 +845,6 @@ impl SessionManager {
         session.answer_questions(request_id, answers, app).await
     }
 
-    /// Deletes the worktree a session was running in and moves the session to
-    /// its project root, keeping the transcript and everything in it.
-    ///
-    /// The child is killed first and unconditionally, even when it is idle:
-    /// its working directory is about to stop existing, and the lock git
-    /// refuses the removal over names that process. A session with no live
-    /// child is the ordinary case here — this is offered on settle, which is
-    /// something a reader does to finished work.
-    ///
-    /// Ordering is the whole of the method. Disk first, index second: an entry
-    /// relocated before a removal that then failed would describe a session as
-    /// living at the project root while its files sat in a directory nothing
-    /// pointed at any more.
-    pub async fn remove_worktree(&self, session_id: &str) -> Result<SessionIndexItem> {
-        let item = get_session_index_item(session_id)
-            .await?
-            .with_context(|| format!("no session {session_id}"))?;
-
-        if item.worktree_name.is_none() {
-            bail!("that session is not running in a worktree");
-        }
-
-        if let Some(session) = self.sessions.lock().await.remove(session_id) {
-            session.kill().await?;
-        }
-
-        remove_session_worktree(&item).await?;
-
-        if item.harness == Pi {
-            if let Err(error) = pi::relocate_session_data(session_id, &item.project_path).await {
-                eprintln!("could not relocate Pi session data for {session_id}: {error}");
-            }
-        }
-
-        relocate_session_to_project(session_id)
-            .await?
-            .with_context(|| format!("no session {session_id}"))
-    }
-
     /// Deletes a session: kills its child if one is running, then drops the
     /// index entry and the log. Returns whether the index held it.
     ///
@@ -942,23 +856,14 @@ impl SessionManager {
             session.kill().await?;
         }
 
-        // Pi's context transcript lives beside Dray's data so it can resume
-        // across worktree moves; remove it with the Dray session rather than
-        // leaving a private copy behind after deletion.
+        // Local Pi sessions keep their context files beside Dray; Cloud Pi
+        // sessions keep them in the Docker volume, which is removed below.
         if let Err(e) = pi::delete_session_data(session_id).await {
             eprintln!("could not delete Pi session data for {session_id}: {e}");
         }
 
-        // Best-effort for the same reason the attachments below are, and with
-        // one cost worth naming: a removal that fails here orphans the tree
-        // with no UI left to retry from, since the row it hung off is about to
-        // go. `git worktree remove` by hand is the recovery. Failing the
-        // delete instead would be worse — the session the user asked to be rid
-        // of would still be there.
         if let Some(item) = get_session_index_item(session_id).await? {
-            if let Err(e) = remove_session_worktree(&item).await {
-                eprintln!("could not remove worktree for {session_id}: {e}");
-            }
+            remove_session_cloud(&item).await;
         }
 
         // Best-effort: the images are a convenience for the transcript that is
@@ -996,6 +901,15 @@ impl SessionManager {
             _ => Ok(None),
         }
     }
+}
+
+/// Adds the branch instruction to the initial Cloud prompt. It is deliberately
+/// plain text: a Cloud starts without a repository, so this is the contract Pi
+/// can follow when it creates or edits a remote checkout itself.
+pub fn cloud_start_prompt(prompt: &str, branch: &str, based_on: &str) -> String {
+    format!(
+        "{prompt}\n\nWork on branch `{branch}` based on `{based_on}`."
+    )
 }
 
 /// Owns a Windows job containing the Pi process and all of its descendants.
@@ -1064,8 +978,10 @@ pub struct Session {
     /// since the CLI blocks its turn until something replies.
     pub stdin: Arc<Mutex<ChildStdin>>,
     pub harness: Harness,
-    /// The directory Pi uses to discover extension commands and the session's
-    /// own checkout for prompt delivery.
+    /// Whether the child is a Pi process inside a Docker Cloud sandbox.
+    pub cloud: bool,
+    /// The host-side directory used by the local UI. Cloud sessions keep their
+    /// actual files in Docker and this directory remains empty.
     pub cwd: String,
     pub model: ModelId,
     pub pi_model: Option<PiModel>,
@@ -1099,10 +1015,10 @@ impl Session {
         effort: Option<Effort>,
         permission_mode: ApprovalPolicy,
         cwd: &str,
-        // The session's own tree, for the turn-end snapshot. Differs from `cwd`
-        // on a worktree creation, where the child spawns at the project root.
+        // The host-side marker used for local UI snapshots. A Cloud's real
+        // workspace is `/home/agent/workspace` inside Docker.
         session_cwd: &str,
-        worktree_name: Option<&str>,
+        cloud_name: Option<&str>,
         is_new_session: bool,
         fork_from: Option<&str>,
         app: &AppHandle,
@@ -1115,7 +1031,7 @@ impl Session {
             permission_mode,
             cwd,
             session_cwd,
-            worktree_name,
+            cloud_name,
             is_new_session,
             fork_from,
             app,
@@ -1127,9 +1043,8 @@ impl Session {
     /// child's stdin — the CLI never echoes it back.
     ///
     /// `baseline` is the caller's working-tree snapshot, taken before this
-    /// prompt reaches the child. It is passed in rather than taken here because
-    /// only the manager knows which directory to snapshot: a worktree session's
-    /// tree does not exist until the CLI creates it.
+    /// prompt reaches the child. Cloud sessions pass `None` because their
+    /// workspace lives in Docker and is not a host Git checkout.
     pub async fn send_msg(
         &mut self,
         prompt: &str,
@@ -1138,7 +1053,8 @@ impl Session {
         from: Option<MessageSender>,
         app: &AppHandle,
     ) -> Result<()> {
-        let extension_command = self.harness == Pi
+        let extension_command = !self.cloud
+            && self.harness == Pi
             && pi::commands::is_extension_command(&self.cwd, prompt)
                 .await
                 .unwrap_or(false);
@@ -1361,6 +1277,12 @@ impl Session {
     /// revive a session after it has been stopped.
     pub async fn kill(mut self) -> Result<()> {
         self.stopped.store(true, Relaxed);
+
+        if self.cloud {
+            // Killing the Docker client alone can orphan the container. Remove
+            // it first; the named volume intentionally survives for resume.
+            sandbox::remove_container(&self.id).await;
+        }
 
         #[cfg(windows)]
         if let Some(process_job) = self.process_job.take() {
@@ -1650,6 +1572,14 @@ mod tests {
 
     /// Only a finished-and-unread session clears on read; selecting a running
     /// one must not stop it reading as busy.
+    #[test]
+    fn cloud_branch_instruction_is_appended_exactly_once() {
+        assert_eq!(
+            cloud_start_prompt("Fix the issue", "cloud/123", "main"),
+            "Fix the issue\n\nWork on branch `cloud/123` based on `main`."
+        );
+    }
+
     #[test]
     fn mark_seen_clears_only_completed() {
         let mut tracker = StatusTracker::default();

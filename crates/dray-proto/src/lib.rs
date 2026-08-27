@@ -20,10 +20,8 @@ use std::path::PathBuf;
 /// detectable. An added optional field usually needs no bump: an old app that
 /// ignores `model` runs the session on its own default, which is a session the
 /// caller can see and judge. `from` is the other kind — an old app ignores it,
-/// starts the worktree from `origin/<default>`, and answers *identically to a
-/// success*, so a session spawned to review unpushed work reviews none of it
-/// and reports back that everything looks fine. Wrong work that looks like
-/// right work is what earns a bump.
+/// so the Cloud's branch brief would silently use the wrong base. Wrong work
+/// that looks like right work is what earns a bump.
 ///
 /// Refusing costs every command, not just the new one — but that cost falls
 /// where it is cheapest. A CLI behind the app is told to run `dray update` and
@@ -33,8 +31,8 @@ use std::path::PathBuf;
 /// half is behind so the reader — usually an agent, reading it as tool output —
 /// runs the cure that applies rather than the one that doesn't.
 ///
-/// v2 added `CreateSession::from`.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// v3 replaces local checkout isolation with Cloud sandbox semantics.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Where the app listens, unless [`endpoint`] is overridden.
 pub const SOCKET_NAME: &str = "dray.sock";
@@ -86,12 +84,9 @@ pub enum Request {
 #[serde(rename_all = "camelCase")]
 pub struct CreateSession {
     pub prompt: String,
-    /// The repo the session runs in — the main worktree, which the CLI fills
-    /// from `git worktree list` when `--project` is absent, so a call from a
-    /// terminal lands in the repo it was made from and a call from inside a
-    /// linked worktree still names the repo rather than that tree. `None` falls
-    /// back to the parent session's project, and with neither the server
-    /// refuses.
+    /// Project metadata for grouping and branch context. The Cloud sandbox does
+    /// not mount or clone this project. `None` falls back to the parent session's
+    /// project, or a virtual Cloud project when called from a plain terminal.
     #[serde(default)]
     pub project_path: Option<String>,
     /// `None` inherits the parent session's model, or Pi's configured model with
@@ -110,13 +105,9 @@ pub struct CreateSession {
     /// Absent for a call from the user's own terminal, which is ordinary.
     #[serde(default)]
     pub parent_session_id: Option<String>,
-    /// Where the new session's worktree starts from: a session id, a branch, or
-    /// any git ref. `None` is the ordinary case and means the harness's default
-    /// base.
-    ///
-    /// A session id is resolved to the branch that session's work lands on, and
-    /// that resolution is the app's — the CLI has no index to read and no
-    /// business learning how a session's branch is named.
+    /// Branch context for the new Cloud: a session id or branch name. `None`
+    /// uses the parent session's branch when there is one, otherwise `main`.
+    /// The app resolves session ids because the CLI has no session index.
     #[serde(default)]
     pub from: Option<String>,
 }
@@ -196,12 +187,12 @@ impl Response {
 pub struct SessionSummary {
     pub session_id: String,
     pub title: String,
-    /// Where the agent runs — the worktree for a worktree session, so this is
-    /// the directory a reader would `cd` into.
+    /// Where the agent runs. For a Cloud this is its private sandbox workspace;
+    /// it is not a host project checkout.
     pub cwd: String,
     pub project_path: String,
     pub branch: Option<String>,
-    pub worktree_name: Option<String>,
+    pub cloud_name: Option<String>,
     /// `idle`, `in_progress` or `completed`, as the app's own index spells them.
     pub status: String,
     pub modified: String,
@@ -299,34 +290,33 @@ mod tests {
     fn a_base_travels_on_the_create() {
         let line = serde_json::to_string(&Envelope::new(Request::CreateSession(CreateSession {
             prompt: "review it".into(),
-            from: Some("worktree-calm-owl".into()),
+            from: Some("cloud-calm-owl".into()),
             ..Default::default()
         })))
         .unwrap();
-        assert!(line.contains(r#""from":"worktree-calm-owl""#));
+        assert!(line.contains(r#""from":"cloud-calm-owl""#));
 
         let back: Envelope = serde_json::from_str(&line).unwrap();
         let Request::CreateSession(create) = back.request else {
             panic!("wrong variant");
         };
-        assert_eq!(create.from.as_deref(), Some("worktree-calm-owl"));
+        assert_eq!(create.from.as_deref(), Some("cloud-calm-owl"));
     }
 
-    /// `from` is what v2 exists for: a v1 app would have ignored the field,
-    /// started the worktree from `origin/<default>`, and answered like a
-    /// success. The envelope carries the version ahead of the command so that
-    /// is refused before the request is read at all.
+    /// `from` now carries Cloud branch semantics. An older app would ignore
+    /// that meaning and answer like a success with different state, so the
+    /// version is checked before the request is read.
     #[test]
     fn a_create_carrying_a_base_goes_out_at_the_version_that_added_it() {
         let line = serde_json::to_value(Envelope::new(Request::CreateSession(CreateSession {
             prompt: "review it".into(),
-            from: Some("worktree-calm-owl".into()),
+            from: Some("cloud-calm-owl".into()),
             ..Default::default()
         })))
         .unwrap();
 
-        assert_eq!(line["v"], 2);
-        assert!(PROTOCOL_VERSION >= 2, "from must not travel under v1");
+        assert_eq!(line["v"], 3);
+        assert!(PROTOCOL_VERSION >= 3, "Cloud branch semantics must not travel under v2");
     }
 
     /// The field is defaulted, so a response shape without it parses rather
@@ -336,7 +326,7 @@ mod tests {
     fn a_create_answered_without_a_base_still_parses() {
         let response: Response = serde_json::from_str(
             r#"{"status":"created","session":{"sessionId":"a","title":"t","cwd":"/p",
-                "projectPath":"/p","branch":null,"worktreeName":null,"status":"idle",
+                "projectPath":"/p","branch":null,"cloudName":null,"status":"idle",
                 "modified":"now"}}"#,
         )
         .unwrap();
@@ -371,7 +361,7 @@ mod tests {
     fn a_summary_without_a_parent_key_still_parses() {
         let summary: SessionSummary = serde_json::from_str(
             r#"{"sessionId":"a","title":"t","cwd":"/p","projectPath":"/p","branch":null,
-                "worktreeName":null,"status":"idle","modified":"now"}"#,
+                "cloudName":null,"status":"idle","modified":"now"}"#,
         )
         .unwrap();
         assert_eq!(summary.parent_session_id, None);

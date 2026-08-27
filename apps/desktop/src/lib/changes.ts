@@ -24,9 +24,8 @@ export type ChangeRange = {
 /// does the range stay open.
 ///
 /// A prompt whose own baseline is null is skipped rather than ending the
-/// search. That matters for a worktree session, whose first prompt can fail to
-/// snapshot — falling through to the neighbouring prompt shows a range slightly
-/// off from the one asked for, which beats showing nothing.
+/// search. Cloud prompts intentionally have no Git snapshot; falling through
+/// to a neighboring local prompt is still preferable to breaking the range.
 ///
 /// Deliberately only the last turn. A session-wide baseline is the same code
 /// reading a different prompt, but it would be *wrong* rather than merely

@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 
 /// Off, the branch picker to the right decides where the session runs. On, it is
 /// replaced by the fork point, which the CLI picks rather than the user.
-export default function WorktreeToggle({
+export default function CloudToggle({
   on,
   onToggle,
 }: {
@@ -36,7 +36,7 @@ export default function WorktreeToggle({
           )}
         />
       </span>
-      Worktree
+      Cloud
     </Button>
   );
 }

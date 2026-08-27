@@ -5,31 +5,20 @@ import { useSyncExternalStore } from "react";
 /// standing still until the reader answers, so it is given twice as long to be
 /// noticed.
 ///
-/// `worktree` is the odd one and breaks two of this store's habits on purpose.
-/// It is raised by the reader's own click rather than by something happening
-/// off screen, and its button *destroys* rather than navigates — so it is the
-/// one kind whose expiry is a real answer. Letting the bar run out means "keep
-/// the worktree", which is why the card offers no way to say so: the safe
-/// choice is what doing nothing already does.
-///
 /// `pr` is the only kind raised by something no session did. A turn ending, a
 /// question asked and a tree settled are all this app's own doing; a pull
 /// request turning green is CI reporting somewhere else, which is why it is the
 /// one kind that fires whether or not the window has focus — the reader cannot
 /// have seen it happen. See `announce` in [useSessions](./useSessions.ts) for
-/// the split the other three make.
-export type NoticeKind = "completed" | "asking" | "worktree" | "pr";
+/// the split the other two make.
+export type NoticeKind = "completed" | "asking" | "pr";
 
 /// How long each kind stays on screen. Read by the card to time its own progress
 /// bar, which is also what dismisses it — see [NoticeStack](../components/NoticeStack.tsx).
 ///
-/// `worktree` takes the longer window for `asking`'s reason turned around: the
-/// reader is being asked to decide something irreversible they did not go
-/// looking for, and ten seconds is not long enough to read a cost and weigh it.
 export const NOTICE_TTL_MS: Record<NoticeKind, number> = {
   completed: 10_000,
   asking: 15_000,
-  worktree: 15_000,
   // News that will keep, like a finished turn: the pull request stays ready,
   // and the card is a shortcut to it rather than the only way to find it.
   pr: 10_000,
@@ -55,19 +44,12 @@ export type Notice = {
   /// window and the sidebar rail is already marking the row, so repeating the
   /// title here spends the card's width saying what the next glance says anyway.
   ///
-  /// The `worktree` card states its *action* here — "Delete worktree?" — which
-  /// is the same rule read the other way: it is the one thing the reader has to
-  /// know, and a card whose first line was a task title would make them read to
-  /// the end to find out what it wanted.
   label: string;
-  /// A second line, which only the `worktree` card carries. The others are a
-  /// verb the reader acts on immediately; this one is a decision, and the facts
-  /// it turns on have to be on the card rather than a click away.
   detail?: string;
   /// What the notice is about, drawn muted beside the label rather than under
   /// it. Two lines of heading for a card this size read as two separate things
   /// to deal with; on one line the eye takes the action first and the subject
-  /// as the qualifier it is. Only the `worktree` card has one.
+  /// as the qualifier it is.
   subject?: string;
 };
 
@@ -135,7 +117,7 @@ export function dismissNotice(sessionId: string, kind?: NoticeKind | NoticeKind[
 /// Spelled out rather than written as "everything but `pr`", so a kind added
 /// later has to be placed here on purpose instead of inheriting a default that
 /// may not suit it.
-export const ANSWERED_BY_OPENING: NoticeKind[] = ["completed", "asking", "worktree"];
+export const ANSWERED_BY_OPENING: NoticeKind[] = ["completed", "asking"];
 
 function subscribe(listener: () => void) {
   listeners.add(listener);

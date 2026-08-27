@@ -8,6 +8,8 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const tauriCli = require.resolve("@tauri-apps/cli/tauri.js");
 const args = process.argv.slice(2);
+const noWatch = args.includes("--no-watch");
+if (noWatch) process.env.DRAY_NO_WATCH = "1";
 if (args[0] === "dev" && !args.some((a) => a === "-c" || a === "--config")) {
   args.push("--config", "src-tauri/tauri.dev.conf.json");
 }

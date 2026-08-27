@@ -384,14 +384,13 @@ mod cli_tests {
         assert!(generate_title("   \n ", ".", None, None).await.is_err());
     }
 
-    /// A worktree session used to pass the tree's own path here, which the CLI
-    /// has not created yet at that point — so the spawn failed and every one of
-    /// those sessions silently kept its prompt-derived title.
+    /// A Cloud session has no host checkout, so title generation continues to
+    /// use the selected project as context rather than the empty sandbox.
     #[tokio::test]
     async fn a_missing_cwd_is_named_rather_than_failing_as_a_spawn_error() {
         let err = generate_title(
             "add a dark mode toggle",
-            "/nonexistent/worktrees/blue-kite",
+            "/nonexistent/cloud/blue-kite",
             None,
             None,
         )
@@ -400,7 +399,7 @@ mod cli_tests {
             .to_string();
 
         assert!(
-            err.contains("/nonexistent/worktrees/blue-kite"),
+            err.contains("/nonexistent/cloud/blue-kite"),
             "got: {err}"
         );
     }

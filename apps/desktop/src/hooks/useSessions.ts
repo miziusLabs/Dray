@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   useComposerPrefs,
   type EffortByModel,
-  type WorktreeBranchMode,
+  type CloudBranchMode,
 } from "@/hooks/useComposerPrefs";
 import { useDockBadge } from "@/hooks/useDockBadge";
 import type { TitlePrefs } from "@/hooks/useTitlePrefs";
@@ -86,9 +86,9 @@ export function useSessions(titlePrefs: TitlePrefs) {
     // The branch a switch is waiting on the user to confirm, because the tree
     // has uncommitted changes. Null when nothing is pending.
     const [pendingBranch, setPendingBranch] = useState<string | null>(null);
-    const [useWorktree, setUseWorktreeState] = useState(() => prefs.useWorktree);
-    const [worktreeBranchMode, setWorktreeBranchModeState] = useState<WorktreeBranchMode>(
-      () => prefs.worktreeBranchMode,
+    const [useCloud, setUseCloudState] = useState(() => prefs.useCloud);
+    const [cloudBranchMode, setCloudBranchModeState] = useState<CloudBranchMode>(
+      () => prefs.cloudBranchMode,
     );
     // Per-session, not global: sessions run concurrently and all of their events
     // arrive on the same channel, so a single value would clear on another's
@@ -159,21 +159,21 @@ const setPermissionMode = (mode: ApprovalPolicy) => {
   setPrefs({ permissionMode: mode });
 };
 
-// Sticky, unlike before. Someone who works in worktrees works in worktrees; the
+// Sticky, unlike before. Someone who works in clouds works in clouds; the
 // old reset-to-off made them re-toggle it for every single task.
 //
 // Resolved against the rendered value rather than inside the state updater: React
 // may run an updater twice, and writing the preference from in there would fire
 // the side effect twice with it.
-const setUseWorktree = (next: boolean | ((prev: boolean) => boolean)) => {
-  const resolved = typeof next === "function" ? next(useWorktree) : next;
-  setUseWorktreeState(resolved);
-  setPrefs({ useWorktree: resolved });
+const setUseCloud = (next: boolean | ((prev: boolean) => boolean)) => {
+  const resolved = typeof next === "function" ? next(useCloud) : next;
+  setUseCloudState(resolved);
+  setPrefs({ useCloud: resolved });
 };
 
-const setWorktreeBranchMode = (mode: WorktreeBranchMode) => {
-  setWorktreeBranchModeState(mode);
-  setPrefs({ worktreeBranchMode: mode });
+const setCloudBranchMode = (mode: CloudBranchMode) => {
+  setCloudBranchModeState(mode);
+  setPrefs({ cloudBranchMode: mode });
 };
 
 // Attaching a known project just selects it, so this doubles as "switch to one
@@ -227,6 +227,13 @@ const runCheckout = async (target: string, stash: boolean) => {
 // since. A stale zero silently skips the dialog and moves their work.
 const handleSelectBranch = async (target: string) => {
   if (!projectPath || target === branches?.current) return;
+
+  // Cloud only records the branch as prompt metadata. Never check out or
+  // mutate the host project: the sandbox does not contain that repository.
+  if (useCloud) {
+    setBranch(target);
+    return;
+  }
 
   let list: BranchList;
   try {
@@ -300,12 +307,17 @@ const handleSendMsg = async (
   const isNewSession = !sessionId;
 
   const existing = sessionId ? sessions.find((s) => s.sessionId === sessionId) : undefined;
-  // The backend reads the recorded cwd on resume, so this only has to be right
-  // for a new session.
-  const cwd = isNewSession ? projectPath : existing?.cwd ?? projectPath;
+  // A Cloud starts in an empty Docker workspace, so a project is optional.
+  // Keep the selected project as metadata when there is one, but use the
+  // current app directory as a valid launch context when there is not.
+  const cwd = isNewSession
+    ? useCloud
+      ? projectPath ?? "."
+      : projectPath
+    : existing?.cwd ?? projectPath;
 
   if (!cwd) {
-    setError("Attach a project first.");
+    setError("Attach a project first, or enable Cloud.");
     return;
   }
 
@@ -343,12 +355,14 @@ const handleSendMsg = async (
       titleEffort: titlePrefs.effort,
       permissionMode,
       cwd,
-      // Recorded, not acted on for a normal session. For a worktree session it
-      // is the source branch used when creating the isolated checkout.
+      // Cloud only records branch context; it never checks out the selected
+      // project. A Cloud fork also gets the branch instruction on its first
+      // send when the setting is enabled.
       branch: isNewSession ? branch : null,
-      useWorktree: isNewSession && useWorktree,
-      createWorktreeBranch: isNewSession && worktreeBranchMode === "new",
-      worktreeName: null,
+      useCloud: isNewSession && useCloud,
+      createCloudBranch:
+        (isNewSession || Boolean(existing?.cloudName)) && cloudBranchMode === "new",
+      cloudName: null,
       isNewSession,
     });
 
@@ -370,7 +384,7 @@ const handleSendMsg = async (
     const { snapshot } = outcome;
 
     // Only a new session yields a snapshot. Built by the backend, so the resolved
-    // worktree name and truncated title come from disk rather than a guess here.
+    // cloud name and truncated title come from disk rather than a guess here.
     if (snapshot) {
       upsertSession(snapshot);
       // A new session is never archived, so it belongs to the active list only —
@@ -500,8 +514,8 @@ const handleNewSession = () => {
   setPiModel(prefs.piModel);
   setEffortByModel(prefs.effortByModel);
   setPermissionModeState(prefs.permissionMode);
-  setUseWorktreeState(prefs.useWorktree);
-  setWorktreeBranchModeState(prefs.worktreeBranchMode);
+  setUseCloudState(prefs.useCloud);
+  setCloudBranchModeState(prefs.cloudBranchMode);
   setBranch(branches?.current ?? null);
 };
 
@@ -514,7 +528,7 @@ const handleNewSession = () => {
 // `sessionIndexItems` until the render after it is made, and it needs this on
 // the way in like any other session being opened.
 //
-// Project, branch, and the worktree flag aren't restored — the composer hides
+// Project, branch, and the cloud flag aren't restored — the composer hides
 // all three once a session exists, and they'd only mislead the next new chat.
 const restoreSessionControls = (item: SessionIndexItem) => {
   setHarnessState(item.harness);
@@ -685,56 +699,6 @@ const setSessionFlags = async (
   }
 };
 
-// Deletes the worktree a session was running in, keeping the session. The
-// backend kills the child, removes the tree and its branch, and relocates the
-// index entry to the project root; the row is replaced from what it returns,
-// for the reason `setSessionFlags` above gives.
-//
-// The relocated item no longer carries a `worktreeName`, which is what retires
-// every control that offers this — the button disappears because the thing it
-// acted on is gone, rather than because anything tracks that it was pressed.
-const removeWorktree = async (sessionId: string): Promise<boolean> => {
-  let updated: SessionIndexItem;
-  try {
-    updated = await invoke<SessionIndexItem>("remove_session_worktree", { sessionId });
-  } catch (e) {
-    setError(String(e));
-    return false;
-  }
-
-  setSessionIndexItems((prev) =>
-    prev.map((i) => (i.sessionId === sessionId ? updated : i)),
-  );
-  // The open transcript holds its own copy of these fields, and `cwd` is the
-  // one that matters: the changes panel and the PR tab both read it, and left
-  // pointing into the deleted tree they would read a directory that is gone.
-  // Copied off the write rather than restated here — spelling the relocation
-  // out a second time is how this and the index drift, and it had: `branch`
-  // was cleared here while the entry on disk keeps the worktree's branch for
-  // the PR tab to find its PR by.
-  setSessions((prev) =>
-    prev.map((s) =>
-      s.sessionId === sessionId
-        ? {
-            ...s,
-            cwd: updated.cwd,
-            worktreeName: updated.worktreeName,
-            worktreeRemoved: updated.worktreeRemoved,
-            branch: updated.branch,
-          }
-        : s,
-    ),
-  );
-  // A killed child leaves no `session_status`, so the sidebar would sit on
-  // whatever it last saw — `in_progress` for a session that was mid-turn.
-  setStatusBySession((prev) => ({ ...prev, [sessionId]: "idle" }));
-
-  // Reported so the notice card can say "Deleted" and mean it. A failure has
-  // already reached the reader through the error banner, and the card retires
-  // itself rather than claiming something that didn't happen.
-  return true;
-};
-
 // Copies a session onto a new id so it can be carried on in two directions at
 // once. The id is minted here for the same reason a new session's is — this app
 // chooses session ids and the CLI adopts them.
@@ -743,7 +707,7 @@ const removeWorktree = async (sessionId: string): Promise<boolean> => {
 // spawns yet: the backend leaves the CLI's own fork for the first send, and the
 // snapshot it returns is the parent's copied log, so the new session opens
 // reading exactly like the one it came from.
-const forkSession = async (sessionId: string, worktree: boolean) => {
+const forkSession = async (sessionId: string, cloud: boolean) => {
   const forkId = crypto.randomUUID();
 
   let snapshot: SessionSnapshot;
@@ -751,7 +715,7 @@ const forkSession = async (sessionId: string, worktree: boolean) => {
     snapshot = await invoke<SessionSnapshot>("fork_session", {
       sessionId,
       forkId,
-      worktree,
+      cloud,
     });
   } catch (e) {
     setError(String(e));
@@ -790,7 +754,6 @@ const deleteSession = async (sessionId: string) => {
   setStatusBySession(({ [sessionId]: _, ...rest }) => rest);
   setWorkingBySession(({ [sessionId]: _, ...rest }) => rest);
   setQueuedBySession(({ [sessionId]: _, ...rest }) => rest);
-
   if (selectedSessionId === sessionId) {
     handleNewSession();
   }
@@ -1418,6 +1381,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useWorktree, worktreeBranchMode, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseWorktree, setWorktreeBranchMode, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession, removeWorktree};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud, cloudBranchMode, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, setCloudBranchMode, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
 
 }

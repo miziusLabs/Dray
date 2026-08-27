@@ -58,7 +58,7 @@ const latest = new Map<string, number>();
 
 // The sidebar's read saw this branch change. Every cwd's stamp for it under
 // that repo goes, not just the selected one: the marks are keyed by repo root
-// and the panel by cwd, which differ for a worktree session, and a stale stamp
+// and the panel by cwd, which differ for local nested checkouts, and a stale stamp
 // anywhere is a stale panel the next time that session is opened. The rows
 // stay — a dropped stamp means "re-read on next look", never "blank".
 branchChanged.subscribe(({ repo, branch }) => {

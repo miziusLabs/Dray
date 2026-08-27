@@ -139,35 +139,32 @@ Icons for `pr`/`draftPr` = same pair sidebar row and panel toggle draw, so mark 
 
 Hover delay symmetric (150ms): keep cursor merely passing through from popping row open, and let one overshooting on way out come back without it having closed.
 
-## Worktree notice and confirm dialog
+## Cloud sandbox
 
-**Two ways in, and shape follow who asked.** Settle raise **notice**, settled bar's button raise **dialog**. Settling, reader doing something else and being *offered* something, so safe answer must cost zero click: card expire into "keep it" after 15s and therefore carry no Keep button, since doing nothing already is keeping. Pressing "Delete worktree" = reader asking, and they owed confirm naming cost. Both read copy from [worktree.ts](src/lib/worktree.ts), so two route cannot drift into describing same deletion differently.
+Cloud is the only isolated-session mode. A Cloud Session starts Pi through
+Docker with a private named volume and an empty `/home/agent/workspace`. The
+selected project is retained only as grouping and branch metadata; it is never
+cloned, mounted, or used as the container's working tree.
 
-Notice = first `NoticeKind` raised by reader's own click rather than by something off screen, and first whose button **destroy** rather than navigate. Three thing follow.
+The image is built by `scripts/build-sandbox.ps1` and includes Java 21, Java 25,
+Node.js 24, Git, GitHub CLI, and Pi. The host `~/.pi/agent` directory is a
+read-only seed copied into the volume on first start, excluding host session
+transcripts. This keeps extensions, settings, and authentication available
+without sharing mutable Pi state between Cloud Sessions.
 
-**Action lead, subject ride beside it.** Card arrive unasked-for while reader doing something else, so first thing read = what it *want*, not what happened. `label` = `Delete worktree?`, `subject` = task's title muted **on same line**, `detail` = what survive and what don't. Leading with `Settled <task>` read as receipt, and receipt = thing you look away from; task on own third line made two heading-weight line read as two thing to deal with.
+GitHub authentication follows Agentsmith. The host resolves `GITHUB_TOKEN`,
+`GH_TOKEN`, or the local `gh auth token`; only the environment variable name is
+passed to Docker. The entrypoint exports `GH_TOKEN`, runs `gh auth setup-git`,
+and rewrites SSH GitHub URLs to HTTPS. The token is never written to the Pi
+seed or the Cloud volume.
 
-Task named by own **title** not by generated worktree name — `calm-navy-beacon` name directory reader never chose. Action `shrink-0` and title = half that give way; `title` attribute restore what clip took.
-
-It only card with **two** button. Skip = answer card give itself when bar run out, so it there to be *said* rather than waited for — answer you can only give by waiting is one you cannot give.
-
-**Tooltip holding only keycap need own left padding.** `TooltipContent` tighten `pr-1.5` when kbd present but leave `pl-3`, so tooltip that *only* cap sit visibly off-centre. Fixed in component not at call site: `has-[>[data-slot=kbd]:first-child]:pl-1.5` (and same for `kbd-group`).
-
-**Accelerator in tooltip here, not in button.** Rest of stack draw keycap inline, which read fine on card holding one button and badly on this one holding two: row grow wider than sentence above it. So `WithShortcut` wrap each button in tooltip carrying cap. Empty `keys` render **no tooltip at all** rather than empty one: only top card answer to keys, and elsewhere tooltip would repeat button's own visible label back.
-
-Dialog get **no** such confirmation: it close, and enough else on screen already say so.
-
-Card also only one naming its subject, breaking `NoticeStack`'s own "verb and nothing else" rule on purpose — several card can stack, and "Settled" alone say nothing about which settle it answer for. Detail line say "its worktree", which reach directory through thing that own it. Title run to 60 char and card `w-fit`, so it capped and truncated with `title` attribute restoring rest. Dialog keep worktree name instead: it open from settled bar, where title already two inches away in header.
-
-**Counts _are_ warning, so dialog one step not two.** Sidebar's delete and PR panel's merge take second confirm precisely because they carry no such detail; adding one here make reader confirm sentence they already read. Destructive fill only where something actually lost — on clean tree this tidying up, and red make safe answer look like dangerous one.
-
-**Alert = `--popover`, not `--card`, and that vibrancy fix not taste.** Two token same colour with opaque page under them, so swap change nothing until glass on. There `--card` become 5.5% white veil — right for surface sitting *in* page, wrong for one floating over it. Notice card land on sidebar, which have no fill under vibrancy, so veil composite straight onto window material and leave text washed out. Applies to `Alert` in general, not just worktree one.
-
-**Destructive confirm sit rightmost and take solid red.** `AlertDialogFooter` = `sm:flex-row sm:justify-end`, so source order = screen order — confirm must come **after** `AlertDialogCancel` in markup or it land on left. `destructive` prop on `AlertDialogAction` carry solid fill, not button's own `destructive` variant: that one a tint, for control sitting among others, where this the one thing in dialog that do something. Prop caller's to set — both dialog today destructive, but red default quietly colour first one that isn't.
+When **Create new Cloud branches** is enabled, the first prompt gets the
+instruction **Work on branch `cloud/<id>` based on `<base>`.** This is prompt
+metadata for an empty sandbox, not a local Git branch operation.
 
 ## Settings dialog
 
-**Dialog, not alert, and `showClose` = whole difference.** Frame, overlay and both animation copied from `alert-dialog` deliberately: to reader two are same object, differing only in whether app asking question or reader opened something. Alert answered by own buttons so carry no dismiss; dialog dismissed rather than answered, and Escape alone = way out only for people who already know it there. `--popover` not `--card` for [the vibrancy reason above](#worktree-notice-and-confirm-dialog).
+**Dialog, not alert, and `showClose` = whole difference.** Frame, overlay and both animation copied from `alert-dialog` deliberately: to reader two are same object, differing only in whether app asking question or reader opened something. Alert answered by own buttons so carry no dismiss; dialog dismissed rather than answered, and Escape alone = way out only for people who already know it there. `--popover` not `--card` for [the vibrancy reason above](#cloud-sandbox).
 
 **Gear in sidebar's titlebar strip, and it move in fullscreen.** Strip `justify-end` normally to clear traffic lights, `justify-start` in fullscreen where they gone. Sidebar toggle **also** drawn in app header when sidebar collapsed, so it must hold strip's outer edge in both layout and never change which end it at; gear have no second home, so gear = the one that move. Settings sit in that strip rather than filter row below, because every control in that row scope list under it and these app-wide.
 

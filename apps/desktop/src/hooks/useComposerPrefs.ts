@@ -11,14 +11,14 @@ const SEED: ComposerPrefs = {
   piModel: null,
   effortByModel: {},
   permissionMode: "auto",
-  useWorktree: false,
-  worktreeBranchMode: "source",
+  useCloud: false,
+  cloudBranchMode: "source",
 };
 
 /// Effort is a property of the model, not of the picker: switching to Sonnet must
 /// not inherit the Max you last chose on Opus. Absent key = use the model default.
 export type EffortByModel = Partial<Record<ModelId, Effort>>;
-export type WorktreeBranchMode = "source" | "new";
+export type CloudBranchMode = "source" | "new";
 
 /// What a new session starts with. Deliberately not the whole composer: `branch`
 /// seeds from whatever the repo is checked out to, since restoring a name without
@@ -30,8 +30,8 @@ export type ComposerPrefs = {
   piModel: PiModel | null;
   effortByModel: EffortByModel;
   permissionMode: ApprovalPolicy;
-  useWorktree: boolean;
-  worktreeBranchMode: WorktreeBranchMode;
+  useCloud: boolean;
+  cloudBranchMode: CloudBranchMode;
 };
 
 /// The sticky half of the composer. Every control the user can change writes here,
@@ -52,7 +52,7 @@ export function useComposerPrefs() {
     ...prefs,
     harness: "pi",
     modelId: "pi",
-    worktreeBranchMode: prefs.worktreeBranchMode === "new" ? "new" : "source",
+    cloudBranchMode: prefs.cloudBranchMode === "new" ? "new" : "source",
   };
 
   const patch = useCallback(

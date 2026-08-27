@@ -68,8 +68,8 @@ struct New {
     /// your conversation — the new session inherits no context.
     prompt: String,
 
-    /// Repo to run in. Defaults to the calling session's project, or the git
-    /// repo of the current directory.
+    /// Project metadata for grouping and branch context. The Cloud sandbox does
+    /// not mount or clone this project.
     #[arg(long)]
     project: Option<PathBuf>,
 
@@ -78,10 +78,9 @@ struct New {
     #[arg(long)]
     effort: Option<String>,
 
-    /// Base the new session's worktree on existing work: a session id, a
-    /// branch, or any git ref. Committed work only. Defaults to the
-    /// harness's default base.
-    #[arg(long, value_name = "SESSION|REF")]
+    /// Base the new Cloud's branch instruction on a session id or branch name.
+    /// Defaults to the calling session's recorded branch, then `main`.
+    #[arg(long, value_name = "SESSION|BRANCH")]
     from: Option<String>,
 }
 
@@ -155,8 +154,8 @@ fn new(args: New) -> Result<(), String> {
             eprintln!(
                 "Started \"{}\"{}{}",
                 session.title,
-                match &session.worktree_name {
-                    Some(name) => format!(" in worktree {name}"),
+                match &session.cloud_name {
+                    Some(name) => format!(" in Cloud {name}"),
                     None => String::new(),
                 },
                 // `--from <session-id>` names a session, so the branch it
@@ -425,8 +424,8 @@ fn parent_session_id() -> Option<String> {
 
 /// `--project` if given, else the repo the current directory sits in.
 ///
-/// `None` is a real answer, not a failure: the app falls back to the calling
-/// session's own project, and only refuses when there is no parent either.
+/// `None` is a real answer: the app uses the calling session's project when
+/// available, otherwise it groups the Cloud under a virtual project.
 fn resolve_project(explicit: Option<PathBuf>) -> Option<String> {
     if let Some(path) = explicit {
         return Some(path.to_string_lossy().into_owned());
@@ -435,23 +434,14 @@ fn resolve_project(explicit: Option<PathBuf>) -> Option<String> {
     repo_root(Path::new("."))
 }
 
-/// The repo `dir` belongs to — its **main** worktree, not whichever linked one
-/// we happen to be standing in.
+/// The repository containing `dir`, when the CLI was invoked from one.
 ///
-/// `rev-parse --show-toplevel` answers the linked worktree, and that is what an
-/// agent running in a Dray worktree session was putting on the wire as the new
-/// session's project. The app then computed a `cwd` of
-/// `<that worktree>/.dray/worktrees/<name>`, which Pi does not create —
-/// it resolves the repo for itself — so Changes, commit and PR all read a
-/// directory that does not exist.
-///
-/// `worktree list` puts the main worktree first whatever you run it from, and
-/// that is what `project_path` has always meant: the grouping key worktree
-/// sessions list under.
+/// Cloud Sessions do not need this value to run, but keeping a project path for
+/// calls made from a normal checkout preserves useful sidebar grouping.
 fn repo_root(dir: &Path) -> Option<String> {
     let output = std::process::Command::new("git")
         .current_dir(dir)
-        .args(["worktree", "list", "--porcelain"])
+        .args(["rev-parse", "--show-toplevel"])
         .output()
         .ok()?;
 
@@ -459,26 +449,8 @@ fn repo_root(dir: &Path) -> Option<String> {
         return None;
     }
 
-    main_worktree(&String::from_utf8(output.stdout).ok()?)
-}
-
-/// The first record's path, or `None` for a bare repo — nothing is checked out
-/// there, so it is no place to run a session, and `None` sends the app to the
-/// calling session's own project instead.
-///
-/// Not `-z`: that needs git 2.36, and anything older fails the command outright
-/// and answers nothing. The line format is only ambiguous for a repo root with
-/// a newline in its path.
-fn main_worktree(porcelain: &str) -> Option<String> {
-    let mut lines = porcelain.lines();
-    let path = lines.next()?.strip_prefix("worktree ")?;
-
-    // Records are separated by a blank line, so this reads the first one alone.
-    if lines.take_while(|l| !l.is_empty()).any(|l| l == "bare") {
-        return None;
-    }
-
-    (!path.is_empty()).then(|| path.to_string())
+    let root = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (!root.is_empty()).then_some(root)
 }
 
 #[cfg(test)]
@@ -492,18 +464,18 @@ mod tests {
     }
 
     #[test]
-    fn there_is_no_way_to_opt_out_of_the_worktree() {
+    fn there_is_no_way_to_opt_out_of_the_cloud() {
         // Sessions created here run at the same time by design, so sharing a
         // checkout is never the right answer — the flag is gone rather than
         // defaulted.
-        assert!(Cli::try_parse_from(["dray", "new", "x", "--no-worktree"]).is_err());
+        assert!(Cli::try_parse_from(["dray", "new", "x", "--no-cloud"]).is_err());
     }
 
     #[test]
-    fn the_worktree_cannot_be_named_either() {
+    fn the_cloud_cannot_be_named_either() {
         // An agent has no basis for picking a name, Dray generates a readable
         // one, and a caller-supplied name is one more thing that can collide.
-        assert!(Cli::try_parse_from(["dray", "new", "x", "--worktree-name", "n"]).is_err());
+        assert!(Cli::try_parse_from(["dray", "new", "x", "--cloud-name", "n"]).is_err());
     }
 
     #[test]
@@ -594,14 +566,11 @@ mod tests {
         assert!(SKILL.contains("Nothing was created"));
     }
 
-    /// A worktree carries what was committed, so a reviewer pointed at work in
-    /// progress reports on a tree missing the very change the user is looking
-    /// at. Nothing in the mechanism can fix that, which makes saying it part of
-    /// the feature rather than documentation around it.
     #[test]
-    fn the_skill_says_a_base_carries_committed_work_only() {
+    fn the_skill_explains_that_clouds_start_without_a_repository() {
         assert!(SKILL.contains("--from"));
-        assert!(SKILL.contains("Committed work only"));
+        assert!(SKILL.contains("never clones"));
+        assert!(SKILL.contains("Create new Cloud branches"));
     }
 
     #[test]
@@ -612,51 +581,6 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_repo_is_no_project() {
-        assert_eq!(main_worktree("worktree /srv/repo.git\nbare\n"), None);
-    }
-
-    #[test]
-    fn only_the_first_record_is_read() {
-        // `bare` on a later record would be a repo that has no main worktree
-        // at all, but reading past the blank line is how a second record's
-        // attribute gets mistaken for the first one's.
-        let porcelain = "worktree /a\nHEAD abc\nbranch refs/heads/main\n\nworktree /b\nbare\n";
-        assert_eq!(main_worktree(porcelain).as_deref(), Some("/a"));
-    }
-
-    #[test]
-    fn nothing_at_all_is_no_project() {
-        assert_eq!(main_worktree(""), None);
-        assert_eq!(main_worktree("HEAD abc\n"), None);
-    }
-
-    /// The one that matters, and it needs a real linked worktree: the whole
-    /// defect was a git subcommand answering differently depending on which
-    /// directory it ran in, which no string fixture can show.
-    #[test]
-    fn resolving_from_inside_a_worktree_answers_the_repo() {
-        let Some(repo) = scratch_repo() else {
-            return;
-        };
-
-        let tree = repo.join(".dray").join("worktrees").join("child");
-        git(&repo, &["worktree", "add", "-q", tree.to_str().unwrap()]);
-
-        let root = repo.to_string_lossy().into_owned();
-        assert_eq!(repo_root(&repo).as_deref(), Some(root.as_str()));
-        assert_eq!(repo_root(&tree).as_deref(), Some(root.as_str()));
-
-        // The reading this replaced, kept as the reason the test exists.
-        assert_eq!(
-            show_toplevel(&tree).as_deref(),
-            Some(tree.to_string_lossy().as_ref())
-        );
-
-        let _ = std::fs::remove_dir_all(&repo);
-    }
-
-    #[test]
     fn a_plain_directory_is_no_project() {
         let dir = std::env::temp_dir().join(format!("dray-clitest-plain-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -664,47 +588,5 @@ mod tests {
         assert_eq!(repo_root(&dir), None);
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A throwaway repo with one commit, canonicalized because git prints real
-    /// paths and macOS hands out `/var/…` symlinks into `/private/var/…`.
-    /// `None` when there is no usable git, which is not a failure worth failing
-    /// the suite over.
-    fn scratch_repo() -> Option<PathBuf> {
-        let dir = std::env::temp_dir().join(format!("dray-clitest-{}", std::process::id()));
-        // A run that failed before its cleanup would otherwise leave a repo
-        // here whose `child` worktree already exists.
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).ok()?;
-        let dir = std::fs::canonicalize(&dir).ok()?;
-
-        if !git(&dir, &["init", "-q", "."]) {
-            return None;
-        }
-        git(&dir, &["config", "user.email", "t@example.com"]);
-        git(&dir, &["config", "user.name", "Test"]);
-        std::fs::write(dir.join("keep.txt"), "a\n").ok()?;
-        git(&dir, &["add", "-A"]);
-        git(&dir, &["commit", "-qm", "init"]);
-
-        Some(dir)
-    }
-
-    fn git(at: &Path, args: &[&str]) -> bool {
-        std::process::Command::new("git")
-            .current_dir(at)
-            .args(args)
-            .output()
-            .is_ok_and(|o| o.status.success())
-    }
-
-    fn show_toplevel(at: &Path) -> Option<String> {
-        let out = std::process::Command::new("git")
-            .current_dir(at)
-            .args(["rev-parse", "--show-toplevel"])
-            .output()
-            .ok()?;
-
-        Some(String::from_utf8(out.stdout).ok()?.trim().to_string())
     }
 }

@@ -10,7 +10,6 @@ use crate::models::{Effort, Model};
 use crate::session::{flush_queued, publish_status, QueuedMessages, Session, StatusTracker};
 use crate::store::{self, append_session_event, next_seq_by_session_id};
 use anyhow::{Context, Result};
-use serde_json::Value;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::Arc;
@@ -48,49 +47,10 @@ pub async fn delete_session_data(session_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Updates a Pi transcript's stored cwd after Dray relocates its worktree.
-///
-/// Pi refuses to open a session whose header points at a deleted directory in
-/// RPC mode, so the header must follow the durable Dray index when cleanup moves
-/// the session back to the project root.
-pub async fn relocate_session_data(session_id: &str, cwd: &str) -> Result<()> {
-    let dir = store::get_home_app_dir().await?.join("pi-sessions");
-    let suffix = format!("_{session_id}.jsonl");
-    let mut entries = match tokio::fs::read_dir(&dir).await {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-
-    while let Some(entry) = entries.next_entry().await? {
-        if !entry.file_name().to_string_lossy().ends_with(&suffix) {
-            continue;
-        }
-
-        let path = entry.path();
-        let contents = tokio::fs::read_to_string(&path).await?;
-        let (header_line, rest) = contents.split_once('\n').unwrap_or((&contents, ""));
-        let mut header: Value = serde_json::from_str(header_line)
-            .with_context(|| format!("invalid Pi session header in {}", path.display()))?;
-        if header.get("type").and_then(Value::as_str) != Some("session") {
-            continue;
-        }
-        header["cwd"] = Value::String(cwd.to_string());
-        let mut updated = serde_json::to_string(&header)?;
-        if !rest.is_empty() || contents.ends_with('\n') {
-            updated.push('\n');
-            updated.push_str(rest);
-        }
-        tokio::fs::write(path, updated).await?;
-    }
-    Ok(())
-}
-
 /// Starts one persistent Pi RPC child for a Dray session.
 ///
-/// Pi's own session file is placed in a stable Dray-owned directory so a
-/// session can still resume after its worktree is relocated or removed. The
-/// user configuration and extensions remain the normal `~/.pi/agent` ones.
+/// Local Pi sessions use a stable Dray-owned directory. Cloud sessions use a
+/// private Docker volume, seeded from the host `~/.pi/agent` setup.
 pub async fn init(
     session_id: &str,
     model: &Model,
@@ -98,61 +58,79 @@ pub async fn init(
     _permission_mode: crate::events::ApprovalPolicy,
     cwd: &str,
     session_cwd: &str,
-    _worktree_name: Option<&str>,
-    _is_new_session: bool,
+    cloud_name: Option<&str>,
+    is_new_session: bool,
     fork_from: Option<&str>,
     app: &AppHandle,
 ) -> Result<Session> {
-    let app_dir = store::get_home_app_dir().await?;
-    let session_dir = app_dir.join("pi-sessions");
-    tokio::fs::create_dir_all(&session_dir).await?;
-
-    let session_dir = session_dir
-        .to_str()
-        .context("Pi session directory is not valid UTF-8")?;
+    let cloud = cloud_name.is_some();
+    let session_dir = if cloud {
+        "/home/agent/.pi/agent/sessions".to_string()
+    } else {
+        let app_dir = store::get_home_app_dir().await?;
+        let session_dir = app_dir.join("pi-sessions");
+        tokio::fs::create_dir_all(&session_dir).await?;
+        session_dir
+            .to_str()
+            .context("Pi session directory is not valid UTF-8")?
+            .to_string()
+    };
     let mut args = vec![
-        "--mode",
-        "rpc",
-        "--session-dir",
+        "--mode".to_string(),
+        "rpc".to_string(),
+        "--session-dir".to_string(),
         session_dir,
         // A desktop session is already an explicit user action. This lets Pi
         // load project-local extensions and context files without an invisible
         // trust prompt in its headless RPC mode.
-        "--approve",
+        "--approve".to_string(),
     ];
     if let Some(pi_model) = &model.pi_model {
-        args.push("--provider");
-        args.push(&pi_model.provider);
-        args.push("--model");
-        args.push(&pi_model.id);
+        args.push("--provider".to_string());
+        args.push(pi_model.provider.clone());
+        args.push("--model".to_string());
+        args.push(pi_model.id.clone());
     }
     if let Some(effort) = effort {
-        args.push("--thinking");
-        args.push(effort.as_arg());
+        args.push("--thinking".to_string());
+        args.push(effort.as_arg().to_string());
     }
     if let Some(parent) = fork_from {
         // Pi performs the lazy fork while opening RPC mode and keeps the new
         // transcript under the id Dray already assigned to this session.
-        args.extend(["--fork", parent, "--session-id", session_id]);
+        args.extend([
+            "--fork".to_string(),
+            parent.to_string(),
+            "--session-id".to_string(),
+            session_id.to_string(),
+        ]);
     } else {
         // The same form creates a missing session and resumes an existing one.
-        args.extend(["--session-id", session_id]);
+        args.extend(["--session-id".to_string(), session_id.to_string()]);
     }
 
-    let mut command = crate::binpath::pi_command().await;
-    if let Some(home) = dirs::home_dir() {
-        command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
-    }
-    if let Some(endpoint) = crate::orchestration::child_endpoint() {
-        command.env("DRAY_ENDPOINT", endpoint);
-    }
+    let mut command = if let Some(name) = cloud_name {
+        crate::sandbox::pi_command(session_id, name, &args).await?
+    } else {
+        let mut command = crate::binpath::pi_command().await;
+        if let Some(home) = dirs::home_dir() {
+            command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
+        }
+        if let Some(endpoint) = crate::orchestration::child_endpoint() {
+            command.env("DRAY_ENDPOINT", endpoint);
+        }
+        command.args(&args);
+        command
+    };
 
-    let mut child = command
-        .args(args)
+    let child = command
         .current_dir(cwd)
         .env("DRAY_SESSION_ID", session_id)
-        .env("PATH", crate::binpath::agent_path())
-        .stdin(Stdio::piped())
+        .stdin(Stdio::piped());
+    if !cloud {
+        child.env("PATH", crate::binpath::agent_path());
+    }
+    let mut child = child
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
@@ -174,7 +152,7 @@ pub async fn init(
     let stdout_status = status.clone();
     let stopped = Arc::new(AtomicBool::new(false));
     let stdout_stopped = stopped.clone();
-    let seq_start = if _is_new_session {
+    let seq_start = if is_new_session {
         0
     } else {
         next_seq_by_session_id(session_id).await?
@@ -225,6 +203,7 @@ pub async fn init(
         child,
         stdin,
         harness: Pi,
+        cloud,
         cwd: session_cwd.to_string(),
         model: model.id,
         pi_model: model.pi_model.clone(),

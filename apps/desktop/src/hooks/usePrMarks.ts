@@ -89,9 +89,9 @@ function marksByBranch(prs: PrMark[]): Map<string, PrMark> {
 /// One query per repo rather than one per session: `gh` costs the better part
 /// of a second, so a spawn per visible row would make the sidebar the most
 /// expensive thing in the app. The frontend does the matching, because which
-/// branch a session lands on is its own rule — `sessionBranch` rebuilds a
-/// worktree session's from its worktree name — and the backend answering a map
-/// would be a second copy of it.
+/// branch a session lands on is its own rule — `sessionBranch` provides the
+/// recorded branch — and the backend answering a map would be a second copy
+/// of it.
 ///
 /// Failure is silent — no `gh`, not a GitHub repo, logged out. The mark is
 /// decoration on a list that works without it, so there is nothing here to
@@ -250,7 +250,7 @@ export function usePrMarks(repoPaths: string[]) {
   // it. Only on disagreement, or every panel poll would double as a marks one.
   //
   // The repo is found by prefix: the panel hands back a session cwd, which
-  // for a worktree session sits under the repo root this is keyed by. Longest
+  // for a cloud session sits under the repo root this is keyed by. Longest
   // match, so a repo nested inside another resolves to itself.
   useEffect(
     () =>
@@ -326,7 +326,7 @@ export function usePrMarks(repoPaths: string[]) {
     /// the `load(false)` that already runs on arriving at a project picks up
     /// the truth. Every repo rather than the one that changed, because the
     /// caller holds a session cwd where this is keyed by repo root — the two
-    /// differ for a worktree session — and a write is rare enough that the
+    /// differ for a cloud session — and a write is rare enough that the
     /// worst case is one extra `gh` on the next project switch.
     ///
     /// The bump is what makes the clear stick. Without it a read already in

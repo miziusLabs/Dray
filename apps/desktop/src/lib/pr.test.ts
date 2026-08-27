@@ -49,50 +49,31 @@ const check = (state: PrCheck["state"]): PrCheck => ({
 });
 
 describe("sessionBranch", () => {
-  it("uses the recorded source branch for a source-branch worktree", () => {
-    expect(sessionBranch({ branch: "main", worktreeName: "calm-owl" })).toBe("main");
+  it("uses the recorded source branch for a source-branch cloud", () => {
+    expect(sessionBranch({ branch: "main", cloudName: "calm-owl" })).toBe("main");
   });
 
   it("uses the checked-out branch otherwise", () => {
-    expect(sessionBranch({ branch: "feature", worktreeName: null })).toBe("feature");
-    expect(sessionBranch({ branch: null, worktreeName: null })).toBeNull();
-  });
-
-  // A settled session whose worktree was deleted keeps the branch its work is
-  // on and loses only the name of the directory it ran in. The PR outlives
-  // both, so the tab has to survive the tidy-up.
-  it("keeps naming the PR's branch after the worktree is deleted", () => {
-    expect(sessionBranch({ branch: "calm-owl", worktreeName: null })).toBe("calm-owl");
+    expect(sessionBranch({ branch: "feature", cloudName: null })).toBe("feature");
+    expect(sessionBranch({ branch: null, cloudName: null })).toBeNull();
   });
 
   // Git's live reading wins over the branch recorded at creation. Anything
   // checking out another branch inside the tree should update the PR lookup.
   it("lets git's own reading of HEAD outrank the guess", () => {
     expect(
-      sessionBranch({ branch: "main", worktreeName: "calm-owl" }, "fix/thing"),
+      sessionBranch({ branch: "main", cloudName: "calm-owl" }, "fix/thing"),
     ).toBe("fix/thing");
-    expect(sessionBranch({ branch: "feature", worktreeName: null }, "fix/thing")).toBe(
+    expect(sessionBranch({ branch: "feature", cloudName: null }, "fix/thing")).toBe(
       "fix/thing",
     );
-  });
-
-  // The relocated session runs in the project root, so HEAD there is whatever
-  // that shared checkout happens to be on — `main`, most of the time. Reading
-  // it took the PR tab away the moment a tree was settled.
-  it("ignores the shared checkout's HEAD once the worktree is gone", () => {
-    expect(
-      sessionBranch(
-        { branch: "calm-owl", worktreeName: null, worktreeRemoved: true },
-        "main",
-      ),
-    ).toBe("calm-owl");
   });
 
   // The read is per-session and lands a frame late, and a non-repo has no
   // branch at all — so both fall back rather than drawing nothing.
   it("falls back while there is no reading to use", () => {
-    expect(sessionBranch({ branch: "main", worktreeName: "calm-owl" }, null)).toBe("main");
-    expect(sessionBranch({ branch: "feature", worktreeName: null }, undefined)).toBe(
+    expect(sessionBranch({ branch: "main", cloudName: "calm-owl" }, null)).toBe("main");
+    expect(sessionBranch({ branch: "feature", cloudName: null }, undefined)).toBe(
       "feature",
     );
   });

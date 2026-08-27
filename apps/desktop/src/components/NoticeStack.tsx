@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Check, Loader2 } from "lucide-react";
-
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
@@ -28,7 +26,6 @@ type NoticeStackProps = {
   /// its PR tab. Selecting alone would land the reader on a transcript that
   /// says nothing about the pull request the card is about.
   onOpenPr: (sessionId: string) => void;
-  onDeleteWorktree: (sessionId: string) => Promise<boolean>;
 };
 
 /// What the button promises. Named for what the reader will do there rather
@@ -37,7 +34,6 @@ type NoticeStackProps = {
 const ACTION: Record<NoticeKind, string> = {
   completed: "View",
   asking: "Answer",
-  worktree: "Delete",
   // Not "Merge". What the reader does there is merge it, which is what this
   // label rule asks for — but the app's own merge button arms a confirm before
   // it lands one, and a card button that skipped straight past that would be
@@ -49,13 +45,9 @@ const ACTION: Record<NoticeKind, string> = {
 /// The bar's colour, matching the rail mark the row will be wearing when the
 /// reader gets there.
 ///
-/// The worktree card has no rail to match — nothing in the sidebar is waiting
-/// — so its bar is the destructive colour instead, and reads as what it is: the
-/// time left on an offer to delete something.
 const BAR: Record<NoticeKind, string> = {
   completed: "bg-emerald-500/70",
   asking: "bg-accent-command/70",
-  worktree: "bg-destructive/70",
   // The colour of the glyph the row is wearing, which is the rule the other
   // bars follow — GitHub's emerald for an open pull request. It shares that
   // with `completed`, and the two are told apart by what the card says rather
@@ -65,17 +57,11 @@ const BAR: Record<NoticeKind, string> = {
   pr: "bg-emerald-500/70",
 };
 
-/// How long the card lingers after its work is done, to say so. Long enough to
-/// read one word, short enough that nobody waits on it.
-const CONFIRM_MS = 1400;
-
 /// Wraps a button in the tooltip that carries its accelerator, and only where
 /// there is one to carry.
 ///
-/// The caps used to sit *in* the buttons. That reads well on a card holding one
-/// of them and badly on the worktree card holding two — the row grew wider than
-/// the sentence above it, and a card meant to sit in a corner stopped fitting
-/// in one. A tooltip is where this app puts shortcuts anyway.
+/// The caps used to sit *in* the buttons. A tooltip is where this app puts
+/// shortcuts anyway.
 ///
 /// `keys` empty means no tooltip at all rather than an empty one: only the top
 /// card answers to the keys, and everywhere else the tooltip would repeat the
@@ -108,27 +94,22 @@ function WithShortcut({
 
 /// One card.
 ///
-/// Its own component because of `phase`: a card that has been acted on has to
-/// keep saying so for a moment, and state per card cannot live in the map that
-/// renders them.
+/// Its own component because each card owns the countdown animation while it
+/// is hovered.
 function NoticeCard({
   notice,
   isNext,
   onTake,
-  onDeleteWorktree,
 }: {
   notice: Notice;
   isNext: boolean;
   onTake: () => void;
-  onDeleteWorktree: () => Promise<boolean>;
 }) {
-  const [phase, setPhase] = useState<"idle" | "working" | "done">("idle");
   const [hovered, setHovered] = useState(false);
-  const worktree = notice.kind === "worktree";
 
   const bar = useRef<HTMLSpanElement>(null);
   const timer = useRef<Animation | null>(null);
-  const duration = phase === "done" ? CONFIRM_MS : NOTICE_TTL_MS[notice.kind];
+  const duration = NOTICE_TTL_MS[notice.kind];
 
   // The countdown, and the thing that ends it: one `Animation` object owning
   // both the bar and the dismissal, so there is still exactly one clock.
@@ -159,41 +140,12 @@ function NoticeCard({
     };
   }, [duration, notice.sessionId]);
 
-  // Nothing runs down while the reader is on the card or while the git work is
-  // in flight. `done` deliberately keeps running under the cursor: the reader
-  // just clicked this, and the pause exists to protect a button they are still
-  // reaching for — past that press there is no target left to protect, and a
-  // card waiting for the mouse to leave reads as stuck.
-  const frozen = phase === "working" || (hovered && phase === "idle");
+  // Hovering pauses the countdown so a notice can be read without losing it.
+  const frozen = hovered;
   useEffect(() => {
     if (frozen) timer.current?.pause();
     else timer.current?.play();
   }, [frozen, duration]);
-
-  const confirm = async () => {
-    setPhase("working");
-    if (await onDeleteWorktree()) {
-      setPhase("done");
-      return;
-    }
-    // The error banner already carries the reason, so the card leaves rather
-    // than sitting there implying the deletion is still going to happen.
-    dismissNotice(notice.sessionId, notice.kind);
-  };
-
-  // ⌘D deletes without the trip to a 40px button, which is the whole point of
-  // the card. Bound here rather than in the stack because pressing it has to
-  // run the same `confirm` the button does — the "Deleted" state is this
-  // card's, and a key that reached past it would delete the worktree while the
-  // card sat there still offering to.
-  //
-  // A key of its own rather than more meaning on ⌘G: one chord that sometimes
-  // navigates and sometimes destroys is the shape that burns someone once.
-  // Guarded on `isNext` so a stack of cards has exactly one target, the same
-  // one ⌘G has, and on `idle` so a repeat press can't land mid-flight.
-  useHotkey("d", () => {
-    if (worktree && isNext && phase === "idle") void confirm();
-  });
 
   return (
     <Alert
@@ -235,65 +187,18 @@ function NoticeCard({
       )}
 
       <span className="flex shrink-0 items-center gap-1">
-        {/* Skip is the answer the card gives itself when the bar runs out, so
-            it is here to be *said* rather than waited for — and it holds the
-            keycap, which keeps ⌘G non-destructive on every card in the stack.
-            It goes once the deletion has happened: there is nothing left to
-            skip, and a live button beside "Deleted" invites a second thought
-            about a directory that is already gone. */}
-        {worktree && phase !== "done" && (
-          <WithShortcut keys={isNext ? ["G"] : []}>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-muted-foreground"
-              disabled={phase === "working"}
-              onClick={() => dismissNotice(notice.sessionId, notice.kind)}
-            >
-              Skip
-            </Button>
-          </WithShortcut>
-        )}
-
         {/* `default` rather than `secondary`: the card is itself a raised
             surface, so a secondary fill on top of it is one shade off the thing
             it sits on and stops reading as a control at all. `pr-1` because the
             keycaps carry their own inset, which turns the size's own right
             padding into a gap. */}
-        <WithShortcut keys={isNext && phase !== "done" ? [worktree ? "D" : "G"] : []}>
+        <WithShortcut keys={isNext ? ["G"] : []}>
         <Button
           size="xs"
-          className={cn(
-            "shrink-0",
-            // Destructive fill for the one card whose button destroys. On a
-            // card the reader did not ask for, it is the difference between a
-            // button they read and one they click past.
-            worktree && "bg-destructive text-white hover:bg-destructive/90",
-            // Full strength while the git work runs: the spinner and the verb
-            // are the state, and dimming them makes the one live thing on the
-            // card the hardest part of it to read.
-            "disabled:opacity-100",
-            // Done is a statement, not a control. It keeps the fill so the card
-            // doesn't reflow into a different shape at the moment the eye is on
-            // it, and drops the pointer so nothing invites a second press.
-            phase === "done" && "pointer-events-none",
-          )}
-          disabled={phase === "working"}
-          onClick={worktree ? () => void confirm() : onTake}
+          className="shrink-0"
+          onClick={onTake}
         >
-          {phase === "done" ? (
-            <>
-              <Check className="size-3.5" />
-              Deleted
-            </>
-          ) : phase === "working" ? (
-            <>
-              <Loader2 className="size-3.5 animate-spin" />
-              Deleting…
-            </>
-          ) : (
-            ACTION[notice.kind]
-          )}
+          {ACTION[notice.kind]}
         </Button>
         </WithShortcut>
       </span>
@@ -317,8 +222,7 @@ function NoticeCard({
 /// and no icon: the sidebar rail is already marking the row, so a card that
 /// repeats the name spends its width saying what the next glance says anyway.
 /// What is left is the one fact that isn't on screen anywhere else — *what* is
-/// wanted — and a button to go and do it. The worktree card is the exception
-/// and says why in [useNotices](../hooks/useNotices.ts).
+/// wanted — and a button to go and do it.
 ///
 /// **The buttons are the controls, and they are the only ones.** An earlier
 /// pass made the whole card clickable with a chevron for a hint, and it was not
@@ -326,12 +230,9 @@ function NoticeCard({
 /// you read and leave alone. There is no dismiss button on the navigating kinds
 /// either — those are already leaving on their own, and an X to make one leave
 /// slightly sooner is a second target competing with the one that matters. The
-/// worktree card earns its Skip by being a *question*: leaving is a real answer
-/// there, and an answer you can only give by waiting is one you cannot give.
 export default function NoticeStack({
   onSelect,
   onOpenPr,
-  onDeleteWorktree,
 }: NoticeStackProps) {
   const notices = useNotices();
 
@@ -342,19 +243,14 @@ export default function NoticeStack({
   const next = notices[0] ?? null;
 
   // Where a card leads, which is the same for the key and for the button. The
-  // navigating kinds go somewhere and a worktree card only leaves: its Skip is
-  // what this lands on, which is what keeps the key below non-destructive.
+  // The key opens the session or its PR, matching the button on the card.
   const take = (notice: Notice) => {
     dismissNotice(notice.sessionId, notice.kind);
     if (notice.kind === "pr") onOpenPr(notice.sessionId);
-    else if (notice.kind !== "worktree") onSelect(notice.sessionId);
+    else onSelect(notice.sessionId);
   };
 
-  // ⌘G takes the navigating kinds — a session, or a session and its PR tab —
-  // and *skips* a worktree card, so the key never destroys anything. That is
-  // the whole reason the worktree card has a Skip button to hang it on: a
-  // shortcut that usually navigates but sometimes deletes a directory is the
-  // shape that burns someone exactly once.
+  // ⌘G takes the navigating kinds — a session, or a session and its PR tab.
   //
   // Registered here rather than in `App` so it exists only while a card does —
   // ⌘G with nothing raised should stay free for whatever wants it later.
@@ -376,7 +272,6 @@ export default function NoticeStack({
           notice={notice}
           isNext={notice === next}
           onTake={() => take(notice)}
-          onDeleteWorktree={() => onDeleteWorktree(notice.sessionId)}
         />
       ))}
     </div>

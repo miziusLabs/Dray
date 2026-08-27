@@ -99,9 +99,6 @@ function AlertDialogDescription({
 /// `destructive` takes a solid red fill rather than the button's own
 /// `destructive` variant, which is a tint — that one is for a control sitting
 /// among others, and this is the one thing in the dialog that does something.
-/// The same solid red the worktree notice's button uses, so the two ways to
-/// reach a deletion look like the same action.
-///
 /// It is the caller's to set. Both of this app's dialogs happen to be
 /// destructive, but a default of red would quietly colour the first one that
 /// isn't.

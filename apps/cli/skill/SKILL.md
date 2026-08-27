@@ -1,6 +1,6 @@
 ---
 name: dray
-description: Create, list and message Dray sessions from the command line. Use when the user asks to work on several things at once — a batch of issues, tickets, or tasks — and each deserves its own agent, its own branch, and its own place in the sidebar. Also for checking on sessions you started, and for sending a message or summary between sessions.
+description: Create, list and message Dray Cloud Sessions from the command line. Use when the user asks to work on several things at once — a batch of issues, tickets, or tasks — and each deserves its own agent, its own sandbox, and its own place in the sidebar. Also for checking on sessions you started, and for sending a message or summary between sessions.
 ---
 
 # Dray sessions
@@ -40,21 +40,18 @@ Options:
 
 | flag | meaning |
 |---|---|
-| `--project <path>` | Repo to run in. Defaults to the current session's, or the repo you are in. |
+| `--project <path>` | Project metadata for grouping and branch context. Defaults to the current session's project. The project is not copied into the Cloud sandbox. |
 | `--effort <level>` | `low`, `medium`, `high`, `xhigh`, `max`. Defaults to the current session's. |
-| `--from <session\|ref>` | Start the worktree on existing work instead of `origin/<default>`. |
+| `--from <session\|branch>` | Base the Cloud's branch instruction on a session or branch name. |
 
-### Each session gets its own worktree
+### Each session gets its own Cloud sandbox
 
-Every session runs in its own git worktree on its own branch, and there is no way
-to turn that off. It is what makes running them at once safe — without it, three
-agents write to one checkout and overwrite each other.
+Every session runs in its own Docker sandbox backed by a private volume, and
+there is no way to turn that isolation off. The sandbox starts empty: Dray does
+not clone, mount, or otherwise include a GitHub repository. The selected project
+and branch are metadata used to group the session and brief the agent.
 
-By default the worktree branches from `origin/<default>`, **not** from the branch
-you are on. So a session created plainly cannot see unpushed work — yours or
-another session's.
-
-### Basing a session on existing work
+### Giving a Cloud a branch brief
 
 ```bash
 dray new --from <session-id> "Review the work on this branch and report what you find"
@@ -62,30 +59,22 @@ dray new --from feature/login "Write tests for the login flow on this branch"
 ```
 
 `--from` takes a **session id** — the same id `dray ls` prints and `dray send`
-takes — or a branch, tag or commit. Naming a session is the usual case: you have
-its id already, and you do not have to know how Dray names its branches.
+takes — or a branch name. Naming a session uses the branch recorded for that
+session as the base instruction; the Cloud still starts with no repository.
 
-This is what makes review possible. Spawn another Pi session, point it at yours
-with `--from`, and it gets its own checkout
-of the same commits — so it collides with nobody while it reads.
+When the app's **Create new Cloud branches** setting is enabled, the initial
+prompt is extended with:
 
-Three things to know:
+```text
+Work on branch `cloud/<id>` based on `<base>`.
+```
 
-- **Committed work only.** The new worktree starts at a commit. Anything the
-  other session has changed but not committed is *not* there. If you are asking
-  for a review of work in progress, commit it first — or say plainly in your
-  prompt what is missing, or the reviewer will report on a tree that lacks the
-  very change the user is looking at.
-- **A new branch, not a shared one.** The session gets its own `<name>` branch
-  starting at that commit. It never checks out the branch you named, so it
-  cannot commit onto your work or move it.
-- **Not a shared checkout.** There is no way to run two sessions in one
-  directory, and `--from` is not it. Two agents writing to one checkout overwrite
-  each other, and the changes panel cannot tell them apart.
+The agent may then use the authenticated GitHub CLI to fetch or clone a
+repository only when the task explicitly asks for it. Dray itself never clones
+or mounts the selected project into a Cloud sandbox.
 
-The line `dray new` prints says what it resolved: `Started "…" in worktree
-calm-owl, based on brisk-jade`. Worth reading back when you passed a
-session id, since the branch that id resolved to is something only the app knew.
+The line `dray new` prints says what it resolved: `Started "…" in Cloud
+<id>, based on <base>`.
 
 ## Listing sessions
 

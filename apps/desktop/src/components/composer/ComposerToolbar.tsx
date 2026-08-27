@@ -6,7 +6,7 @@ import ContextMeter from "@/components/composer/ContextMeter";
 import ModelSelector from "@/components/composer/ModelSelector";
 import PermissionSelector from "@/components/composer/PermissionSelector";
 import ProjectSelector from "@/components/composer/ProjectSelector";
-import WorktreeToggle from "@/components/composer/WorktreeToggle";
+import CloudToggle from "@/components/composer/CloudToggle";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -46,8 +46,8 @@ export type ComposerToolbarProps = {
   onConfirmBranchSwitch: (stash: boolean) => void;
   onCancelBranchSwitch: () => void;
 
-  useWorktree: boolean;
-  onToggleWorktree: () => void;
+  useCloud: boolean;
+  onToggleCloud: () => void;
 
   /// Opens the file picker. The attachments themselves are held in a
   /// module-level store keyed by session, not passed through here — this row is
@@ -65,7 +65,7 @@ export type ComposerToolbarProps = {
 };
 
 /// The composer's control row. Model and permission change a running session in
-/// place; project, branch, and worktree decide where it starts and disappear
+/// place; project, branch, and cloud decide where it starts and disappear
 /// once it has — a control that can never be used is noise, and the session
 /// header already shows the project and branch. Its own spacing from the card is
 /// the caller's, since only the caller knows which side of it the row sits on.
@@ -88,8 +88,8 @@ export default function ComposerToolbar({
   pendingBranch,
   onConfirmBranchSwitch,
   onCancelBranchSwitch,
-  useWorktree,
-  onToggleWorktree,
+  useCloud,
+  onToggleCloud,
   onAttach,
   contextUsage,
   isNewSession,
@@ -131,44 +131,40 @@ export default function ComposerToolbar({
 
       {isNewSession && (
         <>
-          <ProjectSelector
-            projects={projects}
-            value={projectPath}
-            onSelect={onSelectProject}
-            onAttach={onAttachProject}
-          />
+          {!useCloud && (
+            <ProjectSelector
+              projects={projects}
+              value={projectPath}
+              onSelect={onSelectProject}
+              onAttach={onAttachProject}
+            />
+          )}
 
-          {/* Both describe a repo, so neither means anything until one is
-              picked. The branch selector stays visible when worktree mode is
-              enabled so it continues to show the worktree's source branch. */}
+          {/* Cloud is available even before a local project is selected. A
+              project, when selected, supplies branch metadata only; it is never
+              mounted into the Docker sandbox. */}
+          <CloudToggle on={useCloud} onToggle={onToggleCloud} />
+
           {projectPath && (
-            <>
-              <WorktreeToggle on={useWorktree} onToggle={onToggleWorktree} />
-
-              {/* Relative, so the switch popover anchors to the picker rather
-                  than to the window. Keeping the label inside this stable
-                  wrapper prevents the selector from being remounted when the
-                  worktree mode changes. */}
-              <div className="relative flex min-w-0 items-center">
-                {useWorktree && (
-                  <span className="text-ui text-muted-foreground/60">from</span>
-                )}
-                <BranchSelector
-                  key="branch-selector"
-                  branches={branches}
-                  value={branch}
-                  onSelect={onSelectBranch}
-                  disabled={pendingBranch !== null}
-                />
-                <BranchSwitchDialog
-                  key="branch-switch-dialog"
-                  target={pendingBranch}
-                  dirty={branches?.dirty ?? 0}
-                  onConfirm={onConfirmBranchSwitch}
-                  onCancel={onCancelBranchSwitch}
-                />
-              </div>
-            </>
+            <div className="relative flex min-w-0 items-center">
+              {useCloud && (
+                <span className="text-ui text-muted-foreground/60">from</span>
+              )}
+              <BranchSelector
+                key="branch-selector"
+                branches={branches}
+                value={branch}
+                onSelect={onSelectBranch}
+                disabled={pendingBranch !== null}
+              />
+              <BranchSwitchDialog
+                key="branch-switch-dialog"
+                target={pendingBranch}
+                dirty={branches?.dirty ?? 0}
+                onConfirm={onConfirmBranchSwitch}
+                onCancel={onCancelBranchSwitch}
+              />
+            </div>
           )}
         </>
       )}

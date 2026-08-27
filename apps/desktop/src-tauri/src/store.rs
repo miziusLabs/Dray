@@ -41,21 +41,16 @@ pub struct SessionIndexItem {
     pub session_id: String,
     pub harness: Harness,
     /// Where the agent actually runs. Equals `project_path` for a normal
-    /// session; points inside `~/.mizius/worktrees/<id>` for a worktree one.
+    /// session; points inside `~/.dray/cloud/<id>` for a Cloud one.
     pub cwd: String,
-    /// Repo root — the grouping key, so worktree sessions still list under
-    /// their project rather than each becoming a project of their own.
+    /// Project metadata used for sidebar grouping; a Cloud does not mount or
+    /// clone this project.
     pub project_path: String,
     pub branch: Option<String>,
-    /// `Some` marks this a worktree session. The branch is either the source
-    /// branch or a generated branch named exactly like the worktree UUID.
-    pub worktree_name: Option<String>,
-    /// This session ran in a worktree and that tree has since been deleted, so
-    /// `cwd` is the project root it was moved back to. The distinction is what
-    /// keeps `branch` above authoritative: the shared checkout's HEAD describes
-    /// whatever else is going on in it, not this session's work.
+    /// `Some` marks this a Cloud session. Cloud sessions use a private Docker
+    /// volume identified by this name; the host project is never mounted.
     #[serde(default)]
-    pub worktree_removed: bool,
+    pub cloud_name: Option<String>,
     pub title: String,
     /// Remembered per session so switching between sessions restores the model
     /// the user last picked instead of resetting to a default.
@@ -247,7 +242,7 @@ impl SessionIndexItem {
         harness: Harness,
         cwd: &str,
         project_path: &str,
-        worktree_name: Option<&str>,
+        cloud_name: Option<&str>,
         branch: Option<&str>,
         first_prompt: &str,
         model: ModelId,
@@ -262,12 +257,11 @@ impl SessionIndexItem {
             harness,
             cwd: cwd.to_string(),
             project_path: project_path.to_string(),
-            // The caller knows the branch actually used: source mode records
-            // the source branch, while new-branch mode records the generated
-            // UUID. Nothing is derived from the worktree name here.
+            // The caller knows the branch metadata: source mode records the
+            // selected branch, while Cloud new-branch mode records the target
+            // branch instruction. Nothing is derived from the Cloud name here.
             branch: branch.map(str::to_string),
-            worktree_name: worktree_name.map(str::to_string),
-            worktree_removed: false,
+            cloud_name: cloud_name.map(str::to_string),
             title: title_from_prompt(first_prompt),
             model,
             pi_model: None,
@@ -287,37 +281,27 @@ impl SessionIndexItem {
     /// is inherited, since a fork continues the same conversation; everything
     /// describing this session's own history starts fresh.
     ///
-    /// `worktree_name` is what the two fork flavours differ on. Forking in place
-    /// leaves it `None` even when the parent is a worktree session: the field
-    /// means "this session owns that tree", and settling or deleting the fork
-    /// would otherwise pull the directory out from under the parent still
-    /// working in it. `cwd` and `branch` are inherited either way, so the fork
-    /// still runs in the parent's tree and its PR tab still finds the branch.
-    pub fn fork(&self, session_id: &str, worktree_name: Option<&str>) -> Self {
+    /// `cloud_name` is what the two fork flavours differ on. Forking in place
+    /// leaves it `None`; a Cloud fork gets a private Docker volume, while an
+    /// in-place fork continues using the parent's local directory.
+    pub fn fork(&self, session_id: &str, cloud_name: Option<&str>) -> Self {
         let now = now_rfc3339();
 
         Self {
             session_id: session_id.to_string(),
             harness: self.harness,
-            cwd: match worktree_name {
-                Some(name) => worktree_path(name),
+            cwd: match cloud_name {
+                Some(name) => cloud_path(name),
                 None => self.cwd.clone(),
             },
             project_path: self.project_path.clone(),
-            // A worktree fork always gets its own generated branch, whose name
-            // is exactly the worktree UUID rather than a prefixed variant.
-            branch: match worktree_name {
-                Some(name) => Some(name.to_string()),
+            // A Cloud fork gets a private branch instruction on its first send;
+            // no local branch is created because the Cloud has no repository.
+            branch: match cloud_name {
+                Some(name) => Some(format!("cloud/{name}")),
                 None => self.branch.clone(),
             },
-            worktree_name: worktree_name.map(str::to_string),
-            // Inherited, because this decides whether the recorded `branch` or
-            // git's own HEAD is believed. A fork in place of a session whose
-            // tree was removed sits in the shared checkout exactly as its parent
-            // does, so HEAD there names whatever else is going on in it — the
-            // same reason the parent carries the flag. A fork into a new tree
-            // has one of its own and reads HEAD straight.
-            worktree_removed: worktree_name.is_none() && self.worktree_removed,
+            cloud_name: cloud_name.map(str::to_string),
             title: fork_title(&self.title),
             model: self.model,
             pi_model: self.pi_model.clone(),
@@ -366,82 +350,52 @@ fn fork_title(parent: &str) -> String {
     format!("{}…{SUFFIX}", truncated.trim_end())
 }
 
-/// A worktree id no tree and no session has claimed. Wider than checking disk
-/// alone on purpose, and every caller wants the wider one: a
-/// fork's tree is not created until its first send, so its name lives only in the
-/// index until then. Resolving against disk alone lets anything else drawing a
-/// name — another fork, or an ordinary new worktree session — take one a pending
-/// fork is already holding, and that fork's `-w` then fails against the tree the
-/// other one made. Permanently, since the name is on its index entry by then and
-/// every retry redraws the same one.
-///
-/// Only 16³ names exist, so this is not the vanishing odds it looks like.
-pub async fn resolve_unclaimed_worktree_name(
+/// A Cloud id no other session has claimed. The id names the Docker volume and
+/// the empty host-side workspace used by local UI APIs.
+pub async fn resolve_unclaimed_cloud_name(
     _project_path: &str,
     _requested: Option<&str>,
 ) -> Result<String> {
     let claimed: Vec<String> = list_session_index_items()
         .await?
         .into_iter()
-        .filter_map(|i| i.worktree_name)
+        .filter_map(|i| i.cloud_name)
         .collect();
 
     for _ in 0..16 {
-        let id = random_worktree_id();
-        if !claimed.contains(&id) && !PathBuf::from(worktree_path(&id)).exists() {
+        let id = random_cloud_id();
+        if !claimed.contains(&id) && !PathBuf::from(cloud_path(&id)).exists() {
             return Ok(id);
         }
     }
 
-    bail!("could not find an unused worktree id after 16 attempts")
+    bail!("could not find an unused cloud id after 16 attempts")
 }
 
-/// The branch a session's work lands on — the reading `--from <session-id>`
-/// resolves through, and the same one `sessionBranch` in `pr.ts` takes.
-///
-/// One rule, stated twice because it has two readers and neither can call the
-/// other: the PR tab needs it in the frontend, and basing a worktree on another
-/// session's work needs it here. What it must not become is two *different*
-/// rules — a `--from` that starts a reviewer on one branch while the header
-/// beside it names another is a disagreement nothing on screen could explain.
-///
-/// `observed` is git's own reading of HEAD, and it wins wherever the session
-/// still has a checkout of its own: the recorded branch is a guess made at
-/// creation, and a checkout inside the tree moves HEAD without touching it.
-///
-/// `worktree_removed` is the one case it loses. A relocated session runs in the
-/// project root, a checkout shared with every other session and with the
-/// reader's own editor, so HEAD there answers "what is this checkout on" and
-/// never "where did this session's work land".
-///
-/// The guess itself is just `branch`, with no branch-name rebuild beside it:
-/// [`SessionIndexItem::new`] and [`SessionIndexItem::fork`] both write the
-/// actual branch into the field at creation, so the record already holds it.
-/// `pr.ts` falls back to the recorded value while its git reading is pending.
+/// The branch a session's work lands on. Cloud sessions have no checkout, so
+/// their recorded branch is always the value supplied to the session prompt;
+/// local sessions prefer Git's current branch while it is available.
 pub fn session_branch(item: &SessionIndexItem, observed: Option<&str>) -> Option<String> {
-    if item.worktree_removed {
-        return item.branch.clone();
-    }
-
     observed
         .filter(|b| !b.is_empty())
         .map(str::to_string)
         .or_else(|| item.branch.clone())
 }
 
-/// Worktrees live in a shared, private directory outside project checkouts.
-pub fn worktree_path(id: &str) -> String {
+/// Empty host-side workspace paths are kept separate from project checkouts.
+/// They are not mounted into Docker; Cloud state lives in Docker volumes.
+pub fn cloud_path(id: &str) -> String {
     dirs::home_dir()
-        .expect("a home directory is required for worktrees")
-        .join(".mizius")
-        .join("worktrees")
+        .expect("a home directory is required for Clouds")
+        .join(".dray")
+        .join("cloud")
         .join(id)
         .to_string_lossy()
         .into_owned()
 }
 
-/// A worktree id is a random UUID-4.
-fn random_worktree_id() -> String {
+/// A cloud id is a random UUID-4.
+fn random_cloud_id() -> String {
     Uuid::new_v4().to_string()
 }
 
@@ -609,97 +563,6 @@ pub async fn set_session_status(
     write_session_index(&sessions).await?;
 
     Ok(Some(updated))
-}
-
-/// Moves a session out of the worktree it was running in and back to its
-/// project root, which is what makes it survive the directory being deleted.
-///
-/// `cwd` is the load-bearing field: `send_msg` reads it off the index rather
-/// than trusting its caller, so a session left pointing at a deleted directory
-/// would fail to spawn on the next prompt. The CLI meets us here — it resumes
-/// a session whose worktree is gone in the launch directory and clears its own
-/// worktree binding — so after this write both sides agree the session lives
-/// at the project root.
-///
-/// `worktree_name` goes and `branch` stays, and the second half is the one
-/// worth stating. `branch` holds the branch the work landed on, written there
-/// by `new` — not the base it forked from when a new branch was requested — so
-/// it is exactly what the PR lookup needs and the only record of it
-/// left once the tree and the local branch are gone. `sessionBranch` falls
-/// back to it when there is no worktree name, which is what keeps the PR tab
-/// on a settled session pointing at that session's own PR. Clearing it here
-/// took the tab away from every worktree session the moment it was tidied up.
-///
-/// `worktree_removed` is what makes that fallback reachable. The PR tab prefers
-/// git's own reading of HEAD over anything the index remembers, and after this
-/// write that reading comes from the project root — a checkout shared with
-/// every other session and with the reader's editor, so it answers `main` and
-/// the tab hides itself again. The flag says "this session no longer has a
-/// checkout of its own", which is the fact that settles which of the two wins.
-///
-/// Returns the entry as written, or `None` for an id the index doesn't hold.
-pub async fn relocate_session_to_project(session_id: &str) -> Result<Option<SessionIndexItem>> {
-    let _guard = INDEX_LOCK.lock().await;
-
-    let mut sessions = list_session_index_items().await?;
-    let Some(item) = sessions.iter_mut().find(|i| i.session_id == session_id) else {
-        return Ok(None);
-    };
-
-    item.cwd = item.project_path.clone();
-    item.worktree_name = None;
-    item.worktree_removed = true;
-    let updated = item.clone();
-
-    write_session_index(&sessions).await?;
-
-    Ok(Some(updated))
-}
-
-/// Marks the sessions whose worktree was deleted before the index recorded it.
-///
-/// `worktree_removed` arrived after the removal path already worked, so every
-/// tree settled before it reads as a session that still owns its directory —
-/// which is the one reading that takes its PR tab away, since git's HEAD in the
-/// shared project root then outranks the branch the work landed on. Inferred
-/// from the shape the relocation leaves behind and nothing else: no worktree
-/// name, `cwd` back at the project root, and a `branch` still holding the
-/// legacy generated branch that only [`SessionIndexItem::new`] used to mint. A
-/// plain session sitting on a branch named that way is the false positive this
-/// can produce, and it costs that session its recorded branch instead of its
-/// HEAD rather than anything destructive.
-///
-/// Writes only when it changed something, so this is a read on every launch
-/// after the first.
-pub async fn backfill_removed_worktrees() -> Result<()> {
-    let _guard = INDEX_LOCK.lock().await;
-
-    let mut sessions = list_session_index_items().await?;
-    if mark_relocated(&mut sessions) {
-        write_session_index(&sessions).await?;
-    }
-
-    Ok(())
-}
-
-/// Split out from the async read so it can be tested without an `index.json`.
-/// Answers whether anything changed, which is what decides the write.
-fn mark_relocated(items: &mut [SessionIndexItem]) -> bool {
-    let mut changed = false;
-    for item in items.iter_mut() {
-        let relocated = item.worktree_name.is_none()
-            && item.cwd == item.project_path
-            && item
-                .branch
-                .as_deref()
-                .is_some_and(|b| b.starts_with("worktree-"));
-
-        if relocated && !item.worktree_removed {
-            item.worktree_removed = true;
-            changed = true;
-        }
-    }
-    changed
 }
 
 /// A persisted `in_progress` is a lie after a restart — no child survives the
@@ -1023,7 +886,7 @@ mod tests {
     #[test]
     fn index_entries_written_before_these_fields_still_read() {
         let legacy = r#"{"sessionId":"a","harness":"claude_code","cwd":"/p","projectPath":"/p",
-            "branch":null,"worktreeName":null,"title":"t","created":"c","modified":"m",
+            "branch":null,"cloudName":null,"title":"t","created":"c","modified":"m",
             "archived":false,"pinned":false}"#;
 
         let item: SessionIndexItem = serde_json::from_str(legacy).unwrap();
@@ -1040,7 +903,7 @@ mod tests {
     #[test]
     fn legacy_index_entry_reads_as_no_pending_fork() {
         let legacy = r#"{"sessionId":"a","harness":"claude_code","cwd":"/p","projectPath":"/p",
-            "branch":null,"worktreeName":null,"title":"t","created":"c","modified":"m",
+            "branch":null,"cloudName":null,"title":"t","created":"c","modified":"m",
             "archived":false,"pinned":false}"#;
 
         let item: SessionIndexItem = serde_json::from_str(legacy).unwrap();
@@ -1051,7 +914,7 @@ mod tests {
         assert_eq!(item.fork_from, None);
     }
 
-    /// Forking in place must not claim the parent's tree: `worktree_name` is what
+    /// Forking in place must not claim the parent's tree: `cloud_name` is what
     /// settling and deleting act on, so a fork carrying it would take the
     /// directory out from under the session still working in it.
     #[test]
@@ -1059,7 +922,7 @@ mod tests {
         let mut parent = SessionIndexItem::new(
             "parent",
             Harness::Pi,
-            "/p/.dray/worktrees/wt",
+            "/p/.dray/cloud/wt",
             "/p",
             Some("wt"),
             Some("main"),
@@ -1077,7 +940,7 @@ mod tests {
 
         assert_eq!(fork.cwd, parent.cwd, "the fork runs where the parent does");
         assert_eq!(fork.branch, parent.branch, "so its PR tab finds the branch");
-        assert_eq!(fork.worktree_name, None, "but it does not own the tree");
+        assert_eq!(fork.cloud_name, None, "but it does not own the tree");
         assert_eq!(fork.fork_from.as_deref(), Some("parent"));
 
         // How the agent runs is inherited; this session's own history is not.
@@ -1089,45 +952,14 @@ mod tests {
         assert!(!fork.pinned);
     }
 
-    /// A relocated session's `cwd` is the shared checkout, so git's HEAD there
-    /// names whatever else is going on in it rather than where this session's
-    /// work lands. A fork in place inherits that footing exactly, and dropping
-    /// the flag would take its PR tab with it.
-    #[test]
-    fn forking_a_relocated_session_in_place_keeps_its_branch_authoritative() {
-        let mut parent = SessionIndexItem::new(
-            "parent",
-            Harness::Pi,
-            "/p",
-            "/p",
-            Some("wt"),
-            Some("worktree-wt"),
-            "add the PR panel",
-            ModelId::Pi,
-            None,
-            ApprovalPolicy::Auto,
-            None,
-        );
-        parent.worktree_name = None;
-        parent.worktree_removed = true;
-
-        let here = parent.fork("child", None);
-        assert!(here.worktree_removed);
-        assert_eq!(here.branch.as_deref(), Some("worktree-wt"));
-
-        // A tree of its own, so HEAD in it is the honest answer again.
-        let elsewhere = parent.fork("child", Some("bold-otter"));
-        assert!(!elsewhere.worktree_removed);
-    }
-
     /// The four cases `sessionBranch` in `pr.ts` is tested on, so `--from` and
     /// the PR tab cannot come to disagree about which branch a session is on.
     #[test]
     fn a_sessions_branch_reads_the_same_way_the_pr_tab_reads_it() {
-        let worktree = SessionIndexItem::new(
+        let cloud = SessionIndexItem::new(
             "a",
             Harness::Pi,
-            "/p/.dray/worktrees/calm-owl",
+            "/p/.dray/cloud/calm-owl",
             "/p",
             Some("calm-owl"),
             Some("main"),
@@ -1137,13 +969,13 @@ mod tests {
             ApprovalPolicy::Auto,
             None,
         );
-        // The source branch is recorded directly rather than rebuilt from the
-        // worktree name.
-        assert_eq!(session_branch(&worktree, None).as_deref(), Some("main"));
+        // Cloud branch metadata is recorded directly rather than rebuilt from
+        // the Cloud volume name.
+        assert_eq!(session_branch(&cloud, None).as_deref(), Some("main"));
         // Git's own reading outranks the recorded branch: anything checking out
         // another branch inside the tree leaves the record describing one it left.
         assert_eq!(
-            session_branch(&worktree, Some("fix/thing")).as_deref(),
+            session_branch(&cloud, Some("fix/thing")).as_deref(),
             Some("fix/thing")
         );
 
@@ -1162,16 +994,6 @@ mod tests {
         );
         assert_eq!(session_branch(&plain, None).as_deref(), Some("feature"));
 
-        // Relocated: `cwd` is the shared project root, so HEAD there answers
-        // what that checkout is on and never where this session's work landed.
-        let mut settled = worktree.clone();
-        settled.worktree_name = None;
-        settled.cwd = settled.project_path.clone();
-        settled.worktree_removed = true;
-        assert_eq!(
-            session_branch(&settled, Some("main")).as_deref(),
-            Some("main")
-        );
     }
 
     /// A fork is a copy, so it sits exactly where the original sits: beside its
@@ -1208,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn forking_into_a_worktree_takes_a_tree_and_branch_of_its_own() {
+    fn forking_into_a_cloud_takes_a_tree_and_branch_of_its_own() {
         let parent = SessionIndexItem::new(
             "parent",
             Harness::Pi,
@@ -1225,10 +1047,10 @@ mod tests {
 
         let fork = parent.fork("child", Some("bold-otter"));
 
-        assert_eq!(fork.cwd, worktree_path("bold-otter"));
+        assert_eq!(fork.cwd, cloud_path("bold-otter"));
         assert_eq!(fork.project_path, "/p", "it still groups under the project");
-        assert_eq!(fork.worktree_name.as_deref(), Some("bold-otter"));
-        assert_eq!(fork.branch.as_deref(), Some("bold-otter"));
+        assert_eq!(fork.cloud_name.as_deref(), Some("bold-otter"));
+        assert_eq!(fork.branch.as_deref(), Some("cloud/bold-otter"));
     }
 
     /// The suffix is the whole point of the title, so truncation takes its room
@@ -1365,16 +1187,14 @@ mod tests {
         );
     }
 
-    /// A worktree session records the branch it will use. Source mode records
-    /// the source branch; new-branch mode records the generated UUID. This is
-    /// why `relocate_session_to_project` keeps the field: it is the only place
-    /// the PR's branch survives once the tree and any generated branch are deleted.
+    /// A Cloud session records branch metadata for its prompt. The constructor
+    /// preserves the branch supplied by the session manager.
     #[test]
-    fn a_worktree_session_records_the_branch_its_work_lands_on() {
+    fn a_cloud_session_records_the_branch_its_work_lands_on() {
         let item = SessionIndexItem::new(
             "a",
             Harness::Pi,
-            "/p/.dray/worktrees/calm-owl",
+            "/p/.dray/cloud/calm-owl",
             "/p",
             Some("calm-owl"),
             Some("main"),
@@ -1386,73 +1206,6 @@ mod tests {
         );
 
         assert_eq!(item.branch.as_deref(), Some("main"));
-        assert!(!item.worktree_removed);
-    }
-
-    /// Entries written before the field existed have to read as sessions that
-    /// still own their directory, or every worktree session predating it starts
-    /// ignoring a HEAD that is genuinely its own.
-    #[test]
-    fn an_index_entry_without_the_flag_reads_as_a_tree_still_there() {
-        let item: SessionIndexItem = serde_json::from_value(serde_json::json!({
-            "sessionId": "a",
-            "harness": "pi",
-            "cwd": "/p/.dray/worktrees/calm-owl",
-            "projectPath": "/p",
-            "branch": "worktree-calm-owl",
-            "worktreeName": "calm-owl",
-            "title": "hi",
-            "created": "2026-01-01T00:00:00Z",
-            "modified": "2026-01-01T00:00:00Z",
-            "archived": false,
-            "pinned": false,
-        }))
-        .unwrap();
-
-        assert!(!item.worktree_removed);
-    }
-
-    /// The flag arrived after the removal path already worked, so trees settled
-    /// before it have to be recognised by the shape relocation leaves: no
-    /// worktree name, `cwd` back at the project root, and a branch still
-    /// carrying the legacy generated prefix. Without this those sessions keep
-    /// reading the shared checkout's HEAD and keep losing their PR tab.
-    #[test]
-    fn a_tree_settled_before_the_flag_existed_is_recognised_by_its_shape() {
-        let session = |cwd: &str, branch: Option<&str>, worktree: Option<&str>| {
-            SessionIndexItem::new(
-                "a",
-                Harness::Pi,
-                cwd,
-                "/p",
-                worktree,
-                branch,
-                "hi",
-                ModelId::Pi,
-                None,
-                ApprovalPolicy::Auto,
-                None,
-            )
-        };
-
-        let mut items = vec![
-            // Relocated: the tree is gone and the branch is all that is left.
-            session("/p", Some("worktree-calm-owl"), None),
-            // Still in its tree — its own HEAD is the right thing to read.
-            session("/p/.dray/worktrees/calm-owl", None, Some("calm-owl")),
-            // Never had one.
-            session("/p", Some("main"), None),
-        ];
-
-        assert!(mark_relocated(&mut items));
-        assert!(items[0].worktree_removed);
-        assert!(!items[1].worktree_removed);
-        assert!(!items[2].worktree_removed);
-
-        assert!(
-            !mark_relocated(&mut items),
-            "a second pass must report nothing to write"
-        );
     }
 
     #[test]

@@ -954,7 +954,6 @@ dependencies = [
  "dirs 6.0.0",
  "dray-proto",
  "fff-search",
- "libc",
  "notify-rust",
  "serde",
  "serde_json",

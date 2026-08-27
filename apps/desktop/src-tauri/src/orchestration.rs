@@ -315,7 +315,7 @@ async fn create_session(create: CreateSession, app: &AppHandle) -> Result<Respon
             // time, and several agents writing to one checkout overwrite each
             // other — the changes panel cannot even tell them apart.
             true,
-            // Agent-created worktrees always use their own branch.
+            // Agent-created clouds always use their own branch.
             true,
             // Never named by the caller: an agent has no basis for choosing
             // one, and a name that collides is a create that fails for a field
@@ -343,62 +343,24 @@ async fn create_session(create: CreateSession, app: &AppHandle) -> Result<Respon
     })
 }
 
-/// What `--from` starts the new worktree at: a session id, a branch, or any
-/// other ref.
-///
-/// A session id is tried first, because it is the address everywhere else in
-/// `dray` — `ls` prints it, `send` takes it — and an agent holding one should
-/// not have to learn how Dray names branches to point at that session's work.
-/// A ref that happens to look like a session id is the only ambiguity, and a
-/// v7 UUID is not a branch name anybody types.
-///
-/// The session's branch comes from [`store::session_branch`], the one reading
-/// of that question, so this cannot start a reviewer on one branch while the
-/// author's header names another.
-///
-/// **Committed work only**, and nothing here can change that: a worktree at a
-/// branch tip carries what was committed and not what the author has open in
-/// their editor. Usually right for a review, and said plainly in the skill,
-/// because the failure is an agent reporting confidently on a tree that is
-/// missing the very change the user is looking at.
-async fn resolve_base(from: &str, project_path: &str) -> Result<String> {
+/// Resolves the branch instruction for a new Cloud. A Cloud has no local
+/// repository, so this intentionally does not validate or resolve refs through
+/// Git. A session id uses the branch recorded for that session; any other
+/// value is passed through as the branch the user named.
+async fn resolve_base(from: &str, _project_path: &str) -> Result<String> {
     if let Some(item) = store::get_session_index_item(from).await? {
-        // Read where the session actually runs, which is its worktree for a
-        // worktree session — `session_branch` outranks it for a relocated one,
-        // whose `cwd` is the shared project root.
-        let observed = crate::git::current_branch(&item.cwd).await;
-        let branch = store::session_branch(&item, observed.as_deref()).with_context(|| {
-            format!(
-                "session {from} is on no branch — a detached HEAD, or a directory that is not \
-                 a repository. Pass a branch or a commit instead."
-            )
-        })?;
-
-        // A session in another repo — or one whose branch has since been
-        // deleted — names a branch this one has never heard of. Said here
-        // rather than left to git, whose error names the branch without saying
-        // that a session was what asked for it.
-        if crate::git::resolve_commit(project_path, &branch)
-            .await
-            .is_none()
-        {
-            bail!(
-                "session {from} is on branch {branch}, which {project_path} does not have — \
-                 check the two are the same repository, and that the branch still exists"
-            );
-        }
-
-        return Ok(branch);
+        return store::session_branch(&item, None).with_context(|| {
+            format!("session {from} has no recorded branch to use as a Cloud base")
+        });
     }
 
-    if crate::git::resolve_commit(project_path, from)
-        .await
-        .is_some()
+    if from.trim().is_empty()
+        || from.chars().any(|character| matches!(character, '\0' | '\n' | '\r'))
     {
-        return Ok(from.to_string());
+        bail!("invalid Cloud base branch");
     }
 
-    bail!("{from} is neither a session id nor a branch, tag or commit in {project_path}")
+    Ok(from.to_string())
 }
 
 async fn list_sessions(list: ListSessions) -> Result<Response> {
@@ -581,9 +543,17 @@ fn resolve_harness(requested: Option<&str>, parent: Option<&SessionIndexItem>) -
 }
 
 fn resolve_project(create: &CreateSession, parent: Option<&SessionIndexItem>) -> Result<String> {
-    project_from(create.project_path.as_deref(), parent).context(
-        "no project to create the session in — pass --project, or run this from inside a repo",
-    )
+    // Cloud Sessions do not need a repository. Keep a stable virtual project
+    // path for sidebar grouping when a terminal invocation has no explicit
+    // project and no parent session.
+    Ok(project_from(create.project_path.as_deref(), parent)
+        .unwrap_or_else(cloud_project_path))
+}
+
+fn cloud_project_path() -> String {
+    dirs::home_dir()
+        .map(|home| home.join(".dray").join("cloud").to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".dray/cloud".to_string())
 }
 
 /// The caller's own answer wins, then the parent's. Canonicalized because
@@ -606,7 +576,7 @@ fn summarize(item: SessionIndexItem) -> SessionSummary {
         cwd: item.cwd,
         project_path: item.project_path,
         branch: item.branch,
-        worktree_name: item.worktree_name,
+        cloud_name: item.cloud_name,
         // Through serde rather than a match, so a status added to the enum
         // cannot leave this arm reporting the wrong one.
         status: serde_json::to_value(item.status)
@@ -700,7 +670,7 @@ mod tests {
 
     #[test]
     fn a_version_mismatch_is_refused_before_the_request_is_read() {
-        let line = r#"{"v":99,"cmd":"create_session","prompt":"hi","useWorktree":true}"#;
+        let line = r#"{"v":99,"cmd":"create_session","prompt":"hi","useCloud":true}"#;
         let envelope: Envelope = serde_json::from_str(line).unwrap();
         assert_ne!(envelope.v, PROTOCOL_VERSION);
     }

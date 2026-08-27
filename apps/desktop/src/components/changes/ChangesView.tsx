@@ -37,9 +37,9 @@ const NO_FILES: readonly ChangedFile[] = [];
 /// `commit_files` and `push_branch` for when a surface for them earns its way
 /// back; nothing in the UI calls them today.
 ///
-/// Scoped to the whole tree, unlike the right panel's changes tab, which
-/// answers "what did this turn do" and stays as it is. Everything runs against
-/// `cwd` rather than the project root — a worktree session has its own tree.
+/// Scoped to the whole local workspace, unlike the right panel's changes tab,
+/// which answers "what did this turn do" and stays as it is. Cloud sessions
+/// intentionally have no local repository to inspect.
 export default function ChangesView({
   cwd,
   active,

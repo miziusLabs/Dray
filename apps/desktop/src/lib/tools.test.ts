@@ -35,16 +35,6 @@ describe("Pi extension tool labels", () => {
 });
 
 describe("isRoutineError", () => {
-  it("passes over a worktree isolation refusal", () => {
-    expect(
-      isRoutineError(
-        "This session is isolated in the worktree /Users/y/.mizius/worktrees/ivory-gold-fjord, " +
-          "but this command is too complex to verify that it stays inside the worktree. " +
-          "Refusing to run it — a worktree-isolated session's git operations must target its own worktree.",
-      ),
-    ).toBe(true);
-  });
-
   it("passes over a missing path, whatever spelled it", () => {
     expect(isRoutineError("Exit code 1\n(eval):cd:1: no such file or directory: apps/desktop")).toBe(
       true,

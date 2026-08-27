@@ -7,10 +7,12 @@
   "packageManager": "pnpm@11.9.0",
   "scripts": {
     "app": "pnpm --filter dray run app",
+    "app:no-watch": "pnpm --filter dray run app:no-watch",
     "tauri": "pnpm --filter dray run tauri",
     "web": "pnpm --filter @dray/web run dev",
     "build:app": "pnpm --filter dray run build",
     "build:web": "pnpm --filter @dray/web run build",
+    "build:sandbox": "pnpm --filter dray run build:sandbox",
     "test": "pnpm --filter dray run test"
   }
 }

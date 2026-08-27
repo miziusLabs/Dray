@@ -38,9 +38,8 @@ type ChatInputProps = {
   /// empty forever if it failed — the picker simply never opens, and a command
   /// typed by hand still works, since the CLI parses the text either way.
   commands?: SlashCommand[];
-  /// Where the `@` picker searches for files. The session's own directory, so a
-  /// worktree session mentions paths inside its tree — the CLI resolves `@path`
-  /// against the directory it was spawned in, and those are the same one.
+  /// Where the `@` picker searches for files. Cloud sessions expose an empty
+  /// host-side marker because their actual workspace stays inside Docker.
   cwd?: string | null;
   /// Interrupts the running turn. Reachable while `busy` and the box is empty —
   /// with something typed the same button sends, since a prompt written during a
@@ -83,10 +82,6 @@ type ChatInputProps = {
   /// bar inherits the form's column and sits exactly where the card would.
   archived?: boolean;
   onUnarchive?: () => void;
-  /// Only set while the session still has a worktree on disk, which is what
-  /// retires the button: the removal clears `worktreeName`, so the control
-  /// goes away because the thing it acted on did.
-  onRemoveWorktree?: () => void;
 };
 
 const MAX_ROWS = 10;
@@ -149,7 +144,6 @@ export default function ChatInput({
   onDismissError,
   archived = false,
   onUnarchive,
-  onRemoveWorktree,
 }: ChatInputProps) {
   const [message, setMessage] = useDraft(sessionId);
   const [resizeTick, setResizeTick] = useState(0);
@@ -461,21 +455,9 @@ export default function ChatInput({
             Unsettle this task to send a follow-up.
           </span>
 
-          {/* Unsettle keeps the right edge it has always had. Cleanup is the
-              rarer of the two and reads as an aside to it, so it takes the
-              ghost variant and sits inboard — the same "chrome doesn't lift"
-              rule the toolbar's buttons follow. */}
-          <span className="flex shrink-0 items-center gap-1">
-            {onRemoveWorktree && (
-              <Button variant="ghost" size="sm" onClick={onRemoveWorktree}>
-                Delete worktree
-              </Button>
-            )}
-
-            <Button variant="secondary" size="sm" onClick={onUnarchive}>
-              Unsettle
-            </Button>
-          </span>
+          <Button variant="secondary" size="sm" onClick={onUnarchive}>
+            Unsettle
+          </Button>
         </div>
       </div>
     );

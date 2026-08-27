@@ -2,27 +2,10 @@ import type { PrCheck, PrMark, PullRequest } from "@/types/events";
 
 /// The branch a session's work lands on, for the PR lookup and the header.
 ///
-/// `observed` is what git says HEAD is, and it wins wherever the session still
-/// has a checkout of its own to be read off. Everything else
-/// here is the branch recorded at creation. New-branch worktrees record their
-/// UUID branch, while source-branch worktrees record the branch they share with
-/// the project checkout. Neither is re-read, so a checkout inside the tree moves
-/// HEAD and leaves the recorded value describing a branch the session is no
-/// longer on — which the PR tab fails *closed* on, asking GitHub about a branch
-/// that has no PR and hiding itself because the answer is empty.
-///
-/// A null `observed` is the ordinary resting state, not an error: the read is
-/// per-session and lands a frame late, and a non-repo has no branch at all.
-/// The recorded value is used while the git reading is pending, so the header
-/// and PR tab do not disappear for a frame after a session is opened.
-///
-/// `worktreeRemoved` is the one case `observed` loses. A relocated session runs
-/// in the project root, shared with every other session and with the reader's
-/// own editor — so HEAD there answers "what is this checkout on", never "where
-/// did this session's work land". Reading it moved the PR tab onto `main` the
-/// moment a tree was settled, which is exactly when the PR is most likely open.
-/// The recorded `branch` survives the removal for this, and the sidebar's mark
-/// kept working throughout because it never had an `observed` to be misled by.
+/// `observed` is what Git says HEAD is for a local session. Cloud sessions have
+/// no checkout, so their recorded branch is used directly. A null `observed`
+/// is also the normal pending/non-repository answer, and the recorded value
+/// keeps the header stable while a local read lands.
 ///
 /// One function because the header and the PR lookup have to agree about which
 /// branch the session is on; two rebuilding it apart is how they come to
@@ -30,12 +13,10 @@ import type { PrCheck, PrMark, PullRequest } from "@/types/events";
 export function sessionBranch(
   session: {
     branch: string | null;
-    worktreeName: string | null;
-    worktreeRemoved?: boolean;
+    cloudName?: string | null;
   },
   observed?: string | null,
 ): string | null {
-  if (session.worktreeRemoved) return session.branch;
   if (observed) return observed;
   return session.branch;
 }

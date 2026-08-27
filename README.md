@@ -26,7 +26,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 ## Features
 
 - Native desktop chat UI for coding-agent CLIs.
-- Session management with changes, diffs, pull requests, and worktrees.
+- Session management with changes, diffs, pull requests, and isolated Cloud Sessions.
 - Attachments, slash commands, themes, and desktop notifications.
 - Marketing site with a Next.js App Router frontend.
 
@@ -57,18 +57,38 @@ pnpm install
 Start either app from the root.
 
 ```sh
-pnpm app    # desktop app (Tauri + Vite)
-pnpm web    # marketing site on :3000
+pnpm app           # desktop app (Tauri + Vite), with hot reload
+pnpm app:no-watch  # desktop app without frontend or backend auto-reload
+pnpm web           # marketing site on :3000
 ```
 
 Commands beyond starting an app should be run from its own directory, because
-`tauri.conf.json`, `.cargo/config.toml`, and `scripts/install.sh` resolve their
+`tauri.conf.json`, `.cargo/config.toml`, and `scripts/install.ps1` resolve their
 paths against it:
 
 ```sh
 cd apps/desktop && pnpm tauri build
 cd apps/desktop/src-tauri && cargo test
 ```
+
+## Cloud sandbox
+
+Cloud Sessions run Pi in Docker without mounting or cloning the selected project.
+The sandbox image includes Java 21, Java 25, Node.js 24, GitHub CLI, and Pi.
+Pi's host `~/.pi/agent` directory is mounted read-only as a seed so extensions,
+settings, and authentication are available without sharing session history.
+GitHub authentication follows Agentsmith: `GITHUB_TOKEN` is passed only to the
+container and the entrypoint exports it as `GH_TOKEN`, runs `gh auth setup-git`,
+and rewrites SSH GitHub URLs to HTTPS.
+
+Build the image locally (Docker Desktop must be running):
+
+```sh
+pnpm build:sandbox
+```
+
+Use `DRAY_CLOUD_IMAGE` to select a different image tag and `GITHUB_TOKEN` (or a
+logged-in `gh`) to provide the token passed to Cloud containers.
 
 ## Deploying the site
 

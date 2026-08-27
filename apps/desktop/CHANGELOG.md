@@ -5,6 +5,17 @@ The release job reads the matching section into the GitHub release notes and the
 updater carries it, so this file is what a release says about itself — not a
 second description of it. GitHub's generated commit list is appended below it.
 
+## Unreleased
+
+### Changed
+
+- **Worktree sessions are now Cloud Sessions.** Cloud runs Pi in a Docker
+  sandbox with Java 21, Java 25, Node.js 24, Pi configuration seed files, and
+  ephemeral GitHub authentication. The selected project is metadata only and
+  is never cloned or mounted into the sandbox.
+- **Cloud branch mode adds an explicit branch brief** to the initial prompt when
+  enabled, so the agent knows the target branch and its base branch.
+
 ## 0.7.3
 
 ### Fixed

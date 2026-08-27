@@ -29,6 +29,7 @@ pub mod models;
 pub mod notifications;
 pub mod orchestration;
 pub mod projects;
+pub mod sandbox;
 pub mod quit;
 pub mod session;
 pub mod store;
@@ -49,9 +50,9 @@ async fn send_msg(
     permission_mode: ApprovalPolicy,
     cwd: &str,
     branch: Option<&str>,
-    use_worktree: bool,
-    create_worktree_branch: bool,
-    worktree_name: Option<&str>,
+    use_cloud: bool,
+    create_cloud_branch: bool,
+    cloud_name: Option<&str>,
     is_new_session: bool,
     app: AppHandle,
     manager: State<'_, SessionManager>,
@@ -75,11 +76,11 @@ async fn send_msg(
             permission_mode,
             cwd,
             branch,
-            use_worktree,
-            create_worktree_branch,
-            worktree_name,
+            use_cloud,
+            create_cloud_branch,
+            cloud_name,
             // The composer has no explicit base ref; its selected branch is
-            // recorded and used as the worktree's starting point.
+            // recorded and used as the cloud's starting point.
             None,
             is_new_session,
             // The composer never has a parent, and its prompts are the user's
@@ -328,43 +329,6 @@ async fn detach_session(session_id: &str) -> Result<Option<SessionIndexItem>, St
         .map_err(|e| e.to_string())
 }
 
-/// What removing this session's worktree would cost, for the dialog that asks.
-///
-/// Answers for a session with no worktree too — an all-zero, `exists: false`
-/// reading — so the caller has one shape to render rather than a null to
-/// branch on.
-#[tauri::command]
-async fn worktree_disposition(session_id: &str) -> Result<git::WorktreeDisposition, String> {
-    let item = store::get_session_index_item(session_id)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let Some(item) = item.filter(|i| i.worktree_name.is_some()) else {
-        return Ok(git::WorktreeDisposition::default());
-    };
-
-    let path = store::worktree_path(item.worktree_name.as_deref().unwrap());
-
-    Ok(git::worktree_disposition(&path, &item.project_path).await)
-}
-
-/// Deletes the session's worktree and its branch, and moves the session to its
-/// project root. The session, its transcript and its log all survive.
-///
-/// Returns the relocated index entry so the frontend replaces its row from
-/// what the disk holds rather than from what it hoped the write would do —
-/// `set_session_flags` makes the same bargain.
-#[tauri::command]
-async fn remove_session_worktree(
-    session_id: &str,
-    manager: State<'_, SessionManager>,
-) -> Result<SessionIndexItem, String> {
-    manager
-        .remove_worktree(session_id)
-        .await
-        .map_err(|e| e.to_string())
-}
-
 /// Removes a session for good: its child, its index entry, and its log. `false`
 /// means the index never held the id, which the sidebar treats the same as a
 /// success — either way the row it was asked to remove is gone.
@@ -377,7 +341,7 @@ async fn delete_session(
 }
 
 /// Copies a session onto `fork_id`, to be carried on separately from the one it
-/// came from. `worktree` gives the fork a tree of its own rather than leaving it
+/// came from. `cloud` gives the fork a tree of its own rather than leaving it
 /// in the parent's directory.
 ///
 /// The id comes from the caller for the same reason a new session's does: this
@@ -390,11 +354,11 @@ async fn delete_session(
 async fn fork_session(
     session_id: &str,
     fork_id: &str,
-    worktree: bool,
+    cloud: bool,
     manager: State<'_, SessionManager>,
 ) -> Result<SessionSnapshot, String> {
     manager
-        .fork(session_id, fork_id, worktree)
+        .fork(session_id, fork_id, cloud)
         .await
         .map_err(|e| e.to_string())
 }
@@ -534,12 +498,6 @@ pub fn run() {
                 if let Err(e) = store::reset_in_progress_sessions().await {
                     eprintln!("[status reset err] {e}");
                 }
-                // Sessions whose worktree was deleted before the index had a
-                // field for it, which is what their PR tab reads to know its
-                // branch outranks the shared checkout's HEAD.
-                if let Err(e) = store::backfill_removed_worktrees().await {
-                    eprintln!("[worktree backfill err] {e}");
-                }
             });
 
             // Orchestration is a side channel: a socket that won't bind must
@@ -582,8 +540,6 @@ pub fn run() {
             detach_session,
             delete_session,
             fork_session,
-            worktree_disposition,
-            remove_session_worktree,
             mark_session_idle,
             interrupt_session,
             stop_task,

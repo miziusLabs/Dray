@@ -31,9 +31,9 @@ function channel<T>() {
   };
 }
 
-/// Whether a session cwd belongs to a repo root — the root itself, or a
-/// worktree under it. Both readers key differently (marks by root, panel by
-/// cwd) and this is the one rule joining them.
+/// Whether a local session cwd belongs to a repo root — the root itself or a
+/// nested checkout. Cloud sessions are intentionally excluded before this
+/// helper is called because their Docker workspace is not in the repo.
 export function inRepo(cwd: string, repo: string): boolean {
   return cwd === repo || cwd.startsWith(`${repo}/`);
 }

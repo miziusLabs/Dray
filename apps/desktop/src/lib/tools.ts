@@ -209,9 +209,6 @@ export function toolArgument(input: JsonValue): string | null {
 // exception and is anchored per-line, because it opens the harness's own
 // refusal rather than appearing inside output.
 const ROUTINE_ERRORS = [
-  // A worktree-isolated session refusing a command it can't prove stays inside
-  // its own tree. Not a failure at all — the command never ran.
-  /is isolated in the worktree|too complex to verify that it stays inside the worktree/i,
   /no such file or directory/i,
   // zsh's own wording when a glob matches nothing, which is the same miss.
   /no matches found:/i,

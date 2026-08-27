@@ -74,7 +74,7 @@ type SidebarProps = {
     sessionId: string,
     flags: { archived?: boolean; pinned?: boolean },
   ) => Promise<void>;
-  onFork: (sessionId: string, worktree: boolean) => Promise<void>;
+  onFork: (sessionId: string, cloud: boolean) => Promise<void>;
   onDelete: (sessionId: string) => Promise<void>;
   onDetach: (sessionId: string) => Promise<void>;
   showArchived: boolean;
@@ -620,8 +620,8 @@ function RowAction({
 /// so reordering moves the digits with it and there is no second table to fall
 /// out of step with the labels.
 const FORKS = [
-  { label: "Fork here", worktree: false },
-  { label: "Fork in new worktree", worktree: true },
+  { label: "Fork here", cloud: false },
+  { label: "Fork in new Cloud Session", cloud: true },
 ] as const;
 
 /// The row's right-click menu. Delete confirms in place — a second surface for
@@ -644,7 +644,7 @@ function RowMenu({
   onDetach,
   children,
 }: {
-  onFork: (worktree: boolean) => void;
+  onFork: (cloud: boolean) => void;
   /// The session is working. The CLI forks by reading its transcript, which a
   /// live child is still appending to, so a fork taken now can inherit half a
   /// turn. The backend refuses it too — this only saves the trip.
@@ -746,7 +746,7 @@ function RowMenu({
                       forkRefs.current[i] = el;
                     }}
                     className="text-ui"
-                    onSelect={() => onFork(fork.worktree)}
+                    onSelect={() => onFork(fork.cloud)}
                   >
                     {fork.label}
                     <Kbd className="ml-auto">{i + 1}</Kbd>
@@ -833,7 +833,7 @@ function SessionRow({
     sessionId: string,
     flags: { archived?: boolean; pinned?: boolean },
   ) => Promise<void>;
-  onFork: (sessionId: string, worktree: boolean) => Promise<void>;
+  onFork: (sessionId: string, cloud: boolean) => Promise<void>;
   onDelete: (sessionId: string) => Promise<void>;
   onDetach: (sessionId: string) => Promise<void>;
 }) {
@@ -851,7 +851,7 @@ function SessionRow({
 
   return (
     <RowMenu
-      onFork={(worktree) => void onFork(item.sessionId, worktree)}
+      onFork={(cloud) => void onFork(item.sessionId, cloud)}
       forkDisabled={status === "in_progress"}
       onDelete={() => void onDelete(item.sessionId)}
       onDetach={nested ? () => void onDetach(item.sessionId) : undefined}

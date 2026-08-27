@@ -16,7 +16,7 @@ export type MediaItem =
 ///
 /// Adding a capture is one entry here and nothing else. Images want a static
 /// import at the top of this file; videos want a poster generated first, by
-/// `./scripts/posters.sh`.
+/// `pwsh ./scripts/posters.ps1`.
 ///
 /// Order is the only priority signal there is: the first entry is the one
 /// that has to paint fast, whatever kind it is. `Board`'s `priority` flag
