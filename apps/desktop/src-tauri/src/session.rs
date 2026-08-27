@@ -462,7 +462,11 @@ impl SessionManager {
             crate::title::spawn_title_generation(
                 session_id,
                 prompt,
-                launch_cwd,
+                // Cloud's launch cwd is the empty host-side marker used by
+                // the Docker-backed session. Title generation runs as a
+                // local one-shot Pi process, so use the selected project
+                // context instead (or "." when Cloud has no project).
+                cwd,
                 title_model.as_ref(),
                 title_effort,
                 app,
