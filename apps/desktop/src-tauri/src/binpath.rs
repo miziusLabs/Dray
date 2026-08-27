@@ -2,16 +2,32 @@
 //!
 //! A bundled `.app` started from Finder or the Dock inherits `launchd`'s
 //! minimal environment rather than the user's PATH. Resolve Pi once and reuse
-//! it: the login-shell probe below costs real time, and the answer cannot
+//! it: the login-shell probe on Unix costs real time, and the answer cannot
 //! change while the app runs.
 
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::process::Stdio;
 use std::sync::OnceLock;
 use tokio::process::Command;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 static PI_PATH: OnceLock<PathBuf> = OnceLock::new();
 static GH_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Applies the process settings shared by every GUI-launched child.
+///
+/// Windows otherwise creates a console window for commands such as Pi, Git, or
+/// `taskkill`, which is especially distracting when a session starts or stops.
+#[cfg(windows)]
+pub fn configure_command(command: &mut Command) {
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+pub fn configure_command(_command: &mut Command) {}
 
 /// The absolute path to `pi`, or the bare name as a last resort.
 pub async fn pi() -> PathBuf {
@@ -27,11 +43,90 @@ pub async fn pi() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("pi"))
 }
 
-/// Reconstructs the PATH a child needs when the app was launched by Finder.
+/// Builds a command for the resolved Pi executable.
 ///
-/// Bundled macOS apps inherit launchd's minimal PATH, which omits user-local
-/// binaries used by Pi extensions and their child processes. Existing entries
-/// stay first so an explicitly configured binary still wins.
+/// npm exposes global packages through `.cmd` shims on Windows, but
+/// `CreateProcess` cannot execute those files directly. The generated shim is
+/// parsed to find its JavaScript entrypoint so prompts and RPC messages still
+/// reach Node as ordinary argv values rather than passing user text through a
+/// shell. The command-shell fallback is only for a non-npm batch file.
+pub async fn pi_command() -> Command {
+    let path = pi().await;
+    let mut command = command_for(&path);
+    configure_command(&mut command);
+    command
+}
+
+fn command_for(path: &Path) -> Command {
+    #[cfg(windows)]
+    {
+        let is_batch = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "cmd" | "bat"));
+
+        if is_batch {
+            if let Some(script) = npm_shim_script(path) {
+                let node = path
+                    .parent()
+                    .map(|parent| parent.join("node.exe"))
+                    .filter(|candidate| is_executable(candidate))
+                    .or_else(|| search_path("node"))
+                    .or_else(|| search_known_dirs("node"))
+                    .unwrap_or_else(|| PathBuf::from("node"));
+                let mut command = Command::new(node);
+                command.arg(script);
+                return command;
+            }
+
+            let shell = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
+            let mut command = Command::new(shell);
+            command.args(["/D", "/S", "/C", "call"]);
+            command.arg(path);
+            return command;
+        }
+    }
+
+    Command::new(path)
+}
+
+/// Extracts the JavaScript entrypoint from npm's generated Windows shim.
+///
+/// The shim uses either `%~dp0` or `%dp0%` for its own directory. Only an
+/// existing `.js` file is accepted, so an unrelated quoted path in a custom
+/// batch file cannot accidentally become the executable.
+#[cfg(windows)]
+fn npm_shim_script(path: &Path) -> Option<PathBuf> {
+    let base = path.parent()?;
+    let contents = std::fs::read_to_string(path).ok()?;
+
+    for token in contents.split('"').skip(1).step_by(2) {
+        let lower = token.to_ascii_lowercase();
+        let candidate = if lower.starts_with("%~dp0") || lower.starts_with("%dp0%") {
+            base.join(token[5..].trim_start_matches(['\\', '/']))
+        } else {
+            PathBuf::from(token)
+        };
+
+        if candidate
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("js"))
+            && candidate.is_file()
+        {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+/// Reconstructs the PATH a child needs when the app was launched by Finder or
+/// Explorer.
+///
+/// Bundled macOS apps inherit launchd's minimal PATH, while a Windows GUI app
+/// may be started before the user's shell profile has added Node/npm. Existing
+/// entries stay first so an explicitly configured binary still wins.
 pub fn agent_path() -> String {
     let inherited = std::env::var_os("PATH").unwrap_or_default();
     let mut dirs: Vec<_> = std::env::split_paths(&inherited).collect();
@@ -78,7 +173,17 @@ async fn resolve(bin: &str) -> Option<PathBuf> {
         return Some(path);
     }
 
-    login_shell_which(bin).await
+    #[cfg(windows)]
+    {
+        // Explorer has no POSIX login shell. The Windows search above covers
+        // PATH and the common install locations without invoking cmd.exe.
+        None
+    }
+
+    #[cfg(not(windows))]
+    {
+        login_shell_which(bin).await
+    }
 }
 
 /// Walks the `PATH` this process actually inherited. Covers `tauri dev` and any
@@ -95,44 +200,73 @@ fn search_path(bin: &str) -> Option<PathBuf> {
 /// Where a user-installed CLI tends to land.
 ///
 /// Public because the spawn needs them for the *other* direction: a child
-/// inherits this process's `PATH`, and a bundled `.app` launched from Finder
-/// inherits launchd's, which holds none of these. So a `dray` the user has
-/// installed is invisible to the agent unless these are put back — the same
-/// failure this module exists to solve for Pi, one layer out.
+/// inherits this process's `PATH`, and a bundled app launched from Finder or
+/// Explorer may hold none of these. So a `dray` the user has installed is
+/// invisible to the agent unless these are put back — the same failure this
+/// module exists to solve for Pi, one layer out.
 pub fn known_dirs() -> Vec<PathBuf> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
 
     let mut dirs = vec![
+        // These user-local locations are shared by Unix shells, Bun on
+        // Windows, and MSYS installations. They are safe to include on both
+        // platforms because they are relative to the user's home directory.
         home.join(".local/bin"),
         home.join(".bun/bin"),
         home.join(".npm-global/bin"),
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
     ];
 
-    // npm's per-user Windows prefix is where `npm install -g` puts command
-    // launchers such as `pi.cmd`. A GUI app may not inherit the shell PATH,
-    // so include it in both resolution and the child environment.
-    #[cfg(windows)]
-    if let Some(data_dir) = dirs::data_dir() {
-        dirs.push(data_dir.join("npm"));
+    #[cfg(not(windows))]
+    {
+        dirs.extend([
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+        ]);
+
+        // Pi is commonly installed through npm under nvm. Those directories
+        // are not stable enough to list statically, but they must be in a
+        // child's PATH as well as in the resolver's search path because Pi is
+        // a Node script.
+        if let Ok(versions) = std::fs::read_dir(home.join(".nvm/versions/node")) {
+            dirs.extend(versions.flatten().map(|entry| entry.path().join("bin")));
+        }
     }
 
-    // Pi is commonly installed through npm under nvm. Those directories are
-    // not stable enough to list statically, but they must be in a child's PATH
-    // as well as in the resolver's search path because Pi is a Node script.
-    if let Ok(versions) = std::fs::read_dir(home.join(".nvm/versions/node")) {
-        dirs.extend(versions.flatten().map(|entry| entry.path().join("bin")));
+    #[cfg(windows)]
+    {
+        // npm's per-user Windows prefix is where `npm install -g` puts command
+        // launchers such as `pi.cmd`. A GUI app may not inherit the shell PATH,
+        // so include it in both resolution and the child environment.
+        if let Some(data_dir) = dirs::data_dir() {
+            dirs.push(data_dir.join("npm"));
+        }
+
+        // Node's installer and per-user installer use these two locations. The
+        // inherited PATH usually contains them, but Explorer-launched apps do
+        // not reliably see a shell's later PATH mutations.
+        if let Some(local_data) = dirs::data_local_dir() {
+            dirs.push(local_data.join("Programs/nodejs"));
+        }
+        for variable in ["ProgramFiles", "ProgramW6432"] {
+            if let Some(program_files) = std::env::var_os(variable) {
+                dirs.push(PathBuf::from(program_files).join("nodejs"));
+            }
+        }
+
+        // Scoop is another common way to install Node and global npm tools for
+        // a Windows user, and both paths are harmless when Scoop is absent.
+        dirs.push(home.join("scoop/shims"));
+        dirs.push(home.join("scoop/apps/nodejs/current"));
     }
 
     dirs
 }
 
 /// The common install directories, checked directly so a bundle launch never
-/// pays for a shell spawn. Not exhaustive by design
-/// — [`login_shell_which`] is the general answer, this is the fast path.
+/// pays for a shell spawn. Not exhaustive by design — on Unix,
+/// [`login_shell_which`] is the general answer and this is the fast path.
 fn search_known_dirs(bin: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let candidates = known_dirs();
@@ -167,12 +301,12 @@ fn search_known_dirs(bin: &str) -> Option<PathBuf> {
     }
 }
 
-/// Returns paths a native process can launch for a command name.
+/// Returns candidate paths for a command name.
 ///
 /// Windows npm installs an extensionless shell script, a `.cmd` launcher, and
-/// often a `.ps1` launcher together. `Command` cannot execute the shell or
-/// PowerShell scripts directly, so the native extensions must be checked first
-/// and the unusable files must never win resolution.
+/// often a `.ps1` launcher together. The resolver returns a `.cmd` when that
+/// is the usable launcher; [`pi_command`] turns npm's shim into a direct Node
+/// invocation before spawning it.
 fn executable_candidates(dir: &Path, bin: &str) -> Vec<PathBuf> {
     #[cfg(windows)]
     {
@@ -193,7 +327,9 @@ fn executable_candidates(dir: &Path, bin: &str) -> Vec<PathBuf> {
 ///
 /// `-l` matters more than it looks: without it zsh reads `.zshrc` only, and a
 /// `PATH` exported from `.zprofile` — where the installers write it — stays
-/// invisible.
+/// invisible. Windows never compiles this path; Explorer has no POSIX shell to
+/// probe, and the native lookup above is enough.
+#[cfg(not(windows))]
 async fn login_shell_which(bin: &str) -> Option<PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 

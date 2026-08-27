@@ -26,16 +26,20 @@ pub use crate::harness::Harness;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering::Relaxed},
+        atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
         Arc,
     },
 };
 use tauri::{AppHandle, Emitter};
+#[cfg(windows)]
+use std::process::Stdio;
 use tokio::{
     io::AsyncWriteExt,
     process::{Child, ChildStdin},
     sync::Mutex,
 };
+#[cfg(windows)]
+use tokio::process::Command;
 
 /// Emitted as `session_status` when a session's status changes, so the sidebar
 /// and composer update without a refetch. Like `SessionTitleEvent`, this is not
@@ -110,8 +114,8 @@ pub struct StatusTracker {
     /// An `init` opened a model call that no `result` has closed yet.
     model_call_open: bool,
     /// Ids of the outstanding background tasks, not just how many. The count is
-    /// all the status machine needs, but Stop has to name each one to the CLI —
-    /// an interrupt does not touch them.
+    /// all the status machine needs, but a cooperative Pi abort does not touch
+    /// them.
     background_tasks: Vec<String>,
     /// Main-thread tool calls started and not yet finished. Not a status input —
     /// it decides whether an arriving prompt is written now or held.
@@ -178,7 +182,7 @@ impl StatusTracker {
         self.model_call_open
     }
 
-    /// The outstanding background tasks, for a Stop that has to name each one.
+    /// The outstanding background tasks.
     ///
     /// The set is republished whole on every change, so this is simply the
     /// latest reading rather than anything accumulated.
@@ -196,9 +200,9 @@ impl StatusTracker {
             AgentEventPayload::ToolCallCompleted { .. } => {
                 self.open_tool_calls = self.open_tool_calls.saturating_sub(1)
             }
-            // A turn cannot end with a call still running, and an interrupt ends
-            // one without completing its calls — so the count is reset here
-            // rather than left to drift up over a session.
+            // A turn cannot end with a call still running, and a killed child
+            // can end one without completing its calls — so the count is reset
+            // here rather than left to drift up over a session.
             AgentEventPayload::TurnCompleted { .. } => self.open_tool_calls = 0,
             _ => {}
         }
@@ -298,6 +302,21 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
+    /// Stops every live session before the app exits. The map is drained before
+    /// awaiting any child so no new send can race shutdown, and a failed kill
+    /// is logged without preventing the remaining children from being cleaned.
+    pub async fn kill_all(&self) {
+        let mut guard = self.sessions.lock().await;
+        let sessions = std::mem::take(&mut *guard);
+
+        for (session_id, session) in sessions {
+            if let Err(error) = session.kill().await {
+                eprintln!("[session shutdown err] {session_id}: {error}");
+            }
+        }
+        drop(guard);
+    }
+
     /// Routes a prompt to a session: spawns a new child, reuses a live one, or
     /// respawns via `--resume` when the id is known but its process is gone.
     pub async fn send_msg(
@@ -779,37 +798,28 @@ impl SessionManager {
         })
     }
 
-    /// Stops everything the session is doing: the turn in flight, and every
-    /// background task still outstanding. Errors when no live child holds the
-    /// id — nothing is running, so there is nothing to stop.
+    /// Stops everything the session is doing immediately.
     ///
-    /// The second half is not something the CLI's own interrupt does. Verified
-    /// against v2.1.232: an interrupt aborts the turn's tools and streaming and
-    /// leaves backgrounded tasks running, which is what backgrounding one means
-    /// — so a session held open by a task alone had a Stop button that acked and
-    /// changed nothing. Naming the tasks here is what makes one Stop mean stop.
-    /// Per-task stops stay available in the subagent panel for the narrower ask.
-    pub async fn interrupt(&self, session_id: &str) -> Result<()> {
+    /// Pi's `abort` request is cooperative and can open a follow-up turn while
+    /// background tasks continue running. Stop is an explicit user request to
+    /// end *all* work, so remove the child from the live map and terminate its
+    /// process tree. The next prompt resumes the persisted Pi session in a new
+    /// child.
+    pub async fn interrupt(&self, session_id: &str, app: &AppHandle) -> Result<()> {
+        // Keep the manager lock until the idle status is published. Otherwise a
+        // prompt sent in the small window after removal could respawn the
+        // session and then receive this stop's late idle event.
         let mut sessions_guard = self.sessions.lock().await;
-        let Some(session) = sessions_guard.get_mut(session_id) else {
-            bail!("no running session {session_id}");
-        };
+        let session = sessions_guard
+            .remove(session_id)
+            .with_context(|| format!("no running session {session_id}"))?;
 
-        session.interrupt().await?;
-
-        // Read after the interrupt, so a task the CLI did stop on its own is
-        // already gone from the set rather than stopped twice. Harmless either
-        // way — the CLI answers success for a task it no longer holds.
-        let task_ids = session.status.lock().await.background_task_ids();
-        for task_id in task_ids {
-            // Logged, not propagated: the interrupt above already went out, and
-            // one task refusing to stop must not hide that from the caller or
-            // stop the tasks behind it in the list from being asked.
-            if let Err(err) = session.stop_task(&task_id).await {
-                eprintln!("[stop task err] {task_id}: {err}");
-            }
-        }
-
+        // `kill` marks the stdout reader before terminating the child, so data
+        // already buffered in the pipe cannot publish a late in-progress or
+        // completed status after this stop has been acknowledged.
+        session.kill().await?;
+        publish_status(session_id, SessionStatus::Idle, app).await;
+        drop(sessions_guard);
         Ok(())
     }
 
@@ -995,6 +1005,9 @@ pub struct Session {
     /// Shared with the stdout task: sends flip it here, `result` and
     /// `background_tasks_changed` flip it there.
     pub status: Arc<Mutex<StatusTracker>>,
+    /// Set before a stop kills the child, so buffered stdout cannot publish
+    /// stale events after the session has been stopped and removed from the map.
+    pub stopped: Arc<AtomicBool>,
     /// Pi extension dialogs waiting for an answer from the frontend.
     pub pi_ui_requests: pi::mapper::PendingUiRequests,
     /// Prompts typed during a running turn, waiting for the next boundary.
@@ -1169,22 +1182,11 @@ impl Session {
         Ok(())
     }
 
-    /// Interrupts the in-flight turn without killing the child. Verified
-    /// against the CLI: it acks with a `control_response`, aborts running tools
-    /// (`terminal_reason: "aborted_tools"`) or streaming
-    /// (`"aborted_streaming"`), ends the turn as `error_during_execution`, and
-    /// usually opens a follow-up turn to narrate the abort — so the status
-    /// machine needs nothing special here, the resulting events drive it.
-    pub async fn interrupt(&mut self) -> Result<()> {
-        write_line(&self.stdin, &serde_json::json!({"type": "abort"})).await
-    }
-
     /// Stops one background task by id.
     ///
-    /// Separate from [`interrupt`](Self::interrupt) because the CLI keeps them
-    /// separate: an interrupt with no turn in flight acks and leaves every
-    /// running task alone, so it is no answer at all to the one state where the
-    /// user is stuck — main thread idle, a task still holding the session open.
+    /// Separate from the session-level Stop because the CLI keeps them
+    /// separate: a cooperative abort with no turn in flight acks and leaves
+    /// every running task alone, while Stop intentionally terminates them all.
     ///
     /// Nothing is emitted here. The CLI republishes the task set and files a
     /// `task_notification` with `status: "stopped"` on its own, which is what
@@ -1280,11 +1282,56 @@ impl Session {
     }
 
     /// Kills the child process. Takes `self` by value — a killed session can't
-    /// be reused.
+    /// be reused. The stdout reader is marked first so buffered events cannot
+    /// revive a session after it has been stopped.
     pub async fn kill(mut self) -> Result<()> {
-        let _ = self.child.kill().await?;
-        Ok(())
+        self.stopped.store(true, Relaxed);
+        terminate_child(&mut self.child).await
     }
+}
+
+/// Terminates a session's Pi process and, on Windows, every descendant tool.
+///
+/// Pi is normally a Node process that launches shells and other tools. Killing
+/// only the direct child leaves those descendants running on Windows, where
+/// there is no Unix process group to signal. `taskkill /T` is built into the OS
+/// and guarantees that descendants do not survive a Windows Stop.
+async fn terminate_child(child: &mut Child) -> Result<()> {
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return Ok(());
+    }
+
+    #[cfg(windows)]
+    {
+        let Some(pid) = child.id() else {
+            return Ok(());
+        };
+
+        let mut command = Command::new("taskkill");
+        crate::binpath::configure_command(&mut command);
+        let killed = command
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .is_ok_and(|status| status.success());
+
+        if killed {
+            child.wait().await?;
+            return Ok(());
+        }
+
+        // The process may have exited between the first check and taskkill.
+        // Reaping that race is preferable to reporting a failed Stop.
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return Ok(());
+        }
+    }
+
+    child.kill().await?;
+    Ok(())
 }
 
 /// Writes one JSON line to a child's stdin. The CLI's input format is

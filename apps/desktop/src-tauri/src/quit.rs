@@ -14,7 +14,7 @@
 
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -138,8 +138,13 @@ pub fn request<R: Runtime>(app: &AppHandle<R>) {
 /// The answer to the confirmation dialog. Nothing else may call `exit` — every
 /// other route out is intercepted so that this one is the only one.
 #[tauri::command]
-pub fn confirm_quit<R: Runtime>(app: AppHandle<R>) {
+pub async fn confirm_quit<R: Runtime>(
+    app: AppHandle<R>,
+    manager: State<'_, crate::session::SessionManager>,
+) -> Result<(), String> {
+    manager.kill_all().await;
     app.exit(0);
+    Ok(())
 }
 
 /// The other answer. Clears the flag so the next ⌘Q asks again rather than

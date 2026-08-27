@@ -755,7 +755,9 @@ const NO_CLI: &str = "GitHub CLI (gh) not found.";
 async fn gh(cwd: &str, args: &[&str]) -> Result<String, String> {
     let bin = binpath::gh().await.ok_or(NO_CLI)?;
 
-    let out = Command::new(bin)
+    let mut command = Command::new(bin);
+    crate::binpath::configure_command(&mut command);
+    let out = command
         .args(args)
         .current_dir(cwd)
         .env("GIT_OPTIONAL_LOCKS", "0")

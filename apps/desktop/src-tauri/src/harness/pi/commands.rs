@@ -11,7 +11,6 @@ use serde_json::Value;
 use std::{collections::HashMap, process::Stdio, sync::OnceLock, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::Command,
     sync::Mutex,
     time::timeout,
 };
@@ -71,9 +70,12 @@ pub async fn list_models(cwd: Option<&str>) -> Result<Vec<Model>> {
 }
 
 async fn probe_models(cwd: Option<&str>) -> Result<Vec<Model>> {
-    let mut command = Command::new(crate::binpath::pi().await);
+    let mut command = crate::binpath::pi_command().await;
     if let Some(home) = dirs::home_dir() {
         command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
+    }
+    if let Some(endpoint) = crate::orchestration::child_endpoint() {
+        command.env("DRAY_ENDPOINT", endpoint);
     }
 
     let mut child = command
@@ -134,9 +136,12 @@ pub async fn is_extension_command(cwd: &str, prompt: &str) -> Result<bool> {
 }
 
 async fn probe(cwd: &str) -> Result<(Vec<SlashCommand>, Vec<String>)> {
-    let mut command = Command::new(crate::binpath::pi().await);
+    let mut command = crate::binpath::pi_command().await;
     if let Some(home) = dirs::home_dir() {
         command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
+    }
+    if let Some(endpoint) = crate::orchestration::child_endpoint() {
+        command.env("DRAY_ENDPOINT", endpoint);
     }
 
     let mut child = command

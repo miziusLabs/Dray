@@ -399,25 +399,24 @@ async fn fork_session(
         .map_err(|e| e.to_string())
 }
 
-/// Stops the in-flight turn without killing the session — the CLI aborts its
-/// tools and streaming, ends the turn, and stays alive for the next prompt.
+/// Stops all work for a session immediately. The live Pi child is terminated;
+/// the next prompt resumes the persisted session in a fresh process.
 #[tauri::command]
 async fn interrupt_session(
     session_id: &str,
+    app: AppHandle,
     manager: State<'_, SessionManager>,
 ) -> Result<(), String> {
     manager
-        .interrupt(session_id)
+        .interrupt(session_id, &app)
         .await
         .map_err(|e| e.to_string())
 }
 
 /// Stops one background task without touching the rest of the session.
 ///
-/// Not reachable through `interrupt_session`: an interrupt with no turn in
-/// flight acks and leaves running tasks alone, which is exactly the state a
-/// background task holds a session in. Idempotent — the CLI answers success for
-/// a task it no longer holds.
+/// This remains separate from `interrupt_session`, whose explicit Stop action
+/// terminates the whole child so every task ends immediately.
 #[tauri::command]
 async fn stop_task(
     session_id: &str,

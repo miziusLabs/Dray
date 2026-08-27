@@ -1,4 +1,6 @@
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::AppHandle;
+#[cfg(target_os = "macos")]
+use tauri::{Emitter, Manager};
 
 /// Show a desktop notification that clicks back into the session it came from.
 ///

@@ -12,12 +12,12 @@ use crate::store::{self, append_session_event, next_seq_by_session_id};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::process::Stdio;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{ChildStderr, ChildStdin, ChildStdout, Command},
+    process::{ChildStderr, ChildStdin, ChildStdout},
     sync::Mutex,
 };
 
@@ -139,9 +139,12 @@ pub async fn init(
         args.extend(["--session-id", session_id]);
     }
 
-    let mut command = Command::new(crate::binpath::pi().await);
+    let mut command = crate::binpath::pi_command().await;
     if let Some(home) = dirs::home_dir() {
         command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
+    }
+    if let Some(endpoint) = crate::orchestration::child_endpoint() {
+        command.env("DRAY_ENDPOINT", endpoint);
     }
 
     let mut child = command
@@ -152,6 +155,7 @@ pub async fn init(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .context("couldn't start pi")?;
 
@@ -165,6 +169,8 @@ pub async fn init(
     let stdout_events = events.clone();
     let status: Arc<Mutex<StatusTracker>> = Arc::new(Mutex::new(StatusTracker::default()));
     let stdout_status = status.clone();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stdout_stopped = stopped.clone();
     let seq_start = if _is_new_session {
         0
     } else {
@@ -191,6 +197,7 @@ pub async fn init(
             stdout_events,
             stdout_seq,
             stdout_status,
+            stdout_stopped,
             stdout_queued,
             flush_seq,
             flush_events,
@@ -223,6 +230,7 @@ pub async fn init(
         events,
         seq,
         status,
+        stopped,
         pi_ui_requests: pending_ui,
         queued,
     })
@@ -236,6 +244,7 @@ async fn read_stdout(
     events: Arc<Mutex<Vec<AgentEvent>>>,
     stdout_seq: Arc<AtomicU64>,
     status: Arc<Mutex<StatusTracker>>,
+    stopped: Arc<AtomicBool>,
     queued: QueuedMessages,
     flush_seq: Arc<AtomicU64>,
     flush_events: Arc<Mutex<Vec<AgentEvent>>>,
@@ -248,6 +257,9 @@ async fn read_stdout(
         mapper::Mapper::with_seq_and_ui(session_id, session_cwd, stdout_seq, pending_ui);
 
     while let Some(line) = lines.next_line().await? {
+        if stopped.load(Relaxed) {
+            break;
+        }
         if line.trim().is_empty() {
             continue;
         }
@@ -273,8 +285,15 @@ async fn read_stdout(
         };
 
         for mut agent_event in mapped {
+            if stopped.load(Relaxed) {
+                return Ok(());
+            }
+
             if let AgentEventPayload::TurnCompleted { ref mut head, .. } = agent_event.payload {
                 *head = crate::git::snapshot_tree(session_cwd).await;
+                if stopped.load(Relaxed) {
+                    return Ok(());
+                }
             }
 
             if let AgentEventPayload::ToolCallCompleted { ref mut result, .. } = agent_event.payload
@@ -289,6 +308,9 @@ async fn read_stdout(
                     | AgentEventPayload::TurnCompleted { .. }
             );
 
+            if stopped.load(Relaxed) {
+                return Ok(());
+            }
             if let Err(error) = app.emit("agent_event", &agent_event) {
                 eprintln!("[pi emit err] {error}");
             }
@@ -301,7 +323,14 @@ async fn read_stdout(
                 tracker.on_event(&agent_event.payload)
             };
             if let Some(next) = next_status {
+                if stopped.load(Relaxed) {
+                    return Ok(());
+                }
                 publish_status(session_id, next, app).await;
+            }
+
+            if stopped.load(Relaxed) {
+                return Ok(());
             }
 
             // Deltas and usage are previews/live counters. Their committed
@@ -321,6 +350,10 @@ async fn read_stdout(
             events.lock().await.push(agent_event.clone());
             if let Err(error) = append_session_event(session_id, agent_event).await {
                 eprintln!("[pi write err] {error}");
+            }
+
+            if stopped.load(Relaxed) {
+                return Ok(());
             }
 
             if at_boundary {

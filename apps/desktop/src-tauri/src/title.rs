@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Stdio;
 use tauri::{AppHandle, Emitter};
-use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use ts_rs::TS;
 
@@ -133,9 +132,12 @@ pub async fn generate_title(
         "--approve",
     ];
 
-    let mut command = Command::new(crate::binpath::pi().await);
+    let mut command = crate::binpath::pi_command().await;
     if let Some(home) = dirs::home_dir() {
         command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
+    }
+    if let Some(endpoint) = crate::orchestration::child_endpoint() {
+        command.env("DRAY_ENDPOINT", endpoint);
     }
 
     let child = command
@@ -149,13 +151,15 @@ pub async fn generate_title(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .kill_on_drop(true)
         .spawn()
         .context("couldn't start Pi for title generation")?;
 
     let output = match timeout(DEADLINE, child.wait_with_output()).await {
         Ok(res) => res.context("Pi failed while generating a title")?,
-        // `wait_with_output` consumed the handle, so there's no kill to issue —
-        // the child is orphaned deliberately and exits on its own.
+        // `kill_on_drop` terminates the child when the timed-out
+        // `wait_with_output` future is dropped, so a title timeout cannot leave
+        // a Node process behind.
         Err(_) => bail!("title generation timed out"),
     };
 

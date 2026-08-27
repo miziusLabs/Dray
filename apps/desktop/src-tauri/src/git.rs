@@ -33,7 +33,9 @@ pub struct BranchList {
 /// A missing binary or a non-repo directory is a normal outcome here, not an
 /// error worth propagating — see [`list_branches`].
 async fn git(cwd: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
+    let mut command = Command::new("git");
+    crate::binpath::configure_command(&mut command);
+    let out = command
         .args(args)
         .current_dir(cwd)
         // A branch poll shouldn't contend with a background index refresh.
@@ -166,6 +168,7 @@ async fn run(cwd: &str, args: &[&str]) -> Result<()> {
 /// which the commit path sets and nothing else wants.
 async fn run_with(cwd: &str, envs: &[(&str, &str)], args: &[&str]) -> Result<()> {
     let mut cmd = Command::new("git");
+    crate::binpath::configure_command(&mut cmd);
     cmd.args(args).current_dir(cwd);
     for (key, value) in envs {
         cmd.env(key, value);
@@ -268,7 +271,9 @@ async fn real_index_path(cwd: &str) -> Option<PathBuf> {
 /// the clean filter runs during `add` — persists as a `None` baseline and shows
 /// up only as a permanently empty panel, with nothing anywhere saying why.
 async fn git_with_index(cwd: &str, index: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
+    let mut command = Command::new("git");
+    crate::binpath::configure_command(&mut command);
+    let out = command
         .args(args)
         .current_dir(cwd)
         .env("GIT_INDEX_FILE", index)
@@ -757,7 +762,9 @@ async fn read_batch(cwd: &str, revs: &[String]) -> Vec<Side> {
 
 /// Feeds NUL-delimited revs to one `git cat-file` and returns its raw stdout.
 async fn batch(cwd: &str, mode: &str, revs: &[String]) -> Option<Vec<u8>> {
-    let mut child = Command::new("git")
+    let mut command = Command::new("git");
+    crate::binpath::configure_command(&mut command);
+    let mut child = command
         .args(["cat-file", mode, "-z"])
         .current_dir(cwd)
         .env("GIT_OPTIONAL_LOCKS", "0")
