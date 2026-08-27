@@ -49,8 +49,9 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  /* Same as `--background`: the sidebar reads as part of the page, not as a
-     separate surface. Kept as its own token so a future palette can diverge. */
+  /* Same as `--background`: the right-hand panel reads as part of the page,
+     not as a separate surface. The main sidebar uses `--composer` for its
+     raised surface. Kept as its own token so a future palette can diverge. */
   --sidebar: oklch(0.145 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.922 0 0);
@@ -259,10 +260,9 @@
 
   /* The desktop is behind the window, not inside it: the native material does
      the blurring and the webview only has to get out of its way. So the body's
-     own fill is the single hole punched through the app, and it works only
-     because nothing else paints edge to edge — the sidebar has no fill of its
-     own, and the right panel's is `--background` under another name, so it has
-     to drop out entirely rather than tint the same pixels a second time.
+     own fill is the single hole punched through the app. The right panel uses
+     `--sidebar`, which drops out here rather than tinting the same pixels a
+     second time; the sidebar and composer keep their opaque surfaces.
 
      Stamped on `<html>` in index.html, before first paint and only on macOS;
      `useVibrancy` takes it away for the length of a fullscreen session. Kept on
@@ -284,11 +284,11 @@
        the buttons it exists to hide. It costs the composer its glass and buys
        the one thing on that edge that has to be opaque. */
     /* Same treatment for the one highlight that lands on the glass rather than
-       inside a menu: the sidebar has no fill here, so a selected session row —
-       and the panel's active tab, which shares the token — is drawn straight
-       onto the material. 11.5% white is `oklch(0.269 0 0)` over an opaque page.
-       The `/50` hover survives it: Tailwind compiles the modifier to a
-       `color-mix`, which multiplies the alpha rather than replacing it. */
+       inside a menu: a selected session row is drawn as a light overlay on the
+       sidebar's composer surface, while the panel's active tab is drawn
+       straight onto the material. 11.5% white is `oklch(0.269 0 0)` over an
+       opaque page. The `/50` hover survives it: Tailwind compiles the modifier
+       to a `color-mix`, which multiplies the alpha rather than replacing it. */
     --sidebar-accent: oklch(1 0 0 / 11.5%);
     /* The rest of the scale, by the same arithmetic — 4% white is
        `oklch(0.19 0 0)` over an opaque page and 11.5% is `oklch(0.269 0 0)`.

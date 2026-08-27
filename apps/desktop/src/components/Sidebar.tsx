@@ -394,7 +394,7 @@ export default function Sidebar({
   if (collapsed) return null;
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col">
+    <aside className="flex w-60 shrink-0 flex-col bg-composer shadow-sm">
       {/* The toggle shares this strip with the traffic lights, so it sits at the
           right to clear them — except in fullscreen, where they're gone and the
           left edge is free. */}
