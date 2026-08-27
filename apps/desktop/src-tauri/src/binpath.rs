@@ -5,7 +5,7 @@
 //! it: the login-shell probe below costs real time, and the answer cannot
 //! change while the app runs.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::OnceLock;
 use tokio::process::Command;
@@ -85,9 +85,11 @@ async fn resolve(bin: &str) -> Option<PathBuf> {
 /// launch from a terminal, where nothing further is needed.
 fn search_path(bin: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join(bin))
-        .find(|candidate| is_executable(candidate))
+    std::env::split_paths(&path).find_map(|dir| {
+        executable_candidates(&dir, bin)
+            .into_iter()
+            .find(|candidate| is_executable(candidate))
+    })
 }
 
 /// Where a user-installed CLI tends to land.
@@ -110,6 +112,14 @@ pub fn known_dirs() -> Vec<PathBuf> {
         PathBuf::from("/usr/local/bin"),
     ];
 
+    // npm's per-user Windows prefix is where `npm install -g` puts command
+    // launchers such as `pi.cmd`. A GUI app may not inherit the shell PATH,
+    // so include it in both resolution and the child environment.
+    #[cfg(windows)]
+    if let Some(data_dir) = dirs::data_dir() {
+        dirs.push(data_dir.join("npm"));
+    }
+
     // Pi is commonly installed through npm under nvm. Those directories are
     // not stable enough to list statically, but they must be in a child's PATH
     // as well as in the resolver's search path because Pi is a Node script.
@@ -127,22 +137,55 @@ fn search_known_dirs(bin: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let candidates = known_dirs();
 
-    if let Some(found) = candidates
-        .iter()
-        .map(|dir| dir.join(bin))
-        .find(|candidate| is_executable(candidate))
-    {
+    if let Some(found) = candidates.iter().find_map(|dir| {
+        executable_candidates(dir, bin)
+            .into_iter()
+            .find(|candidate| is_executable(candidate))
+    }) {
         return Some(found);
     }
 
     // nvm keeps one bin directory per installed Node version, so the path
     // depends on which version is current — glob the versions rather than
-    // guessing one.
-    let versions = std::fs::read_dir(home.join(".nvm/versions/node")).ok()?;
-    versions
-        .flatten()
-        .map(|entry| entry.path().join("bin").join(bin))
-        .find(|candidate| is_executable(candidate))
+    // guessing one. `known_dirs` includes these on Unix, but retaining this
+    // fallback keeps this lookup correct if that list changes later.
+    #[cfg(not(windows))]
+    {
+        let versions = std::fs::read_dir(home.join(".nvm/versions/node")).ok()?;
+        return versions.flatten().find_map(|entry| {
+            let dir = entry.path().join("bin");
+            executable_candidates(&dir, bin)
+                .into_iter()
+                .find(|candidate| is_executable(candidate))
+        });
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = home;
+        None
+    }
+}
+
+/// Returns paths a native process can launch for a command name.
+///
+/// Windows npm installs an extensionless shell script, a `.cmd` launcher, and
+/// often a `.ps1` launcher together. `Command` cannot execute the shell or
+/// PowerShell scripts directly, so the native extensions must be checked first
+/// and the unusable files must never win resolution.
+fn executable_candidates(dir: &Path, bin: &str) -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        [".exe", ".cmd", ".bat", ".com"]
+            .into_iter()
+            .map(|extension| dir.join(format!("{bin}{extension}")))
+            .collect()
+    }
+
+    #[cfg(not(windows))]
+    {
+        vec![dir.join(bin)]
+    }
 }
 
 /// Asks the user's login shell where `bin` is, which is the only way to see a
@@ -182,7 +225,21 @@ fn is_executable(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn is_executable(path: &std::path::Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                matches!(
+                    extension.to_ascii_lowercase().as_str(),
+                    "exe" | "cmd" | "bat" | "com"
+                )
+            })
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn is_executable(path: &std::path::Path) -> bool {
     path.is_file()
 }
