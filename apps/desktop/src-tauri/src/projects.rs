@@ -135,8 +135,8 @@ pub async fn set_last_selected_project(path: &str) -> Result<()> {
 /// Trailing path segment. Mirrors the frontend's `basename` so a project's
 /// cached label matches what the UI would derive from the path.
 fn basename(path: &str) -> String {
-    path.trim_end_matches('/')
-        .rsplit('/')
+    path.trim_end_matches(|separator| separator == '/' || separator == '\\')
+        .rsplit(|separator| separator == '/' || separator == '\\')
         .next()
         .filter(|s| !s.is_empty())
         .unwrap_or(path)
@@ -170,9 +170,11 @@ mod tests {
     }
 
     #[test]
-    fn basename_handles_trailing_slash_and_root() {
+    fn basename_handles_both_path_separators_and_root() {
         assert_eq!(basename("/Users/y/proj"), "proj");
         assert_eq!(basename("/Users/y/proj/"), "proj");
+        assert_eq!(basename(r"C:\Users\y\proj"), "proj");
+        assert_eq!(basename(r"C:\Users\y\proj\"), "proj");
         assert_eq!(basename("/"), "/");
     }
 }
