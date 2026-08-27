@@ -69,6 +69,6 @@ export function formatBytes(n: number): string {
 
 /// Trailing path segment, for showing a project as its folder name.
 export function basename(path: string): string {
-  const parts = path.replace(/\/+$/, "").split("/");
+  const parts = path.replace(/[\\/]+$/, "").split(/[\\/]/);
   return parts[parts.length - 1] || path;
 }
