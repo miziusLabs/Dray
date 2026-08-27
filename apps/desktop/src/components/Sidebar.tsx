@@ -1024,7 +1024,7 @@ function SessionRow({
           </span>
         )}
 
-        <span className="min-w-0 flex-1 truncate text-ui">{item.title}</span>
+        <span className="min-w-0 flex-1 truncate text-ui">{item.title.trimEnd()}</span>
 
         {/* One slot for both, sized by the buttons and always holding that width
             — so a long title truncates against it either way and nothing reflows
