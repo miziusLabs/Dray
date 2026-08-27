@@ -57,7 +57,7 @@ export function highlightSegments(text: string): Segment[] {
   // and the picker use — a slash mid-sentence is a path separator.
   const command = parseSlashCommand(text);
   if (command) {
-    segments.push({ kind: "command", text: `/${command.name}` });
+    segments.push({ kind: "command", text: `${text[0]}${command.name}` });
     i = command.name.length + 1;
     plainFrom = i;
   }

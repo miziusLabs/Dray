@@ -37,6 +37,8 @@ pub struct SlashCommand {
     pub argument_hint: String,
     #[serde(default)]
     pub aliases: Vec<String>,
+    /// Skills are displayed with `$` while Pi still receives `/skill:`.
+    pub is_skill: bool,
 }
 
 /// Returns commands registered by Pi extensions, prompt templates, and skills.
@@ -185,6 +187,12 @@ async fn probe(cwd: &str) -> Result<(Vec<SlashCommand>, Vec<String>)> {
                 if HIDDEN.contains(&name) {
                     return None;
                 }
+                let is_skill = command.get("source").and_then(Value::as_str) == Some("skill");
+                let name = if is_skill {
+                    name.strip_prefix("skill:").unwrap_or(name)
+                } else {
+                    name
+                };
                 Some(SlashCommand {
                     name: name.to_string(),
                     description: command
@@ -194,6 +202,7 @@ async fn probe(cwd: &str) -> Result<(Vec<SlashCommand>, Vec<String>)> {
                         .to_string(),
                     argument_hint: String::new(),
                     aliases: Vec::new(),
+                    is_skill,
                 })
             })
             .collect();

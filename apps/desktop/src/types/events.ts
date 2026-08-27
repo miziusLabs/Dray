@@ -922,10 +922,10 @@ export type Settings = { model: string | null,
 approvalPolicy: PermissionMode | null, sandbox: string | null, writableRoots: Array<string>, networkAccess: boolean | null, fastMode: string | null, };
 
 /**
- * One command the user may type. `name` carries no leading slash — the picker
- * adds it — and may be namespaced by an extension.
+ * One command or skill the user may type. `name` carries no leading prefix —
+ * the picker adds `/` for commands or `$` for skills.
  */
-export type SlashCommand = { name: string, description: string, argumentHint: string, aliases: Array<string>, };
+export type SlashCommand = { name: string, description: string, argumentHint: string, aliases: Array<string>, isSkill: boolean, };
 
 /**
  * A running subagent, whose events interleave with the main conversation's on

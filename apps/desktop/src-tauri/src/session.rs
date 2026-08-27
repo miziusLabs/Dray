@@ -1390,7 +1390,11 @@ async fn deliver_prompt(
     append_session_event(session_id, agent_event).await?;
 
     debug_assert_eq!(harness, Pi);
-    let mut line = json!({"type": "prompt", "message": prepared.text});
+    // `$name` is Dray's user-facing skill syntax; Pi's RPC parser expects the
+    // equivalent `/skill:name` command. Keep the stored event in `$` form so
+    // the transcript reflects what the user typed.
+    let pi_prompt = normalize_skill_prompt(&prepared.text);
+    let mut line = json!({"type": "prompt", "message": pi_prompt});
     if !prepared.images.is_empty() {
         line["images"] = json!(prepared
             .images
@@ -1409,6 +1413,17 @@ async fn deliver_prompt(
         line["streamingBehavior"] = json!("steer");
     }
     write_line(stdin, &line).await
+}
+
+fn normalize_skill_prompt(prompt: &str) -> String {
+    let Some(rest) = prompt.strip_prefix('$') else {
+        return prompt.to_string();
+    };
+    let split = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    if split == 0 {
+        return prompt.to_string();
+    }
+    format!("/skill:{}{}", &rest[..split], &rest[split..])
 }
 
 /// Hands every held prompt to the child, oldest first.
@@ -1484,6 +1499,16 @@ pub async fn flush_queued(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalizes_skill_prompts_for_pi() {
+        assert_eq!(normalize_skill_prompt("$commit-and-push"), "/skill:commit-and-push");
+        assert_eq!(
+            normalize_skill_prompt("$commit-and-push now"),
+            "/skill:commit-and-push now"
+        );
+        assert_eq!(normalize_skill_prompt("fix the bug"), "fix the bug");
+    }
 
     fn turn_completed() -> AgentEventPayload {
         AgentEventPayload::TurnCompleted {

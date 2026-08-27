@@ -14,14 +14,19 @@ function command(
   name: string,
   description = "",
   aliases: string[] = [],
+  isSkill = false,
 ): SlashCommand {
-  return { name, description, argumentHint: "", aliases };
+  return { name, description, argumentHint: "", aliases, isSkill };
 }
 
 describe("slashQuery", () => {
   it("opens on a leading slash and tracks what follows it", () => {
     expect(slashQuery("/", 1)).toBe("");
     expect(slashQuery("/rev", 4)).toBe("rev");
+  });
+
+  it("opens skills with a leading dollar sign", () => {
+    expect(slashQuery("$commit", 7)).toBe("commit");
   });
 
   /// A slash inside prose is a path or a date, not a command. Firing there
@@ -112,7 +117,7 @@ describe("commandSource", () => {
   /// A bundled skill is indistinguishable from a built-in and is meant to be:
   /// neither was installed by anyone, so both read as "came with Pi".
   it("files a bundled skill with the built-ins", () => {
-    expect(commandSource(command("dataviz", "Use this skill whenever..."))).toBe("harness");
+    expect(commandSource(command("dataviz", "Use this skill whenever...", [], true))).toBe("skill");
   });
 
   /// Descriptions end in parentheses for ordinary reasons, so only the scope
@@ -193,6 +198,10 @@ describe("applyCommand", () => {
 
   it("completes a bare slash", () => {
     expect(applyCommand("/", "usage")).toEqual({ text: "/usage ", caret: 7 });
+    expect(applyCommand("$", "commit-and-push", true)).toEqual({
+      text: "$commit-and-push ",
+      caret: 17,
+    });
   });
 });
 
@@ -204,9 +213,13 @@ describe("parseSlashCommand", () => {
     });
   });
 
-  it("reads a bare command", () => {
+  it("reads a bare command or skill", () => {
     expect(parseSlashCommand("/usage")).toEqual({ name: "usage", args: "" });
     expect(parseSlashCommand("/usage  ")).toEqual({ name: "usage", args: "" });
+    expect(parseSlashCommand("$commit-and-push")).toEqual({
+      name: "commit-and-push",
+      args: "",
+    });
   });
 
   it("keeps namespaced names whole", () => {

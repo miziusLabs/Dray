@@ -34,9 +34,9 @@ type ChatInputProps = {
   /// re-reads each one — nothing but paths crosses the bridge, so a pinned
   /// screenshot is never uploaded twice.
   onSend: (message: string, attachmentPaths: string[]) => void;
-  /// What the `/` picker offers. Empty until the backend's probe lands, and
-  /// empty forever if it failed — the picker simply never opens, and a command
-  /// typed by hand still works, since the CLI parses the text either way.
+  /// What the command and `$` skill picker offers. Empty until the backend's
+  /// probe lands, and empty forever if it failed — the picker simply never
+  /// opens, and text typed by hand still works, since the CLI parses it either way.
   commands?: SlashCommand[];
   /// Where the `@` picker searches for files. Cloud sessions expose an empty
   /// host-side marker because their actual workspace stays inside Docker.
@@ -222,7 +222,7 @@ export default function ChatInput({
   }, [query, mentionQuery]);
 
   const pickCommand = (command: SlashCommand) => {
-    const next = applyCommand(message, command.name);
+    const next = applyCommand(message, command.name, command.isSkill);
     pendingCaretRef.current = next.caret;
     setMessage(next.text);
     textareaRef.current?.focus();
@@ -612,7 +612,7 @@ export default function ChatInput({
                   const mirror = mirrorRef.current;
                   if (mirror) mirror.scrollTop = e.currentTarget.scrollTop;
                 }}
-                placeholder={isNewTask ? "Describe a task. @files. /skills and commands." : "Send follow-up"}
+                placeholder={isNewTask ? "Describe a task. @files. $skills and /commands." : "Send follow-up"}
                 onChange={(e) => {
                   setMessage(e.currentTarget.value);
                   setCaret(e.currentTarget.selectionStart);
