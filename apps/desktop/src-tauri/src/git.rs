@@ -1228,9 +1228,9 @@ fn lock_owner_pid(reason: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
-/// `kill(pid, 0)` — the signal number that checks for a process without
-/// sending anything. `EPERM` counts as alive: a process owned by another user
-/// is still a process holding that lock.
+/// Whether the process named in a worktree lock is still alive. Unix uses
+/// `kill(pid, 0)`; Windows queries the process handle without terminating it.
+#[cfg(unix)]
 fn pid_is_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -1239,6 +1239,38 @@ fn pid_is_alive(pid: u32) -> bool {
     // permission check that gives this function its answer.
     let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
     rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(windows)]
+fn pid_is_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ACCESS_DENIED};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    if pid == 0 {
+        return false;
+    }
+
+    // PROCESS_QUERY_LIMITED_INFORMATION is enough to ask for the exit code and
+    // does not grant the ability to terminate or otherwise control the process.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        // Access denied still means a process exists; treating it as alive is
+        // the safe answer before removing a worktree another account owns.
+        return unsafe { GetLastError() } == ERROR_ACCESS_DENIED;
+    }
+
+    let mut exit_code = 0;
+    let queried = unsafe { GetExitCodeProcess(process, &mut exit_code) } != 0;
+    unsafe {
+        CloseHandle(process);
+    }
+
+    // STILL_ACTIVE is the Windows exit-code sentinel (259). An unexpected
+    // query failure is treated as alive so cleanup never removes an in-use
+    // worktree on an inconclusive answer.
+    !queried || exit_code == 259
 }
 
 /// The `locked` reason git records for `worktree_path`, if any.
