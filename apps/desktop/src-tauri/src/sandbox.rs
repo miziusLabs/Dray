@@ -116,13 +116,7 @@ pub async fn pi_command(session_id: &str, cloud_name: &str, pi_args: &[String]) 
         command.arg("--env").arg("GITHUB_TOKEN");
     }
 
-    // Pi extensions can invoke `dray`; forward the session identity even
-    // though the local Unix socket itself is intentionally not mounted into
-    // the sandbox.
     command
-        .env("DRAY_SESSION_ID", session_id)
-        .arg("--env")
-        .arg("DRAY_SESSION_ID")
         .arg(image())
         .arg("pi")
         .args(pi_args);

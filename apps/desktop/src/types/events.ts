@@ -810,10 +810,9 @@ status: SessionStatus,
  */
 forkFrom: string | null, 
 /**
- * The session whose agent created this one, for a session created over the
- * orchestration socket rather than by a person in the composer. `Some` is
- * also what the depth guard reads: a session that was itself spawned may
- * not spawn more.
+ * The session whose agent created this one, rather than one started by a
+ * person in the composer. `Some` is also what the depth guard reads: a
+ * session that was itself spawned may not spawn more.
  */
 parentSessionId: string | null, created: string, modified: string, archived: boolean, pinned: boolean, };
 
@@ -877,10 +876,9 @@ status: SessionStatus,
  */
 forkFrom: string | null, 
 /**
- * The session whose agent created this one, for a session created over the
- * orchestration socket rather than by a person in the composer. `Some` is
- * also what the depth guard reads: a session that was itself spawned may
- * not spawn more.
+ * The session whose agent created this one, rather than one started by a
+ * person in the composer. `Some` is also what the depth guard reads: a
+ * session that was itself spawned may not spawn more.
  */
 parentSessionId: string | null, created: string, modified: string, archived: boolean, pinned: boolean, };
 

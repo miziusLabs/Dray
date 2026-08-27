@@ -136,9 +136,6 @@ pub async fn generate_title(
     if let Some(home) = dirs::home_dir() {
         command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     }
-    if let Some(endpoint) = crate::orchestration::child_endpoint() {
-        command.env("DRAY_ENDPOINT", endpoint);
-    }
 
     let child = command
         .args(args)

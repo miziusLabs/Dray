@@ -116,16 +116,12 @@ pub async fn init(
         if let Some(home) = dirs::home_dir() {
             command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
         }
-        if let Some(endpoint) = crate::orchestration::child_endpoint() {
-            command.env("DRAY_ENDPOINT", endpoint);
-        }
         command.args(&args);
         command
     };
 
     let child = command
         .current_dir(cwd)
-        .env("DRAY_SESSION_ID", session_id)
         .stdin(Stdio::piped());
     if !cloud {
         child.env("PATH", crate::binpath::agent_path());

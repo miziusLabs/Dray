@@ -60,7 +60,7 @@ export default function EventRow({
   /// the call the reader opened the run to see.
   openTool?: boolean;
   /// Opens the session that relayed a prompt. Only a `user_message` reads it,
-  /// and only one that came over the orchestration socket.
+  /// and only one that carries a sender.
   onOpenSession?: (sessionId: string) => void;
 }) {
   const { payload } = event;

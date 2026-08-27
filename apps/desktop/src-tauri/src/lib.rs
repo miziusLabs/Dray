@@ -24,7 +24,6 @@ pub mod harness;
 #[path = "models/models.rs"]
 pub mod models;
 pub mod notifications;
-pub mod orchestration;
 pub mod projects;
 pub mod sandbox;
 pub mod quit;
@@ -77,8 +76,8 @@ async fn send_msg(
             // recorded and used as the cloud's starting point.
             None,
             is_new_session,
-            // The composer never has a parent, and its prompts are the user's
-            // own; only the orchestration socket sets either.
+            // The composer has no parent session, and its prompts are the
+            // user's own.
             None,
             None,
             &app,
@@ -478,23 +477,13 @@ pub fn run() {
                 quit::request(window.app_handle());
             }
         })
-        .setup(|app| {
+        .setup(|_app| {
             // A persisted `in_progress` can't be true anymore — no child
             // survived the restart. Spawned, not awaited: the reset needs no
             // window, and the frontend's first fetch lands well after it.
             tauri::async_runtime::spawn(async {
                 if let Err(e) = store::reset_in_progress_sessions().await {
                     eprintln!("[status reset err] {e}");
-                }
-            });
-
-            // Orchestration is a side channel: a socket that won't bind must
-            // cost the feature, never the app. Logged and dropped for that
-            // reason — there is nothing the reader could act on either.
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = orchestration::serve(handle).await {
-                    eprintln!("[orchestration err] {e:#}");
                 }
             });
 

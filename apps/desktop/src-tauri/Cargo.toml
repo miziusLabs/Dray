@@ -30,7 +30,6 @@ uuid = { version = "1.16", features = ["v4", "v7"] }
 # Generates the TS mirror of the event model; `cargo test` writes ../src/types/.
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 dirs = "6.0.0"
-dray-proto = { path = "../../../crates/dray-proto" }
 tauri-plugin-dialog = "2"
 fff-search = "0.10.3"
 # Attached images travel to the CLI as base64 content blocks.
@@ -43,8 +42,6 @@ base64 = "0.22"
 notify-rust = { version = "4.18", features = ["preview-macos-un"] }
 
 [target.'cfg(windows)'.dependencies]
-# Windows has AF_UNIX support, but Tokio does not expose it as an async stream.
-uds_windows = "1.2.1"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",

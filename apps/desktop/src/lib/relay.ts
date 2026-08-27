@@ -1,7 +1,7 @@
 import type { MessageSender } from "@/types/events";
 
-/// The line `attribute` in `orchestration.rs` puts in front of a relayed
-/// prompt, rebuilt verbatim from the sender the event already names.
+/// The line the backend puts in front of a relayed prompt, rebuilt verbatim
+/// from the sender the event already names.
 ///
 /// Rebuilt, never parsed. A regex over the text would have to guess where the
 /// line ends, and a title holding a bracket or a reworded prefix would break it

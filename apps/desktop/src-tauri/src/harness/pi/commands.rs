@@ -74,9 +74,6 @@ async fn probe_models(cwd: Option<&str>) -> Result<Vec<Model>> {
     if let Some(home) = dirs::home_dir() {
         command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     }
-    if let Some(endpoint) = crate::orchestration::child_endpoint() {
-        command.env("DRAY_ENDPOINT", endpoint);
-    }
 
     let mut child = command
         .args(["--mode", "rpc", "--no-session", "--offline", "--approve"])
@@ -139,9 +136,6 @@ async fn probe(cwd: &str) -> Result<(Vec<SlashCommand>, Vec<String>)> {
     let mut command = crate::binpath::pi_command().await;
     if let Some(home) = dirs::home_dir() {
         command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
-    }
-    if let Some(endpoint) = crate::orchestration::child_endpoint() {
-        command.env("DRAY_ENDPOINT", endpoint);
     }
 
     let mut child = command

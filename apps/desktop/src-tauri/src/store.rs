@@ -79,10 +79,9 @@ pub struct SessionIndexItem {
     /// this one is cleared the moment the CLI carries the fork out.
     #[serde(default)]
     pub fork_from: Option<String>,
-    /// The session whose agent created this one, for a session created over the
-    /// orchestration socket rather than by a person in the composer. `Some` is
-    /// also what the depth guard reads: a session that was itself spawned may
-    /// not spawn more.
+    /// The session whose agent created this one, rather than one started by a
+    /// person in the composer. `Some` is also what the depth guard reads: a
+    /// session that was itself spawned may not spawn more.
     #[serde(default)]
     pub parent_session_id: Option<String>,
     pub created: String,
@@ -136,16 +135,9 @@ pub async fn get_home_app_dir() -> Result<PathBuf> {
 /// Narrows the app directory to the owner alone on Unix. Windows uses the
 /// profile directory's inherited ACLs instead.
 ///
-/// Two things depend on it. Everything under here is private by content —
-/// transcripts hold whole files the agent read and wrote — and the default
-/// `0755` left all of it readable by any other local account.
-///
-/// It is also the orchestration socket's real authentication boundary on Unix.
-/// Connecting to a local-domain socket needs search permission on every
-/// directory in its path, so a `0700` parent settles the question *before the
-/// socket exists* — where the socket's own mode cannot, since `bind` applies
-/// the process umask and a permissive one leaves a window between bind and
-/// chmod.
+/// Everything under here is private by content — transcripts hold whole files
+/// the agent read and wrote — and the default `0755` left all of it readable
+/// by any other local account.
 ///
 /// Best-effort: a directory that cannot be narrowed is worth carrying on with,
 /// since the alternative is an app that refuses to start.
@@ -307,8 +299,8 @@ impl SessionIndexItem {
             fork_from: Some(self.session_id.clone()),
             // Inherited, so the copy sits exactly where the original does: the
             // sidebar draws it beside its source under the same parent, not
-            // under its source, and the orchestration depth cap counts it at the
-            // same depth. A fork that reset this to `None` would surface at the
+            // under its source, and the depth cap counts it at the same depth.
+            // A fork that reset this to `None` would surface at the
             // top level and be free to spawn where the session it copied was
             // not — a depth cap a copy could walk around. Detach is the way out
             // for anyone who wants the fork standing on its own.

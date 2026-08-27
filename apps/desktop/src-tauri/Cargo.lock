@@ -932,7 +932,6 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "dirs 6.0.0",
- "dray-proto",
  "fff-search",
  "notify-rust",
  "serde",
@@ -943,18 +942,8 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "ts-rs",
- "uds_windows",
  "uuid",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "dray-proto"
-version = "0.1.0"
-dependencies = [
- "dirs 6.0.0",
- "serde",
- "serde_json",
 ]
 
 [[package]]

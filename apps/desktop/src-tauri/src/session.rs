@@ -51,6 +51,18 @@ use tokio::{
 #[cfg(windows)]
 use tokio::process::Command;
 
+/// Emitted once a new session's index entry is durable, so the sidebar gains
+/// the row without waiting for process startup or a refetch.
+///
+/// Carries the index item alone, not a `SessionSnapshot`. The frontend's
+/// `agent_event` listener writes into sessions it already holds and drops
+/// events for ids it doesn't — so shipping a snapshot would open a window where
+/// the transcript is half-built in memory and half only on disk. An index item
+/// leaves the transcript unread until the row is clicked, and
+/// `handleSelectSessionIndexItem` already loads it whole from disk at that
+/// point.
+pub const SESSION_CREATED: &str = "session_created";
+
 /// Emitted as `session_status` when a session's status changes, so the sidebar
 /// and composer update without a refetch. Like `SessionTitleEvent`, this is not
 /// an `AgentEvent`: it's derived state, and must never reach the `.jsonl` log.
@@ -335,19 +347,16 @@ impl SessionManager {
         branch: Option<&str>,
         use_cloud: bool,
         cloud_name: Option<&str>,
-        // Branch metadata supplied by the orchestration socket. It resolves a
-        // session id before calling here; Cloud itself does not resolve or
-        // validate Git refs.
+        // Branch metadata for the new Cloud's brief, resolved before calling
+        // here; Cloud itself does not resolve or validate Git refs.
         base_ref: Option<&str>,
         is_new_session: bool,
-        // Set only for a session created over the orchestration socket. The
-        // composer never has one, and it is recorded rather than acted on —
-        // the depth cap reads it back off the index on the *next* create.
+        // Recorded rather than acted on — the depth cap reads it back off the
+        // index on the *next* create.
         parent_session_id: Option<&str>,
-        // The session that relayed this prompt, for a message arriving over the
-        // orchestration socket. `None` everywhere else: the composer's prompts
-        // are the user's own, and a `user_message` with a sender is drawn
-        // differently.
+        // The session that relayed this prompt, drawn on the `user_message`
+        // when present. `None` from the composer: its prompts are the user's
+        // own, and a message with a sender is drawn differently.
         from: Option<MessageSender>,
         app: &AppHandle,
     ) -> Result<SendOutcome> {
@@ -421,7 +430,7 @@ impl SessionManager {
                 let _ = tokio::fs::remove_dir_all(&session_cwd).await;
                 return Err(error);
             }
-            app.emit(crate::orchestration::SESSION_CREATED, &item).ok();
+            app.emit(SESSION_CREATED, &item).ok();
 
             // Cloud work is inside a Docker volume, not the host project, so
             // its changes must never be presented as local Git changes.
