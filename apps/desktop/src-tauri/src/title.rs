@@ -133,9 +133,17 @@ pub async fn generate_title(
         "--approve",
     ];
 
-    let child = Command::new(crate::binpath::pi().await)
+    let mut command = Command::new(crate::binpath::pi().await);
+    if let Some(home) = dirs::home_dir() {
+        command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
+    }
+
+    let child = command
         .args(args)
         .current_dir(cwd)
+        // Match the main Pi harness so GUI launches can find the user's Node
+        // runtime and installed agent resources on Windows as well as Unix.
+        .env("PATH", crate::binpath::agent_path())
         // Closed, not inherited: with the prompt in argv there's nothing to
         // write, and an inherited stdin would let the child block on a read.
         .stdin(Stdio::null())

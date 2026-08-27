@@ -53,6 +53,12 @@ pub async fn read_projects() -> Result<Vec<Project>> {
     }
 
     let mut projects: Vec<Project> = serde_json::from_str(&contents)?;
+    // Older Windows builds stored the whole verbatim path as the cached name
+    // because they only recognized `/` as a separator. Repair those entries as
+    // they are read; other cached names still preserve their attach-time label.
+    for project in &mut projects {
+        repair_legacy_name(project);
+    }
     // Descending, so the newest selection sorts to the front. RFC 3339 stamps
     // compare correctly as strings at fixed width.
     projects.sort_by(|a, b| b.last_selected.cmp(&a.last_selected));
@@ -132,6 +138,15 @@ pub async fn set_last_selected_project(path: &str) -> Result<()> {
     write_projects(&projects).await
 }
 
+/// Repairs the path labels written by builds that did not recognize Windows
+/// separators. Other cached names remain untouched so attach-time labels are
+/// preserved when a directory is no longer available.
+fn repair_legacy_name(project: &mut Project) {
+    if project.name == project.path {
+        project.name = basename(&project.path);
+    }
+}
+
 /// Trailing path segment. Mirrors the frontend's `basename` so a project's
 /// cached label matches what the UI would derive from the path.
 fn basename(path: &str) -> String {
@@ -175,6 +190,20 @@ mod tests {
         assert_eq!(basename("/Users/y/proj/"), "proj");
         assert_eq!(basename(r"C:\Users\y\proj"), "proj");
         assert_eq!(basename(r"C:\Users\y\proj\"), "proj");
+        assert_eq!(basename(r"\\?\C:\Users\y\proj"), "proj");
         assert_eq!(basename("/"), "/");
+    }
+
+    #[test]
+    fn repairs_a_legacy_path_as_the_cached_name() {
+        let mut project = Project {
+            path: r"\\?\C:\Users\y\proj".into(),
+            name: r"\\?\C:\Users\y\proj".into(),
+            last_selected: String::new(),
+        };
+
+        repair_legacy_name(&mut project);
+
+        assert_eq!(project.name, "proj");
     }
 }
