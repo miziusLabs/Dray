@@ -965,7 +965,9 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "ts-rs",
+ "uds_windows",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

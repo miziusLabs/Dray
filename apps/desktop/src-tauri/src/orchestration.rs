@@ -7,11 +7,11 @@
 //! itself goes through [`SessionManager::send_msg`], the same function the
 //! composer reaches, so a session created here is not a second kind of session.
 //!
-//! Newline-delimited JSON over a unix socket at `~/.dray/dray.sock` — or
-//! `dray-dev.sock` for a dev build, see [`socket_path`] — one
-//! request per connection. Nothing on the network can reach it at all, and
-//! access control is the containing directory's `0700` — see
-//! [`serve`](serve) for why the socket's own mode cannot be the boundary.
+//! Newline-delimited JSON over a local-domain socket at
+//! `~/.dray/dray.sock` — or `dray-dev.sock` for a dev build, see
+//! [`socket_path`] — one request per connection. Nothing on the network can
+//! reach it at all. On Unix, access control is the containing directory's
+//! `0700`; Windows uses the profile directory's inherited ACLs.
 
 use crate::{
     events::{ApprovalPolicy, MessageSender},
@@ -24,12 +24,15 @@ use dray_proto::{
     encode_line, CreateSession, Envelope, ListSessions, Request, Response, SendMessage,
     SessionSummary, MAX_LINE, PROTOCOL_VERSION,
 };
+use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::path::Path;
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::{UnixListener, UnixStream},
-};
+use tokio::runtime::Handle;
 
 /// Emitted when a session is created by something other than the composer, so
 /// the sidebar gains the row without a refetch.
@@ -57,8 +60,8 @@ const MAX_WALK: usize = 64;
 ///
 /// Split by build because the release app is normally running while this one is
 /// being developed, and one path between them means whichever started last owns
-/// the channel — `bind` unlinks the other's socket, so the app left behind
-/// keeps a listener no `dray` will ever reach again.
+/// the channel — the old endpoint is removed before binding, so the app left
+/// behind keeps a listener no `dray` will ever reach again.
 pub fn socket_path() -> Option<std::path::PathBuf> {
     dray_proto::socket_path(tauri::is_dev())
 }
@@ -81,53 +84,50 @@ pub fn child_endpoint() -> Option<String> {
 pub async fn serve(app: AppHandle) -> Result<()> {
     let path = socket_path().context("could not resolve the socket path")?;
 
-    // Creates `~/.dray` and narrows it to `0700`, which is what actually
-    // guards this socket. `bind` applies the process umask, so under a
-    // permissive one the socket lands world-writable and stays that way until
-    // `restrict` runs a moment later — a window another local account can
-    // connect through and reach session creation unauthenticated. Measured:
-    // umask 022 gives 0755, umask 000 gives 0777.
-    //
-    // A directory cannot have that window. Connecting needs search permission
-    // on every directory in the path, so `0700` there settles it before the
-    // socket exists at all. The chmod below stays as a second line rather than
-    // the only one.
-    let dir = store::get_home_app_dir().await?;
+    // Creates ~/.dray before the endpoint. On Unix it is narrowed before the
+    // socket exists; on Windows it inherits the user's profile ACL.
+    let _dir = store::get_home_app_dir().await?;
 
-    // That narrowing is best-effort — the app has to start whether or not it
-    // lands — so this checks rather than assumes. A directory that stayed
-    // group- or world-reachable leaves the racy chmod as the socket's only
-    // guard, and binding anyway would be serving session creation to every
-    // account on the machine.
-    //
-    // Refusing costs orchestration and nothing else, which is the bargain this
-    // whole module already makes: the caller logs and drops the error, and the
-    // app carries on without a side channel.
-    let mode = owner_bits(&dir).await?;
-    if mode & 0o077 != 0 {
-        bail!(
-            "{} is mode {mode:04o}; refusing to serve a socket that other accounts can reach. \
-             Run `chmod 700 {}` and restart.",
-            dir.display(),
-            dir.display()
-        );
+    #[cfg(unix)]
+    {
+        // A directory cannot have the permission window that exists between a
+        // Unix socket bind and chmod: connecting needs search permission on
+        // every directory in the path. Refusing a reachable directory costs
+        // orchestration and nothing else; the caller logs and drops the error.
+        let mode = owner_bits(&_dir).await?;
+        if mode & 0o077 != 0 {
+            bail!(
+                "{} is mode {mode:04o}; refusing to serve a socket that other accounts can reach. \
+                 Run `chmod 700 {}` and restart.",
+                _dir.display(),
+                _dir.display()
+            );
+        }
     }
 
-    // A socket file outlives the process that made it — a crash or a SIGKILL
-    // leaves one behind, and binding onto it fails with "address in use". The
-    // file is not a lock and holds nothing, so removing it is safe *because
-    // this path names one build*: unlinking can only ever take the channel from
-    // another copy of the same build, never from the release app a dev one is
-    // running beside.
+    // A socket endpoint can outlive the process that made it — a crash or a
+    // forced stop can leave one behind, and binding onto it then fails with
+    // "address in use". Removing it is safe because this path is unique to one
+    // build (release or dev), never shared with the other build.
     tokio::fs::remove_file(&path).await.ok();
 
     let listener =
         UnixListener::bind(&path).with_context(|| format!("could not bind {}", path.display()))?;
 
+    #[cfg(unix)]
     restrict(&path)?;
 
+    // Both std::os::unix::net and uds_windows expose blocking streams. Keep
+    // their I/O off Tokio, and only use the runtime to dispatch each request.
+    let runtime = Handle::current();
+    tokio::task::spawn_blocking(move || serve_listener(listener, app, runtime))
+        .await
+        .context("orchestration listener task failed")?
+}
+
+fn serve_listener(listener: UnixListener, app: AppHandle, runtime: Handle) -> Result<()> {
     loop {
-        let (stream, _) = match listener.accept().await {
+        let (stream, _) = match listener.accept() {
             Ok(accepted) => accepted,
             Err(e) => {
                 eprintln!("[orchestration accept err] {e}");
@@ -136,16 +136,18 @@ pub async fn serve(app: AppHandle) -> Result<()> {
         };
 
         let app = app.clone();
+        let connection_runtime = runtime.clone();
         // Per connection, so one slow create cannot hold the next caller off.
-        tokio::spawn(async move {
-            if let Err(e) = handle(stream, &app).await {
+        runtime.spawn_blocking(move || {
+            if let Err(e) = handle(stream, &app, &connection_runtime) {
                 eprintln!("[orchestration conn err] {e:#}");
             }
         });
     }
 }
 
-/// The permission bits on a directory, for the check above.
+/// The permission bits on a Unix directory, for the check above.
+#[cfg(unix)]
 async fn owner_bits(path: &Path) -> Result<u32> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -156,9 +158,9 @@ async fn owner_bits(path: &Path) -> Result<u32> {
     Ok(meta.permissions().mode() & 0o777)
 }
 
-/// `0600` on the socket itself. Defence in depth behind the `0700` directory,
-/// which is the boundary that holds from before the socket exists — this one
-/// cannot, because `bind` has already applied the umask by the time it runs.
+/// `0600` on the Unix socket itself. Defence in depth behind the `0700`
+/// directory, which is the boundary that holds from before the socket exists.
+#[cfg(unix)]
 fn restrict(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -181,34 +183,50 @@ fn mismatch(theirs: u32) -> String {
 
 /// Reads one request, answers it, closes. A connection carries one command so
 /// that a client crashing mid-line costs nothing but itself.
-async fn handle(stream: UnixStream, app: &AppHandle) -> Result<()> {
-    let (read_half, mut write_half) = stream.into_split();
+fn handle(mut stream: UnixStream, app: &AppHandle, runtime: &Handle) -> Result<()> {
+    let mut reader = BufReader::new(&mut stream);
 
     let mut line = String::new();
-    BufReader::new(read_half.take(MAX_LINE))
+    (&mut reader)
+        .take(MAX_LINE)
         .read_line(&mut line)
-        .await
         .context("could not read the request")?;
 
     let response = match serde_json::from_str::<Envelope>(&line) {
         // Answered before the request is even looked at: an old CLI against a
         // new app must be told to upgrade, not handed a guess at what it meant.
         Ok(envelope) if envelope.v != PROTOCOL_VERSION => Response::error(mismatch(envelope.v)),
-        Ok(envelope) => match dispatch(envelope.request, app).await {
+        Ok(envelope) => dispatch_sync(envelope.request, app, runtime)?,
+        Err(e) => Response::error(format!("could not parse the request: {e}")),
+    };
+
+    stream
+        .write_all(encode_line(&response)?.as_bytes())
+        .context("could not write the response")?;
+
+    Ok(())
+}
+
+/// Runs the async dispatch from a blocking connection worker without trying to
+/// enter Tokio recursively. The worker waits for the response while the
+/// runtime continues serving the rest of the app.
+fn dispatch_sync(request: Request, app: &AppHandle, runtime: &Handle) -> Result<Response> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let app = app.clone();
+
+    runtime.spawn(async move {
+        let response = match dispatch(request, &app).await {
             Ok(response) => response,
             // Reported rather than logged: the caller is an agent, and this
             // string is what it reads back as tool output.
             Err(e) => Response::error(format!("{e:#}")),
-        },
-        Err(e) => Response::error(format!("could not parse the request: {e}")),
-    };
+        };
+        let _ = sender.send(response);
+    });
 
-    write_half
-        .write_all(encode_line(&response)?.as_bytes())
-        .await
-        .context("could not write the response")?;
-
-    Ok(())
+    receiver
+        .recv()
+        .context("orchestration runtime stopped before answering")
 }
 
 async fn dispatch(request: Request, app: &AppHandle) -> Result<Response> {

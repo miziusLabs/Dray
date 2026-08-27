@@ -49,10 +49,11 @@ pub const SOCKET_NAME: &str = "dray.sock";
 /// is the ordinary state while developing this app.
 pub const SOCKET_NAME_DEV: &str = "dray-dev.sock";
 
-/// A line longer than this is refused unread. The socket is `0600`, so this is
-/// hygiene rather than a threat model — but a length-prefixed-by-newline
-/// protocol with no cap is one malformed writer away from an allocation the
-/// size of the sender's patience.
+/// A line longer than this is refused unread. The endpoint is protected by
+/// platform-local filesystem ACLs (`0600` on Unix), so this is hygiene rather
+/// than a threat model — but a length-prefixed-by-newline protocol with no cap
+/// is one malformed writer away from an allocation the size of the sender's
+/// patience.
 pub const MAX_LINE: u64 = 1024 * 1024;
 
 /// One request, with the protocol version flattened alongside it so the server

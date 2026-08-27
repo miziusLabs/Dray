@@ -15,7 +15,10 @@ use dray_proto::{
 };
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+use uds_windows::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -294,15 +297,20 @@ fn update() -> Result<(), String> {
 ///
 /// `create_dir` refuses a path that already exists — symlink included — so
 /// another local account cannot park something at the predictable name and have
-/// it run. `0700` closes the window between creating it and writing into it.
+/// it run. Unix narrows it to `0700`; Windows uses the temp directory's
+/// inherited ACLs.
 fn scratch_dir() -> Result<PathBuf, String> {
-    use std::os::unix::fs::PermissionsExt;
-
     let path = std::env::temp_dir().join(format!("dray-update-{}", std::process::id()));
 
     std::fs::create_dir(&path).map_err(|e| format!("could not create {}: {e}", path.display()))?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
-        .map_err(|e| format!("could not restrict {}: {e}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("could not restrict {}: {e}", path.display()))?;
+    }
 
     Ok(path)
 }
