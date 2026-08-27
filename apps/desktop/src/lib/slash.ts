@@ -8,17 +8,12 @@
 /// [streaming.ts]: ./streaming.ts
 import type { SlashCommand } from "@/types/events";
 
-/// The command name being typed, or `null` when the caret isn't in one.
+/// The command or skill name being typed, or `null` when the caret isn't in one.
 ///
-/// Only a *leading* slash counts, because that is the only one the CLI treats as
-/// a command — a slash mid-sentence is prose, and opening a picker over it would
-/// fire on every file path someone types.
-///
-/// The caret has to be inside the first token rather than the text merely
-/// lacking a space, so backspacing into `/review some args` to fix the name
-/// reopens the picker instead of leaving it shut until the line is cleared.
+/// A leading `/` opens commands and a leading `$` opens skills. Prefixes in
+/// prose remain ordinary text, so file paths never open the picker.
 export function slashQuery(text: string, caret: number): string | null {
-  if (!text.startsWith("/")) return null;
+  if (text[0] !== "/" && text[0] !== "$") return null;
 
   const space = text.search(/\s/);
   const end = space === -1 ? text.length : space;
@@ -58,15 +53,11 @@ function score(command: SlashCommand, query: string): number | null {
   return null;
 }
 
-/// Replaces the command being typed with `name`, leaving any arguments alone.
-///
-/// Always lands the caret past a trailing space: every pick is either finished
-/// (the space is harmless) or about to take arguments (the space is needed), and
-/// the CLI reads `/model` and `/model ` identically.
-export function applyCommand(text: string, name: string): { text: string; caret: number } {
+/// Replaces the command or skill being typed with its user-facing prefix.
+export function applyCommand(text: string, name: string, isSkill = false): { text: string; caret: number } {
   const space = text.search(/\s/);
   const args = space === -1 ? "" : text.slice(space);
-  const head = `/${name}`;
+  const head = `${isSkill ? "$" : "/"}${name}`;
 
   return { text: head + (args || " "), caret: head.length + 1 };
 }
@@ -74,25 +65,22 @@ export function applyCommand(text: string, name: string): { text: string; caret:
 /// Where a command came from, as far as the CLI will tell us.
 ///
 /// The `initialize` payload carries no scope field — only `name`, `description`,
-/// `argumentHint` and `aliases` — so this reads the two signals that are
-/// recoverable: a plugin namespaces its commands into the name, and a
-/// user- or project-scoped one has the scope appended to its *description*.
+/// `argumentHint` and `aliases` — so this reads the signals recoverable from
+/// the command and its description.
 ///
-/// `harness` therefore means "neither of those", which lumps the CLI's true
-/// built-ins (`/compact`, `/model`) together with the skills Anthropic ships
-/// alongside them (`/dataviz`, `/code-review`). Nothing distinguishes those two,
-/// and for the reader they are the same thing: commands that were there without
-/// anyone installing them.
+/// Skills are kept distinct so their `$` prefix survives every picker and
+/// transcript surface. `harness` means a built-in command.
 ///
 /// The description test is the fragile half, since it reads display text rather
 /// than a field. It fails benignly — a reworded suffix files a command under the
 /// wrong heading and changes nothing else — so it is not worth a sturdier scheme
 /// that the wire doesn't support.
-export type CommandSource = "harness" | "plugin" | "user";
+export type CommandSource = "harness" | "plugin" | "skill" | "user";
 
 const SCOPE_SUFFIX = /\((?:user|project)\)\s*$/;
 
 export function commandSource(command: SlashCommand): CommandSource {
+  if (command.isSkill) return "skill";
   if (command.name.includes(":")) return "plugin";
   return SCOPE_SUFFIX.test(command.description) ? "user" : "harness";
 }
@@ -144,16 +132,10 @@ export function groupCommands(commands: SlashCommand[], recent: string[]): Comma
   ].filter((group) => group.items.length > 0);
 }
 
-/// Splits a sent message into its command and the rest, or `null` for ordinary
-/// prose. What the transcript renders as a command chip is decided here, so it
-/// can't disagree with what the picker offered.
-///
-/// Deliberately not checked against the known command list: the transcript
-/// outlives the session, and a command that has since been uninstalled was still
-/// a command when it was sent.
+/// Splits a sent command or skill into its name and arguments.
 export function parseSlashCommand(text: string): { name: string; args: string } | null {
-  const match = /^\/([^\s/]\S*)(.*)$/s.exec(text);
+  const match = /^([/$])([^\s/]\S*)(.*)$/s.exec(text);
   if (!match) return null;
 
-  return { name: match[1], args: match[2].trim() };
+  return { name: match[2], args: match[3].trim() };
 }

@@ -1,7 +1,7 @@
 import PickerMenu, { type PickerGroup } from "@/components/composer/PickerMenu";
 import type { SlashCommand } from "@/types/events";
 
-/// The `/` picker's rows. Everything else about the list — where it opens, how
+/// The command and `$` skill picker's rows. Everything else about the list — where it opens, how
 /// it scrolls, how a row lights up — is [PickerMenu]'s, which the `@` picker
 /// shares.
 ///
@@ -24,7 +24,7 @@ export default function SlashCommandMenu({
   return (
     <PickerMenu
       groups={groups}
-      label="Slash commands"
+      label="Commands and skills"
       keyOf={(command) => command.name}
       activeIndex={activeIndex}
       onPick={onPick}
@@ -33,7 +33,7 @@ export default function SlashCommandMenu({
       bare={bare}
       renderItem={(command) => (
         <>
-          <span className="shrink-0 font-medium">/{command.name}</span>
+          <span className="shrink-0 font-medium">{command.isSkill ? "$" : "/"}{command.name}</span>
 
           {command.argumentHint && (
             <span className="shrink-0 text-muted-foreground/60">{command.argumentHint}</span>
