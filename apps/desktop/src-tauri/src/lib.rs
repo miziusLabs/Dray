@@ -51,7 +51,6 @@ async fn send_msg(
     cwd: &str,
     branch: Option<&str>,
     use_cloud: bool,
-    create_cloud_branch: bool,
     cloud_name: Option<&str>,
     is_new_session: bool,
     app: AppHandle,
@@ -77,7 +76,6 @@ async fn send_msg(
             cwd,
             branch,
             use_cloud,
-            create_cloud_branch,
             cloud_name,
             // The composer has no explicit base ref; its selected branch is
             // recorded and used as the cloud's starting point.

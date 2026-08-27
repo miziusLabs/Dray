@@ -158,10 +158,6 @@ passed to Docker. The entrypoint exports `GH_TOKEN`, runs `gh auth setup-git`,
 and rewrites SSH GitHub URLs to HTTPS. The token is never written to the Pi
 seed or the Cloud volume.
 
-When **Create new Cloud branches** is enabled, the first prompt gets the
-instruction **Work on branch `cloud/<id>` based on `<base>`.** This is prompt
-metadata for an empty sandbox, not a local Git branch operation.
-
 ## Settings dialog
 
 **Dialog, not alert, and `showClose` = whole difference.** Frame, overlay and both animation copied from `alert-dialog` deliberately: to reader two are same object, differing only in whether app asking question or reader opened something. Alert answered by own buttons so carry no dismiss; dialog dismissed rather than answered, and Escape alone = way out only for people who already know it there. `--popover` not `--card` for [the vibrancy reason above](#cloud-sandbox).

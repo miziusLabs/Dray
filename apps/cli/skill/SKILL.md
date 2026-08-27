@@ -42,16 +42,16 @@ Options:
 |---|---|
 | `--project <path>` | Project metadata for grouping and branch context. Defaults to the current session's project. The project is not copied into the Cloud sandbox. |
 | `--effort <level>` | `low`, `medium`, `high`, `xhigh`, `max`. Defaults to the current session's. |
-| `--from <session\|branch>` | Base the Cloud's branch instruction on a session or branch name. |
+| `--from <session\|branch>` | Record which branch the Cloud is about — a session id or branch name. The Cloud still starts with no repository. |
 
 ### Each session gets its own Cloud sandbox
 
 Every session runs in its own Docker sandbox backed by a private volume, and
 there is no way to turn that isolation off. The sandbox starts empty: Dray does
 not clone, mount, or otherwise include a GitHub repository. The selected project
-and branch are metadata used to group the session and brief the agent.
+and branch are metadata used to group the session.
 
-### Giving a Cloud a branch brief
+### Naming the branch a Cloud is about
 
 ```bash
 dray new --from <session-id> "Review the work on this branch and report what you find"
@@ -60,18 +60,10 @@ dray new --from feature/login "Write tests for the login flow on this branch"
 
 `--from` takes a **session id** — the same id `dray ls` prints and `dray send`
 takes — or a branch name. Naming a session uses the branch recorded for that
-session as the base instruction; the Cloud still starts with no repository.
-
-When the app's **Create new Cloud branches** setting is enabled, the initial
-prompt is extended with:
-
-```text
-Work on branch `cloud/<id>` based on `<base>`.
-```
-
-The agent may then use the authenticated GitHub CLI to fetch or clone a
-repository only when the task explicitly asks for it. Dray itself never clones
-or mounts the selected project into a Cloud sandbox.
+session; either way the branch is recorded on the new Cloud — it shows in
+`dray ls` and the sidebar — and the Cloud still starts with no repository.
+Dray itself never clones or mounts the branch, so say in the prompt which
+branch the agent should work on.
 
 The line `dray new` prints says what it resolved: `Started "…" in Cloud
 <id>, based on <base>`.

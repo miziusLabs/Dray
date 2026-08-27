@@ -257,9 +257,8 @@ impl SessionIndexItem {
             harness,
             cwd: cwd.to_string(),
             project_path: project_path.to_string(),
-            // The caller knows the branch metadata: source mode records the
-            // selected branch, while Cloud new-branch mode records the target
-            // branch instruction. Nothing is derived from the Cloud name here.
+            // The caller knows the branch metadata; nothing is derived from the
+            // Cloud name here.
             branch: branch.map(str::to_string),
             cloud_name: cloud_name.map(str::to_string),
             title: title_from_prompt(first_prompt),
@@ -295,12 +294,9 @@ impl SessionIndexItem {
                 None => self.cwd.clone(),
             },
             project_path: self.project_path.clone(),
-            // A Cloud fork gets a private branch instruction on its first send;
-            // no local branch is created because the Cloud has no repository.
-            branch: match cloud_name {
-                Some(name) => Some(format!("cloud/{name}")),
-                None => self.branch.clone(),
-            },
+            // Both fork flavours inherit the parent's branch: the Cloud fork
+            // gets a private volume, not a branch of its own.
+            branch: self.branch.clone(),
             cloud_name: cloud_name.map(str::to_string),
             title: fork_title(&self.title),
             model: self.model,
@@ -1030,7 +1026,7 @@ mod tests {
     }
 
     #[test]
-    fn forking_into_a_cloud_takes_a_tree_and_branch_of_its_own() {
+    fn forking_into_a_cloud_takes_a_tree_of_its_own() {
         let parent = SessionIndexItem::new(
             "parent",
             Harness::Pi,
@@ -1050,7 +1046,11 @@ mod tests {
         assert_eq!(fork.cwd, cloud_path("bold-otter"));
         assert_eq!(fork.project_path, "/p", "it still groups under the project");
         assert_eq!(fork.cloud_name.as_deref(), Some("bold-otter"));
-        assert_eq!(fork.branch.as_deref(), Some("cloud/bold-otter"));
+        assert_eq!(
+            fork.branch.as_deref(),
+            parent.branch.as_deref(),
+            "a Cloud fork gets a private volume, not a branch of its own"
+        );
     }
 
     /// The suffix is the whole point of the title, so truncation takes its room

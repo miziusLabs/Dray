@@ -79,7 +79,6 @@ function App() {
     branches,
     branch,
     useCloud,
-    cloudBranchMode,
     busy,
     backgroundTasks,
     compacting,
@@ -96,7 +95,6 @@ function App() {
     setPendingBranch,
     runCheckout,
     setUseCloud,
-    setCloudBranchMode,
     handleSendMsg,
     handleInterrupt,
     handleStopTask,
@@ -790,8 +788,6 @@ function App() {
       onOpenChange={setSettingsOpen}
       showArchived={showArchived}
       onShowArchivedChange={setShowArchived}
-      cloudBranchMode={cloudBranchMode}
-      onCloudBranchModeChange={setCloudBranchMode}
       titleModels={titleModelOptions}
       titleModelId={titlePrefs.modelId}
       titlePiModel={titlePrefs.piModel}

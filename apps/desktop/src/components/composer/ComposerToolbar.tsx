@@ -142,14 +142,14 @@ export default function ComposerToolbar({
 
           {/* Cloud is available even before a local project is selected. A
               project, when selected, supplies branch metadata only; it is never
-              mounted into the Docker sandbox. */}
+              mounted into the Docker sandbox. Both pickers hide in Cloud for
+              the same reason: the controls that decide where a session runs
+              vanish once the mode is set, and the branch the Cloud starts from
+              is the selected project's own. */}
           <CloudToggle on={useCloud} onToggle={onToggleCloud} />
 
-          {projectPath && (
+          {projectPath && !useCloud && (
             <div className="relative flex min-w-0 items-center">
-              {useCloud && (
-                <span className="text-ui text-muted-foreground/60">from</span>
-              )}
               <BranchSelector
                 key="branch-selector"
                 branches={branches}

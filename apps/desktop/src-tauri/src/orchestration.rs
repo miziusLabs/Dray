@@ -315,8 +315,6 @@ async fn create_session(create: CreateSession, app: &AppHandle) -> Result<Respon
             // time, and several agents writing to one checkout overwrite each
             // other — the changes panel cannot even tell them apart.
             true,
-            // Agent-created clouds always use their own branch.
-            true,
             // Never named by the caller: an agent has no basis for choosing
             // one, and a name that collides is a create that fails for a field
             // nobody wanted. `None` lets the app generate a readable one.
@@ -343,7 +341,7 @@ async fn create_session(create: CreateSession, app: &AppHandle) -> Result<Respon
     })
 }
 
-/// Resolves the branch instruction for a new Cloud. A Cloud has no local
+/// Resolves the branch recorded for a new Cloud. A Cloud has no local
 /// repository, so this intentionally does not validate or resolve refs through
 /// Git. A session id uses the branch recorded for that session; any other
 /// value is passed through as the branch the user named.
@@ -466,7 +464,6 @@ async fn send_message(send: SendMessage, app: &AppHandle) -> Result<Response> {
             target.permission_mode,
             &target.cwd,
             None,
-            false,
             false,
             None,
             None,

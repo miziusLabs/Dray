@@ -78,7 +78,7 @@ struct New {
     #[arg(long)]
     effort: Option<String>,
 
-    /// Base the new Cloud's branch instruction on a session id or branch name.
+    /// Name the branch this Cloud is about — a session id or branch name.
     /// Defaults to the calling session's recorded branch, then `main`.
     #[arg(long, value_name = "SESSION|BRANCH")]
     from: Option<String>,
@@ -570,7 +570,6 @@ mod tests {
     fn the_skill_explains_that_clouds_start_without_a_repository() {
         assert!(SKILL.contains("--from"));
         assert!(SKILL.contains("never clones"));
-        assert!(SKILL.contains("Create new Cloud branches"));
     }
 
     #[test]

@@ -5,7 +5,6 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   useComposerPrefs,
   type EffortByModel,
-  type CloudBranchMode,
 } from "@/hooks/useComposerPrefs";
 import { useDockBadge } from "@/hooks/useDockBadge";
 import type { TitlePrefs } from "@/hooks/useTitlePrefs";
@@ -87,9 +86,6 @@ export function useSessions(titlePrefs: TitlePrefs) {
     // has uncommitted changes. Null when nothing is pending.
     const [pendingBranch, setPendingBranch] = useState<string | null>(null);
     const [useCloud, setUseCloudState] = useState(() => prefs.useCloud);
-    const [cloudBranchMode, setCloudBranchModeState] = useState<CloudBranchMode>(
-      () => prefs.cloudBranchMode,
-    );
     // Per-session, not global: sessions run concurrently and all of their events
     // arrive on the same channel, so a single value would clear on another's
     // turn. The backend drives this via `session_status`, and this map is the
@@ -169,11 +165,6 @@ const setUseCloud = (next: boolean | ((prev: boolean) => boolean)) => {
   const resolved = typeof next === "function" ? next(useCloud) : next;
   setUseCloudState(resolved);
   setPrefs({ useCloud: resolved });
-};
-
-const setCloudBranchMode = (mode: CloudBranchMode) => {
-  setCloudBranchModeState(mode);
-  setPrefs({ cloudBranchMode: mode });
 };
 
 // Attaching a known project just selects it, so this doubles as "switch to one
@@ -356,12 +347,9 @@ const handleSendMsg = async (
       permissionMode,
       cwd,
       // Cloud only records branch context; it never checks out the selected
-      // project. A Cloud fork also gets the branch instruction on its first
-      // send when the setting is enabled.
+      // project.
       branch: isNewSession ? branch : null,
       useCloud: isNewSession && useCloud,
-      createCloudBranch:
-        (isNewSession || Boolean(existing?.cloudName)) && cloudBranchMode === "new",
       cloudName: null,
       isNewSession,
     });
@@ -515,7 +503,6 @@ const handleNewSession = () => {
   setEffortByModel(prefs.effortByModel);
   setPermissionModeState(prefs.permissionMode);
   setUseCloudState(prefs.useCloud);
-  setCloudBranchModeState(prefs.cloudBranchMode);
   setBranch(branches?.current ?? null);
 };
 
@@ -1381,6 +1368,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud, cloudBranchMode, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, setCloudBranchMode, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
 
 }

@@ -334,7 +334,6 @@ impl SessionManager {
         // metadata and never changes the host checkout when Cloud is enabled.
         branch: Option<&str>,
         use_cloud: bool,
-        create_cloud_branch: bool,
         cloud_name: Option<&str>,
         // Branch metadata supplied by the orchestration socket. It resolves a
         // session id before calling here; Cloud itself does not resolve or
@@ -396,24 +395,7 @@ impl SessionManager {
                 None if cloud_name.is_some() => None,
                 None => git::current_branch(cwd).await,
             };
-            let base_branch = selected_branch
-                .clone()
-                .unwrap_or_else(|| "main".to_string());
-            let recorded_branch = if cloud_name.is_some() && create_cloud_branch {
-                cloud_name
-                    .as_deref()
-                    .map(|name| format!("cloud/{name}"))
-            } else {
-                selected_branch.clone()
-            };
-            let starting_prompt = match (
-                cloud_name.as_deref(),
-                create_cloud_branch,
-                recorded_branch.as_deref(),
-            ) {
-                (Some(_), true, Some(target)) => cloud_start_prompt(prompt, target, &base_branch),
-                _ => prompt.to_string(),
-            };
+            let recorded_branch = selected_branch.clone();
 
             let mut item = SessionIndexItem::new(
                 session_id,
@@ -469,7 +451,7 @@ impl SessionManager {
             )
             .await?;
             session
-                .send_msg(&starting_prompt, attachment_paths, baseline, from, app)
+                .send_msg(prompt, attachment_paths, baseline, from, app)
                 .await?;
             let events = list_session_events(session_id).await?;
             self.sessions
@@ -640,23 +622,6 @@ impl SessionManager {
             None
         };
 
-        let starting_prompt = if let (Some(parent_id), Some(target)) = (
-            fork_from.as_deref(),
-            indexed.as_ref().and_then(|item| item.branch.as_deref()),
-        ) {
-            if create_cloud_branch {
-                let based_on = get_session_index_item(parent_id)
-                    .await?
-                    .and_then(|item| item.branch)
-                    .unwrap_or_else(|| "main".to_string());
-                cloud_start_prompt(prompt, target, &based_on)
-            } else {
-                prompt.to_string()
-            }
-        } else {
-            prompt.to_string()
-        };
-
         let launch_cwd = if cloud_name.is_some() {
             session_cwd.as_str()
         } else {
@@ -694,7 +659,7 @@ impl SessionManager {
         }
 
         session
-            .send_msg(&starting_prompt, attachment_paths, baseline, from, app)
+            .send_msg(prompt, attachment_paths, baseline, from, app)
             .await?;
         sessions_guard.insert(session_id.to_string(), session);
         Ok(SendOutcome::default())
@@ -901,15 +866,6 @@ impl SessionManager {
             _ => Ok(None),
         }
     }
-}
-
-/// Adds the branch instruction to the initial Cloud prompt. It is deliberately
-/// plain text: a Cloud starts without a repository, so this is the contract Pi
-/// can follow when it creates or edits a remote checkout itself.
-pub fn cloud_start_prompt(prompt: &str, branch: &str, based_on: &str) -> String {
-    format!(
-        "{prompt}\n\nWork on branch `{branch}` based on `{based_on}`."
-    )
 }
 
 /// Owns a Windows job containing the Pi process and all of its descendants.
@@ -1572,14 +1528,6 @@ mod tests {
 
     /// Only a finished-and-unread session clears on read; selecting a running
     /// one must not stop it reading as busy.
-    #[test]
-    fn cloud_branch_instruction_is_appended_exactly_once() {
-        assert_eq!(
-            cloud_start_prompt("Fix the issue", "cloud/123", "main"),
-            "Fix the issue\n\nWork on branch `cloud/123` based on `main`."
-        );
-    }
-
     #[test]
     fn mark_seen_clears_only_completed() {
         let mut tracker = StatusTracker::default();

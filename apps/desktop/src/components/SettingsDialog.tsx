@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/dialog";
 import ModelSelector from "@/components/composer/ModelSelector";
 import { Switch } from "@/components/ui/switch";
-import type { CloudBranchMode } from "@/hooks/useComposerPrefs";
 import type { Effort, Model, ModelId, PiModel } from "@/types/events";
 
 /// The app's preferences, such as they are.
@@ -22,8 +21,6 @@ export default function SettingsDialog({
   onOpenChange,
   showArchived,
   onShowArchivedChange,
-  cloudBranchMode,
-  onCloudBranchModeChange,
   titleModels,
   titleModelId,
   titlePiModel,
@@ -34,8 +31,6 @@ export default function SettingsDialog({
   onOpenChange: (next: boolean) => void;
   showArchived: boolean;
   onShowArchivedChange: (next: boolean) => void;
-  cloudBranchMode: CloudBranchMode;
-  onCloudBranchModeChange: (next: CloudBranchMode) => void;
   titleModels: Model[];
   titleModelId: ModelId;
   titlePiModel: PiModel | null;
@@ -61,10 +56,6 @@ export default function SettingsDialog({
           <SettledSessionsRow
             checked={showArchived}
             onChange={onShowArchivedChange}
-          />
-          <CloudBranchModeRow
-            value={cloudBranchMode}
-            onChange={onCloudBranchModeChange}
           />
           <TitleGenerationRow
             models={titleModels}
@@ -107,30 +98,6 @@ function TitleGenerationRow({
         piModel={piModel}
         effort={effort}
         onChange={onChange}
-      />
-    </SettingRow>
-  );
-}
-
-function CloudBranchModeRow({
-  value,
-  onChange,
-}: {
-  value: CloudBranchMode;
-  onChange: (next: CloudBranchMode) => void;
-}) {
-  const id = useId();
-
-  return (
-    <SettingRow
-      id={id}
-      label="Create new Cloud branches"
-      description="Off: use the selected branch. On: ask the agent to create a new branch based on it."
-    >
-      <Switch
-        id={id}
-        checked={value === "new"}
-        onCheckedChange={(checked) => onChange(checked ? "new" : "source")}
       />
     </SettingRow>
   );
