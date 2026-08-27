@@ -2,8 +2,7 @@ export const REPO = "https://github.com/monorepo-labs/dray";
 
 /// `/releases/latest` redirects to whatever the newest stable release is, so
 /// the button needs no build-time lookup and can never point at a version that
-/// has been superseded. It skips prereleases, which is right here — the beta
-/// channel is the updater's, not the download page's.
+/// has been superseded. It skips prereleases.
 export const DOWNLOAD = `${REPO}/releases/latest`;
 
 /// The universal `.dmg`'s size, decimal MB rounded to match Finder's own

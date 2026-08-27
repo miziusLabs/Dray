@@ -168,10 +168,6 @@ seed or the Cloud volume.
 
 **Switch one rung up from composer's own toggle** — `h-4 w-7` against its `h-3 w-5`. There track sit inside toolbar button among other 12px chrome; here it thing being pressed and have to take click on own.
 
-## Update row
-
-**Update row drawn only when there something to say.** Sidebar have no permanent footer; row reading "up to date" = chrome for fact nobody asked about. Show nothing while sidebar collapsed, deliberate — next check keep offer alive.
-
 ## Notice cards
 
 Sidebar glow was third channel, cut. Landed in same corner as card, so it could not reach eye card wasn't already reaching, and invisible whenever sidebar collapsed. Animation shelved unimported in [attention-glow.css](src/styles/attention-glow.css) with own notes on how to rewire — worth several passes to get right, so next thing wanting pulse don't redo them.

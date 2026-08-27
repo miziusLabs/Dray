@@ -100,12 +100,9 @@ logged-in `gh`) to provide the token passed to Cloud containers.
 Deploy to Vercel with **Root Directory** set to `apps/web`. Vercel reads the
 workspace lockfile at the repo root on its own; no `vercel.json` is needed.
 
-GitHub Pages on this repo is already taken — it serves the desktop app's
-updater manifests off the `updates` branch. Don't point the site at it.
-
 ## Releasing the app
 
-Tag `vX.Y.Z` for stable, `vX.Y.Z-beta.N` for beta. The version in the tag has
-to match `apps/desktop/src-tauri/tauri.conf.json`, and a stable release needs
-a matching `## X.Y.Z` section in `apps/desktop/CHANGELOG.md` — the workflow fails
-loudly on either.
+Tag `vX.Y.Z`. The version in the tag has to match
+`apps/desktop/src-tauri/tauri.conf.json`, and a release needs a matching
+`## X.Y.Z` section in `apps/desktop/CHANGELOG.md` — the workflow fails loudly
+on either.

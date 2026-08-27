@@ -50,7 +50,6 @@ import { titleModels, useTitlePrefs } from "@/hooks/useTitlePrefs";
 import { useSessions } from "@/hooks/useSessions";
 import type { Effort, Model, PiModel } from "@/types/events";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
-import { useUpdater } from "@/hooks/useUpdater";
 import { changeRange, turnChangedTree } from "@/lib/changes";
 import { prBadgeCount, sessionBranch } from "@/lib/pr";
 import { playCelebration } from "@/lib/sound";
@@ -131,17 +130,6 @@ function App() {
   };
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
-  const {
-    status: updateStatus,
-    manual: updateManual,
-    install: installUpdate,
-  } = useUpdater();
-
-  // Every session the app has started this run, not the open one: the install
-  // relaunches the app, so any live child is one this would kill mid-turn. A
-  // session from a previous run cannot still be running — no child survives a
-  // restart — so the live map answers this on its own.
-  const anyRunning = Object.values(statusBySession).some((s) => s === "in_progress");
 
   const [panelOpen, setPanelOpen] = useState(false);
   // `null` is "never picked", and it is the whole of the default-tab rule.
@@ -577,10 +565,6 @@ function App() {
           onFork={forkSession}
           onDelete={deleteSession}
           showArchived={showArchived}
-          updateStatus={updateStatus}
-          updateBlocked={anyRunning}
-          updateManual={updateManual}
-          onInstallUpdate={() => void installUpdate()}
         />
       }
       header={

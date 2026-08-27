@@ -1,9 +1,9 @@
 # Changelog
 
 What each release changed, newest first, in terms of what you'd notice using it.
-The release job reads the matching section into the GitHub release notes and the
-updater carries it, so this file is what a release says about itself — not a
-second description of it. GitHub's generated commit list is appended below it.
+The release job reads the matching section into the GitHub release notes, so
+this file is what a release says about itself — not a second description of it.
+GitHub's generated commit list is appended below it.
 
 ## Unreleased
 

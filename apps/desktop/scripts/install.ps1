@@ -39,23 +39,6 @@ function Invoke-External {
     }
 }
 
-# `createUpdaterArtifacts` makes the bundler sign the update package, and it
-# refuses to build at all when the config carries a public key with no private
-# one to match. CI passes the key as a secret; locally it is the file the
-# keypair was generated into.
-$updaterKey = if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
-    Join-Path $HOME '.tauri/dray_updater.key'
-} else {
-    $env:TAURI_SIGNING_PRIVATE_KEY
-}
-if (-not (Test-Path -LiteralPath $updaterKey -PathType Leaf)) {
-    Fail "no updater signing key at $updaterKey - generate one with 'pnpm tauri signer generate' or set TAURI_SIGNING_PRIVATE_KEY"
-}
-$env:TAURI_SIGNING_PRIVATE_KEY = $updaterKey
-if ($null -eq $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
-    $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ''
-}
-
 $scriptArguments = @($args)
 Say "Building $name"
 Push-Location $root

@@ -12,9 +12,6 @@ use crate::{
 use std::collections::HashMap;
 use tauri::{AppHandle, Manager, State, WindowEvent};
 
-#[cfg(target_os = "macos")]
-use tauri::Emitter;
-
 pub mod attachments;
 pub mod binpath;
 #[path = "events/events.rs"]
@@ -34,7 +31,6 @@ pub mod quit;
 pub mod session;
 pub mod store;
 pub mod title;
-pub mod updater;
 
 #[tauri::command]
 async fn send_msg(
@@ -458,9 +454,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
-        .manage(updater::PendingUpdate::default())
         .manage(quit::PendingQuit::default());
 
     // macOS needs a custom menu so Cmd+Q reaches the in-app confirmation.
@@ -472,10 +466,6 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if event.id() == quit::QUIT_ID {
                 quit::request(app);
-            } else if event.id() == updater::CHECK_UPDATE_ID {
-                if let Err(e) = app.emit(updater::CHECK_UPDATE_REQUESTED, ()) {
-                    eprintln!("[check update emit err] {e}");
-                }
             }
         });
 
@@ -545,8 +535,6 @@ pub fn run() {
             respond_permission,
             answer_questions,
             notifications::notify_session,
-            updater::check_update,
-            updater::install_update,
             github::prs_for_branch,
             github::pr_marks,
             github::merge_pr,

@@ -14,7 +14,6 @@ import {
 import { ThinkingOrb } from "thinking-orbs";
 
 import PrStateIcon, { prStateLabel } from "@/components/PrStateIcon";
-import UpdateRow from "@/components/UpdateRow";
 import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +32,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
-import type { ManualCheck } from "@/hooks/useUpdater";
 import { basename, isToday, relativeTime } from "@/lib/format";
 import { sessionBranch } from "@/lib/pr";
 import { IS_MAC } from "@/lib/platform";
@@ -43,7 +41,6 @@ import type {
   Project,
   SessionIndexItem,
   SessionStatus,
-  UpdateStatus,
 } from "@/types/events";
 
 type SidebarProps = {
@@ -79,12 +76,6 @@ type SidebarProps = {
   onDetach: (sessionId: string) => Promise<void>;
   showArchived: boolean;
   projects: Project[];
-  updateStatus: UpdateStatus | null;
-  // Any session mid-turn, not just the open one — installing relaunches the
-  // whole app.
-  updateBlocked: boolean;
-  updateManual: ManualCheck;
-  onInstallUpdate: () => void;
 };
 
 /// One drawn row: the session, how deep it sits, and the flags its connector
@@ -389,10 +380,6 @@ export default function Sidebar({
   showArchived,
   projects,
   onDetach,
-  updateStatus,
-  updateBlocked,
-  updateManual,
-  onInstallUpdate,
   onOpenSettings,
 }: SidebarProps) {
   const fullscreen = useFullscreen();
@@ -575,14 +562,6 @@ export default function Sidebar({
 
       </div>
 
-      {/* Outside the scroll container so this offer stays visible when the list
-          is long. */}
-      <UpdateRow
-        status={updateStatus}
-        blocked={updateBlocked}
-        manual={updateManual}
-        onInstall={onInstallUpdate}
-      />
     </aside>
   );
 }

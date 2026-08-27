@@ -767,14 +767,15 @@ export type SessionIndexItem = { sessionId: string, harness: Harness,
  */
 cwd: string, 
 /**
- * Project metadata used for grouping; a Cloud does not mount or clone it.
+ * Project metadata used for sidebar grouping; a Cloud does not mount or
+ * clone this project.
  */
 projectPath: string, branch: string | null, 
 /**
- * `Some` marks this a Cloud session. The branch is either the source
- * branch or a generated branch named for the Cloud session.
+ * `Some` marks this a Cloud session. Cloud sessions use a private Docker
+ * volume identified by this name; the host project is never mounted.
  */
-cloudName: string | null, title: string,
+cloudName: string | null, title: string, 
 /**
  * Remembered per session so switching between sessions restores the model
  * the user last picked instead of resetting to a default.
@@ -833,14 +834,15 @@ export type SessionSnapshot = { events: Array<AgentEvent>, sessionId: string, ha
  */
 cwd: string, 
 /**
- * Project metadata used for grouping; a Cloud does not mount or clone it.
+ * Project metadata used for sidebar grouping; a Cloud does not mount or
+ * clone this project.
  */
 projectPath: string, branch: string | null, 
 /**
- * `Some` marks this a Cloud session. The branch is either the source
- * branch or a generated branch named for the Cloud session.
+ * `Some` marks this a Cloud session. Cloud sessions use a private Docker
+ * volume identified by this name; the host project is never mounted.
  */
-cloudName: string | null, title: string,
+cloudName: string | null, title: string, 
 /**
  * Remembered per session so switching between sessions restores the model
  * the user last picked instead of resetting to a default.
@@ -1002,20 +1004,6 @@ export type ToolType = "shell" | "file_read" | "file_edit" | "search" | "web" | 
 export type TurnStatus = "success" | "error";
 
 export type Unreadable = "binary" | "too_large";
-
-export type UpdateChannel = "stable" | "beta";
-
-/**
- * What the sidebar row draws. There is no idle variant: nothing is emitted
- * until an update exists, so the frontend's own `null` is the resting state
- * and a failed check leaves the UI exactly as it was.
- */
-export type UpdateStatus = { "state": "downloading", version: string, 
-/**
- * `None` until the server sends a content length, which not every
- * CDN does — the row shows an indeterminate state rather than 0%.
- */
-percent: number | null, } | { "state": "ready", version: string, notes: string | null, };
 
 export type Usage = { inputTokens: number | null, outputTokens: number | null, cachedInputTokens: number | null, cacheWriteTokens: number | null, 
 /**
