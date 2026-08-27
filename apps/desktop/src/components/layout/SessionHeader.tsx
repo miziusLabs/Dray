@@ -1,4 +1,5 @@
 import GitBranchIcon from "@/components/icons/GitBranchIcon";
+import { Badge } from "@/components/ui/badge";
 import { basename } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { SessionSnapshot } from "@/types/events";
@@ -42,6 +43,11 @@ export default function SessionHeader({ session, branch, className }: SessionHea
         </span>
 
         <span className="truncate font-medium text-foreground">{session.title}</span>
+        {session.cloudName !== null && (
+          <Badge variant="secondary" className="-translate-y-px">
+            Cloud
+          </Badge>
+        )}
       </span>
 
       {branch && (
