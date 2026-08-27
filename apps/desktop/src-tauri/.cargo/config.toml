@@ -4,3 +4,9 @@
 TS_RS_LARGE_INT = "number"
 # Generated bindings belong with the frontend that imports them.
 TS_RS_EXPORT_DIR = { value = "../src/types", relative = true }
+
+# MinGW auto-exports every eligible Rust symbol from the Tauri cdylib. The
+# resulting export table exceeds PE's 65,535-entry limit; the app has no public
+# DLL API, so do not auto-export implementation symbols.
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]
