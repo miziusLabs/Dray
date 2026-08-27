@@ -769,30 +769,14 @@ useEffect(() => {
   invoke<Model[]>("list_models", { harness, cwd: projectPath })
     .then((next) => {
       if (cancelled) return;
+      // The catalog is only the set of choices. The selected model is owned by
+      // the composer/session state and must not be replaced by a refreshed
+      // catalog — that response may have started before the user selected a
+      // model or opened a session with its own model. A missing selection is
+      // the one exception: seed it from the first available model on first
+      // load, preserving the existing default without overwriting a choice.
       setModels(next);
-      setModelId((current) => {
-        const currentPi = current === "pi" ? piModel : null;
-        const stillAvailable = next.some(
-          (model) =>
-            model.id === current &&
-            (current !== "pi" ||
-              (model.piModel?.provider === currentPi?.provider &&
-                model.piModel?.id === currentPi?.id)),
-        );
-        if (stillAvailable) return current;
-        return next[0]?.id ?? current;
-      });
-      setPiModel((current) => {
-        if (modelId === "pi" && next.some(
-          (model) =>
-            model.id === "pi" &&
-            model.piModel?.provider === current?.provider &&
-            model.piModel?.id === current?.id,
-        )) {
-          return current;
-        }
-        return next[0]?.piModel ?? current;
-      });
+      setPiModel((current) => current ?? next[0]?.piModel ?? null);
     })
     .catch((e) => {
       if (!cancelled) setError(String(e));
