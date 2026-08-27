@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isRoutineError, toolLabel, toolSummary } from "./tools";
+import { isRoutineError, streamingLabel, toolLabel, toolSummary } from "./tools";
 
 // Every string here is a real `Bash` error taken out of `~/.dray/sessions`,
 // including the "Exit code N" prefix a shell failure actually arrives with —
@@ -20,6 +20,7 @@ describe("Pi extension tool labels", () => {
     expect(toolLabel("read", true)).toBe("Reading");
     expect(toolLabel("edit", false)).toBe("Edited");
     expect(toolLabel("libarian", false)).toBe("Researched");
+    expect(streamingLabel("finder")).toBe("Exploring codebase");
   });
 });
 

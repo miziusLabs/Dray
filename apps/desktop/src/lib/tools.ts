@@ -148,6 +148,7 @@ export function groupLabel(name: string, count: number, pending: boolean): strin
 export function streamingLabel(name: string): string {
   const noun = TOOL_VERBS[name]?.[2];
   if (!noun) return groupVerb(name, true);
+  if (noun === "codebase") return `${groupVerb(name, true)} ${noun}`;
   return `${groupVerb(name, true)} ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`;
 }
 
