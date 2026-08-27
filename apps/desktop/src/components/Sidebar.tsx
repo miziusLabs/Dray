@@ -48,6 +48,10 @@ import type {
 
 type SidebarProps = {
   items: SessionIndexItem[];
+  // The live search query. Owned by the caller so the list and keyboard
+  // navigation can consume the same filtered array.
+  search: string;
+  onSearchChange: (query: string) => void;
   // The live status of every session the app has heard about this run. Wins over
   // the item's own field, which is only as fresh as the last list fetch.
   statusBySession: Record<string, SessionStatus>;
@@ -248,6 +252,18 @@ export function sortSessions(
   );
 }
 
+/// The rows left on screen by a title search. Matching happens before grouping
+/// so empty project headings disappear and children whose parents do not match
+/// remain visible at the top level.
+export function filterSessions(
+  items: SessionIndexItem[],
+  query: string,
+): SessionIndexItem[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return items;
+  return items.filter((item) => item.title.toLowerCase().includes(needle));
+}
+
 /// Whether a row has a parent to detach from, judged the same way
 /// [`sessionRows`] places it — a parent that isn't on screen means the row is
 /// drawn at the top level, so the menu item can never offer to cut a link the
@@ -344,6 +360,8 @@ export function DevBadge({ className }: { className?: string }) {
 
 export default function Sidebar({
   items,
+  search,
+  onSearchChange,
   statusBySession,
   askingSessions,
   prFor,
@@ -365,6 +383,12 @@ export default function Sidebar({
   onOpenSettings,
 }: SidebarProps) {
   const fullscreen = useFullscreen();
+  const [searching, setSearching] = useState(false);
+
+  const closeSearch = () => {
+    setSearching(false);
+    onSearchChange("");
+  };
 
   // Recency-ordered, with agent-spawned sessions nested under the one that
   // spawned them, and each row carrying the flags its connector rails are drawn
@@ -386,8 +410,13 @@ export default function Sidebar({
       named.get(path) ?? basename(path);
   }, [projects]);
 
-  // Keep the empty state specific to the active or settled session list.
-  const emptyText = showArchived ? "Nothing settled yet." : "No tasks yet.";
+  // A filtered list that comes up empty is different from an empty app, and
+  // saying "No tasks yet" over a query reads as data loss.
+  const emptyText = search.trim()
+    ? `No tasks matching "${search.trim()}".`
+    : showArchived
+      ? "Nothing settled yet."
+      : "No tasks yet.";
 
   // Collapsed is nothing at all, not a rail. The toggle moves to the app header
   // in that state, which is the one row present either way.
@@ -441,15 +470,38 @@ export default function Sidebar({
           </KbdGroup>
         </Button>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled
-          className="w-full justify-start px-1.5 text-ui"
-        >
-          <Search />
-          Search
-        </Button>
+        {searching ? (
+          <div className="flex h-7 w-full items-center gap-1 border border-transparent px-1.5 text-ui">
+            <Search className="size-3.5 shrink-0" />
+            <input
+              autoFocus
+              type="text"
+              value={search}
+              placeholder="Search"
+              aria-label="Search tasks"
+              onChange={(e) => onSearchChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Escape") return;
+                e.preventDefault();
+                closeSearch();
+              }}
+              onBlur={() => {
+                if (!search) setSearching(false);
+              }}
+              className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSearching(true)}
+            className="w-full justify-start px-1.5 text-ui"
+          >
+            <Search />
+            Search
+          </Button>
+        )}
       </div>
 
       {/* Keep the session cards clear of the scrollbar edge. */}

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { isNested, sessionGroups, sessionRows, sortSessions } from "@/components/Sidebar";
+import {
+  filterSessions,
+  isNested,
+  sessionGroups,
+  sessionRows,
+  sortSessions,
+} from "@/components/Sidebar";
 import type { Project, SessionIndexItem } from "@/types/events";
 
 /// Only the fields the ordering reads. Everything else on the index item is
@@ -199,6 +205,77 @@ describe("isNested", () => {
     expect(isNested(child, [parent, child, orphan])).toBe(true);
     expect(isNested(orphan, [parent, child, orphan])).toBe(false);
     expect(isNested(parent, [parent, child, orphan])).toBe(false);
+  });
+});
+
+describe("filterSessions", () => {
+  const titled = (
+    sessionId: string,
+    title: string,
+    parentSessionId: string | null = null,
+    projectPath = "/repo",
+  ) => ({ ...item(sessionId, "2026-01-01T00:00:00Z", parentSessionId, projectPath), title }) as SessionIndexItem;
+
+  it("matches title substrings without regard to case", () => {
+    const items = [
+      titled("a", "Fix the parser"),
+      titled("b", "PARSER rewrite"),
+      titled("c", "Sidebar search"),
+    ];
+
+    expect(ids(filterSessions(items, "parser"))).toEqual(["a", "b"]);
+    expect(ids(filterSessions(items, "PaRsEr"))).toEqual(["a", "b"]);
+  });
+
+  it("returns the original array for blank queries", () => {
+    const items = [titled("a", "Fix the parser")];
+
+    expect(filterSessions(items, "")).toBe(items);
+    expect(filterSessions(items, "   ")).toBe(items);
+  });
+
+  it("trims the query and returns no rows when nothing matches", () => {
+    const items = [titled("a", "Fix the parser")];
+
+    expect(ids(filterSessions(items, "  parser "))).toEqual(["a"]);
+    expect(filterSessions(items, "codex")).toEqual([]);
+  });
+
+  it("keeps a matching child visible at the top level when its parent does not match", () => {
+    const items = [
+      titled("parent", "Something else"),
+      titled("child", "Fix the parser", "parent"),
+    ];
+    const found = filterSessions(items, "parser");
+
+    expect(isNested(found[0], found)).toBe(false);
+    expect(sessionRows(found).map((row) => row.depth)).toEqual([0]);
+  });
+
+  it("removes project headings with no matching rows", () => {
+    const items = [
+      titled("a", "Fix the parser", null, "/a"),
+      titled("b", "Sidebar search", null, "/b"),
+    ];
+
+    expect(
+      sessionGroups(filterSessions(items, "parser"), [project("/a"), project("/b")]).map(
+        (group) => group.projectPath,
+      ),
+    ).toEqual(["/a"]);
+  });
+
+  it("leaves navigation ordered over matching rows only", () => {
+    const items = [
+      titled("first", "parser one"),
+      titled("skipped", "unrelated"),
+      titled("second", "parser two"),
+    ];
+
+    expect(ids(sortSessions(filterSessions(items, "parser")))).toEqual([
+      "first",
+      "second",
+    ]);
   });
 });
 

@@ -26,7 +26,12 @@ import RightPanel, {
   tabOrder,
   type PanelTab,
 } from "@/components/RightPanel";
-import Sidebar, { DevBadge, SidebarToggle, sortSessions } from "@/components/Sidebar";
+import Sidebar, {
+  DevBadge,
+  SidebarToggle,
+  filterSessions,
+  sortSessions,
+} from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import AppShell from "@/components/layout/AppShell";
@@ -243,9 +248,14 @@ function App() {
     busy,
   );
 
-  // The sidebar always shows every session so its project headings remain the
-  // stable way to scan work across repositories.
+  // The sidebar starts from every session so repository marks and ready-to-merge
+  // notices keep watching work even when a search temporarily hides a row.
   const visibleSessions = sessionIndexItems;
+  const [search, setSearch] = useState("");
+  const searchedSessions = useMemo(
+    () => filterSessions(visibleSessions, search),
+    [visibleSessions, search],
+  );
 
   // The sidebar's marks: one `gh` per repo on screen rather than one per row —
   // see `usePrMarks`. Distinct paths, and the *active* list's only: a settled
@@ -477,8 +487,8 @@ function App() {
   // sidebar is collapsed and there is nothing on screen to follow — project
   // list included, since that is what orders the groups it steps through.
   const ordered = useMemo(
-    () => sortSessions(visibleSessions, projects),
-    [visibleSessions, projects],
+    () => sortSessions(searchedSessions, projects),
+    [searchedSessions, projects],
   );
 
   // Wraps downward only. Falling off the bottom returns to the newest session,
@@ -580,7 +590,9 @@ function App() {
       centered={!selectedSession}
       sidebar={
         <Sidebar
-          items={visibleSessions}
+          items={searchedSessions}
+          search={search}
+          onSearchChange={setSearch}
           projects={projects}
           statusBySession={statusBySession}
           askingSessions={askingSessions}
