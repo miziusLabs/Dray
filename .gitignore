@@ -31,10 +31,6 @@ apps/desktop/public/file-icons
 # Local tooling, not part of any build — see the PR panel notes in CLAUDE.md.
 apps/desktop/demo
 
-# Next.js
-.next
-out
-.vercel
 *.tsbuildinfo
 .gstack/
 
