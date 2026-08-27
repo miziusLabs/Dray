@@ -101,7 +101,7 @@ export default function DiffPane({
           <span className="shrink-0 text-sidebar-foreground">{name}</span>
           {dir && (
             <span className="min-w-0 truncate text-muted-foreground">
-              {dir.replace(/\/$/, "")}
+              {dir.replace(/[\\/]$/, "")}
             </span>
           )}
         </span>

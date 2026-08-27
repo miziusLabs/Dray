@@ -391,9 +391,8 @@ const handleCancelQueued = async (): Promise<QueuedMessage | null> => {
   }
 };
 
-// Signals the CLI to abort the in-flight turn; the session stays alive. Status
-// is not touched here — the abort produces a result event, and the backend's
-// machine reports the transition on `session_status` like any other ending.
+// Stops the session's process tree. The backend removes the live child before
+// returning, and the next send resumes the persisted Pi session in a new child.
 const handleInterrupt = async () => {
   if (!selectedSessionId) return;
   try {
@@ -1193,11 +1192,21 @@ useEffect(() => {
     // cleared from here rather than from each of them.
     if (status !== "in_progress") {
       setWorkingBySession((prev) => ({ ...prev, [sessionId]: null }));
+      // A stopped child has no block_stop event to retire its live preview.
+      // Clear it with the status so the last partial tool/text row cannot stay
+      // on screen after Stop returns.
+      setStreamingContentBlock((prev) =>
+        prev[sessionId] ? { ...prev, [sessionId]: null } : prev,
+      );
       // A request can only be answered by the child that asked, so one still
       // open when the turn ends is stranded rather than pending — see the
       // stranded-request note in CLAUDE.md. Dropping it here is what stops the
       // sidebar marking a dead session as waiting on the reader forever.
       setAsksBySession((prev) => (prev[sessionId]?.length ? { ...prev, [sessionId]: [] } : prev));
+      // A stopped child cannot flush prompts it still held in memory. Clear the
+      // mirror with the rest of the live state instead of leaving an Esc row
+      // attached to an idle session.
+      setQueuedBySession((prev) => (prev[sessionId]?.length ? { ...prev, [sessionId]: [] } : prev));
     }
 
     // Finishing in front of the reader is read the moment it does; everything

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { diffSide, diffSides, editSides } from "./diff";
+import { diffSide, diffSides, editSides, fileName } from "./diff";
 
 describe("Pi file edit arguments", () => {
   it("understands Pi's path and oldText/newText edit shape", () => {
@@ -19,6 +19,7 @@ describe("diffSide", () => {
     const b = diffSide("src/b/index.ts", "one");
     const c = diffSide("src/a/index.ts", "one\ntwo");
     expect(a.name).toBe("index.ts");
+    expect(fileName("C:\\Users\\jan\\repo\\index.ts")).toBe("index.ts");
     expect(a.cacheKey).not.toBe(b.cacheKey);
     expect(a.cacheKey).not.toBe(c.cacheKey);
     expect(a.cacheKey).toBe(diffSide("src/a/index.ts", "one").cacheKey);

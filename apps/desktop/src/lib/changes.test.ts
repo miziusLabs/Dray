@@ -102,6 +102,10 @@ describe("splitPath", () => {
     // The two halves are rendered adjacent, so the separator has to live on
     // one of them or the path reads as "src/libtools.ts".
     expect(splitPath("src/lib/tools.ts")).toEqual({ dir: "src/lib/", name: "tools.ts" });
+    expect(splitPath("C:\\Users\\jan\\repo\\tools.ts")).toEqual({
+      dir: "C:\\Users\\jan\\repo\\",
+      name: "tools.ts",
+    });
     expect(splitPath("README.md")).toEqual({ dir: "", name: "README.md" });
   });
 });

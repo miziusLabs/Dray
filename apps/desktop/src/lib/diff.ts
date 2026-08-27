@@ -76,7 +76,7 @@ export function editSides(input: JsonValue): EditSides | null {
 /// The basename, which is what the diff header shows. The library infers the
 /// syntax-highlighting language from this, so the extension has to survive.
 export function fileName(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
 

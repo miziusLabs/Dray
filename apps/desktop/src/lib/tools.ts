@@ -155,7 +155,7 @@ export function streamingLabel(name: string): string {
 /// Absolute paths dominate the row otherwise; the last two segments are enough
 /// to recognize a file and still fit beside the tool name.
 export function shortenPath(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[\\/]/).filter(Boolean);
   if (parts.length <= 2) return path;
   return parts.slice(-2).join("/");
 }

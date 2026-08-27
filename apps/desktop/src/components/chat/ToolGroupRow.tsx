@@ -78,7 +78,7 @@ export default function ToolGroupRow({
             A failing call inside does not color it: one error among a dozen
             calls would paint the whole run as failed, and the row that failed
             says so itself once the group is expanded. */}
-        <span className={cn("shrink-0", pending && "shimmer-text")}>
+        <span className={cn("shrink-0 text-foreground/80", pending && "shimmer-text")}>
           {group.target
             ? groupVerb(group.name, pending)
             : groupLabel(group.name, group.targets, pending)}

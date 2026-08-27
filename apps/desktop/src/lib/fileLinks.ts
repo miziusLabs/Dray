@@ -14,6 +14,7 @@ export function proxyLocalLink(url: string): string {
 export function isLocalLink(url: string): boolean {
   return (
     url.toLowerCase().startsWith("file:") ||
+    /^[a-z]:[\\/]/i.test(url) ||
     (!/^[a-z][a-z\d+.-]*:/i.test(url) &&
       !url.startsWith("#") &&
       !url.startsWith("?") &&

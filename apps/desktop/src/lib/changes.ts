@@ -66,7 +66,7 @@ export function turnChangedTree({ baseline, head }: ChangeRange): boolean {
 /// basename is what the reader scans for, so it stays at full contrast while
 /// the directories recede.
 export function splitPath(path: string): { dir: string; name: string } {
-  const cut = path.lastIndexOf("/");
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   if (cut === -1) return { dir: "", name: path };
   return { dir: path.slice(0, cut + 1), name: path.slice(cut + 1) };
 }

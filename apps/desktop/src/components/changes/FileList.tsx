@@ -43,7 +43,7 @@ export default function FileList({
 
 /// `splitPath` keeps the separator on the directory, which reads as a dangling
 /// slash once the directory is drawn *after* the name.
-const trimSlash = (dir: string) => dir.replace(/\/$/, "");
+const trimSlash = (dir: string) => dir.replace(/[\\/]$/, "");
 
 /// Memoized for [ChangesPanel]'s reason: the view re-renders on every session
 /// event, while a row's props only move when a read finds different trees.
