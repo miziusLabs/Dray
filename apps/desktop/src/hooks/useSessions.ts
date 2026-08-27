@@ -264,6 +264,33 @@ const upsertSessionIndexItem = (item: SessionIndexItem) =>
       : [...prev, item],
   );
 
+// Keep both local copies of a session's settings aligned after the backend
+// accepts a model change. The index is normally enough, but a session opened
+// from a filtered row may only exist in `sessions`.
+const mirrorSessionModel = (
+  sessionId: string,
+  modelId: ModelId,
+  piModel: PiModel | null,
+  effort: Effort | null,
+  permissionMode: ApprovalPolicy,
+) => {
+  const modified = new Date().toISOString();
+  setSessionIndexItems((prev) =>
+    prev.map((i) =>
+      i.sessionId === sessionId
+        ? { ...i, model: modelId, piModel, effort, permissionMode, modified }
+        : i,
+    ),
+  );
+  setSessions((prev) =>
+    prev.map((s) =>
+      s.sessionId === sessionId
+        ? { ...s, model: modelId, piModel, effort, permissionMode, modified }
+        : s,
+    ),
+  );
+};
+
 const handleSendMsg = async (
   message: string,
   attachmentPaths: string[] = [],
@@ -336,6 +363,7 @@ const handleSendMsg = async (
         ...prev,
         [sessionId]: [...(prev[sessionId] ?? []), queued],
       }));
+      mirrorSessionModel(sessionId, modelId, piModel, effort, permissionMode);
       return;
     }
 
@@ -354,14 +382,10 @@ const handleSendMsg = async (
     }
 
     // The backend just bumped `modified` and the model on an existing session's
-    // index entry; mirror it so the sidebar doesn't need a refetch.
-    setSessionIndexItems((prev) =>
-      prev.map((i) =>
-        i.sessionId === sessionId
-          ? { ...i, model: modelId, piModel, effort, permissionMode, modified: new Date().toISOString() }
-          : i,
-      ),
-    );
+    // index entry; mirror it so the sidebar doesn't need a refetch. Keep the
+    // loaded snapshot in step too: a session opened from a filtered row may not
+    // have an index item for the local update to replace.
+    mirrorSessionModel(sessionId, modelId, piModel, effort, permissionMode);
   } catch (e) {
     // A rejected invoke means the turn never started, so nothing will arrive to
     // clear the status — release it here rather than leaving the composer stuck.
@@ -472,7 +496,7 @@ const handleNewSession = () => {
   selectionRequestRef.current = null;
   setSelectedSessionId(null);
   setHarnessState(prefs.harness);
-  setModelId("pi");
+  setModelId(prefs.modelId);
   setPiModel(prefs.piModel);
   setEffortByModel(prefs.effortByModel);
   setPermissionModeState(prefs.permissionMode);
@@ -531,7 +555,12 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
     markSessionRead(sessionId);
   }
 
-  const indexItem = sessionIndexItems.find((i) => i.sessionId === sessionId);
+  // Prefer the loaded session snapshot for sessions already opened. It carries
+  // the same persisted fields without depending on a sidebar refresh that may
+  // still contain an older index entry.
+  const indexItem =
+    sessions.find((s) => s.sessionId === sessionId) ??
+    sessionIndexItems.find((i) => i.sessionId === sessionId);
   if (indexItem) {
     restoreSessionControls(indexItem);
   }
@@ -543,6 +572,12 @@ const handleSelectSessionIndexItem = async (sessionId: string) => {
   try {
     const snapshot = await invoke<SessionSnapshot | null>("get_session_by_id", { sessionId });
     if (snapshot) {
+      // A session may have been opened from an in-chat link while its sidebar
+      // row is filtered out. The snapshot is authoritative in that case, but
+      // only the still-current selection may change the controls.
+      if (selectionRequestRef.current === sessionId) {
+        restoreSessionControls(snapshot);
+      }
       upsertSession(snapshot);
       return;
     }
