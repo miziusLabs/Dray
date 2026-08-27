@@ -2,6 +2,7 @@ import { Copy, ExternalLink } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { LinkSafetyModalProps } from "streamdown";
 
+import { unwrapLocalLink } from "@/lib/fileLinks";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -22,17 +23,20 @@ import {
 /// link that works. The route out of the app is `openUrl`, the same one the PR
 /// panel takes, and `onConfirm` is therefore deliberately unused.
 export default function LinkDialog({ url, isOpen, onClose }: LinkSafetyModalProps) {
+  const targetUrl = unwrapLocalLink(url);
+  const isLocal = targetUrl !== url;
+
   // Both buttons close, so neither needs a "Copied" state — the dialog going
   // away is the confirmation, and a card that stays up after being answered
   // asks the reader to dismiss it twice.
   const copy = async () => {
-    await navigator.clipboard.writeText(url);
+    await navigator.clipboard.writeText(targetUrl);
     onClose();
   };
 
   const open = async () => {
     try {
-      await openUrl(url);
+      await openUrl(targetUrl);
     } catch (err) {
       console.error("failed to open link", err);
     }
@@ -44,12 +48,14 @@ export default function LinkDialog({ url, isOpen, onClose }: LinkSafetyModalProp
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Open this link?</AlertDialogTitle>
-          <AlertDialogDescription>It opens in your default browser.</AlertDialogDescription>
+          <AlertDialogDescription>
+            {isLocal ? "It opens in the associated app." : "It opens in your default browser."}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         {/* The whole URL, wrapping and scrolling rather than truncating — the
             host is the reason to show it and the tail is where a link lies. */}
         <div className="max-h-32 overflow-y-auto rounded-md bg-muted p-3 font-mono text-ui break-all">
-          {url}
+          {targetUrl}
         </div>
         <AlertDialogFooter>
           <Button

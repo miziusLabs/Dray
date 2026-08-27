@@ -1,7 +1,13 @@
 import { memo, useMemo } from "react";
-import { Streamdown, type LinkSafetyConfig, type ThemeInput } from "streamdown";
+import {
+  defaultRehypePlugins,
+  Streamdown,
+  type LinkSafetyConfig,
+  type ThemeInput,
+} from "streamdown";
 
 import LinkDialog from "@/components/chat/LinkDialog";
+import { isLocalLink, proxyLocalLink } from "@/lib/fileLinks";
 import { useCodeTheme } from "@/hooks/useCodeTheme";
 import { createSharedCodePlugin } from "@/lib/codePlugin";
 import type { CodeThemePair } from "@/lib/codeTheme";
@@ -43,6 +49,39 @@ const LINK_SAFETY: LinkSafetyConfig = {
   renderModal: (props) => <LinkDialog {...props} />,
 };
 
+// `rehype-harden` blocks local file URLs and bare workspace paths before
+// Streamdown's link renderer can show its confirmation dialog. Rewrite only
+// those URLs before sanitization, then LinkDialog unwraps the marker before
+// copying or opening it. The stock plugins stay in place; this is deliberately
+// not a way around their other URL checks.
+type MarkdownNode = {
+  type?: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: MarkdownNode[];
+};
+
+const proxyLocalLinks = () => (tree: MarkdownNode) => {
+  const visit = (node: MarkdownNode) => {
+    if (node.tagName === "a" && typeof node.properties?.href === "string") {
+      const href = node.properties.href;
+      if (isLocalLink(href)) {
+        node.properties.href = proxyLocalLink(href);
+      }
+    }
+    node.children?.forEach(visit);
+  };
+
+  visit(tree);
+};
+
+const REHYPE_PLUGINS = [
+  defaultRehypePlugins.raw,
+  proxyLocalLinks,
+  defaultRehypePlugins.sanitize,
+  defaultRehypePlugins.harden,
+];
+
 /// Streamdown is built on the same shadcn tokens as the rest of the app, so it
 /// inherits the palette; only typography scale is ours to set.
 function MarkdownImpl({ children, streaming = false, className }: MarkdownProps) {
@@ -60,6 +99,7 @@ function MarkdownImpl({ children, streaming = false, className }: MarkdownProps)
       mode={streaming ? "streaming" : "static"}
       isAnimating={streaming}
       plugins={plugins}
+      rehypePlugins={REHYPE_PLUGINS}
       controls={CONTROLS}
       linkSafety={LINK_SAFETY}
       shikiTheme={shikiTheme}
