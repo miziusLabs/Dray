@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import type { ManualCheck } from "@/hooks/useUpdater";
-import { isToday, relativeTime } from "@/lib/format";
+import { basename, isToday, relativeTime } from "@/lib/format";
 import { sessionBranch } from "@/lib/pr";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -383,7 +383,7 @@ export default function Sidebar({
   const projectName = useMemo(() => {
     const named = new Map(projects.map((p) => [p.path, p.name]));
     return (path: string) =>
-      named.get(path) ?? path.split("/").filter(Boolean).pop() ?? path;
+      named.get(path) ?? basename(path);
   }, [projects]);
 
   // Keep the empty state specific to the active or settled session list.
