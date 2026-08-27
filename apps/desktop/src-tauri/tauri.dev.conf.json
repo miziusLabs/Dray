@@ -11,6 +11,7 @@
         "minHeight": 480,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "theme": "Dark",
         "transparent": true,
         "windowEffects": {
           "effects": ["sidebar"],
