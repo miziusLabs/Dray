@@ -89,6 +89,10 @@ type SidebarProps = {
 
 /// One drawn row: the session, how deep it sits, and the flags its connector
 /// rails are drawn from.
+const CLOUD_PROJECT_PATH = "Cloud";
+
+const isCloudSession = (item: SessionIndexItem) => item.cloudName != null;
+
 export type SessionListRow = {
   item: SessionIndexItem;
   /// Levels below the top. 0 is a root and draws no connector at all.
@@ -124,9 +128,14 @@ export function sessionRows(items: SessionIndexItem[]): SessionListRow[] {
   const byRecency = (a: SessionIndexItem, b: SessionIndexItem) =>
     Date.parse(b.modified) - Date.parse(a.modified);
 
-  const present = new Set(items.map((i) => i.sessionId));
-  const parentOf = (i: SessionIndexItem) =>
-    i.parentSessionId && present.has(i.parentSessionId) ? i.parentSessionId : null;
+  const present = new Map(items.map((i) => [i.sessionId, i]));
+  const parentOf = (i: SessionIndexItem) => {
+    if (!i.parentSessionId) return null;
+    const parent = present.get(i.parentSessionId);
+    return parent && isCloudSession(parent) === isCloudSession(i)
+      ? i.parentSessionId
+      : null;
+  };
 
   const children = new Map<string, SessionIndexItem[]>();
   for (const item of items) {
@@ -216,7 +225,9 @@ export function sessionGroups(
     // Every subtree the walk emits opens with its own root, so a depth-0 row is
     // where one run ends and the next begins.
     if (row.depth === 0 || !current) {
-      const path = row.item.projectPath;
+      const path = isCloudSession(row.item)
+        ? CLOUD_PROJECT_PATH
+        : row.item.projectPath;
       current = byPath.get(path);
       if (!current) {
         current = { projectPath: path, rows: [] };
@@ -231,7 +242,9 @@ export function sessionGroups(
   // so those keep the order they were built in.
   const rank = new Map(projects.map((p, i) => [p.path, i]));
   const place = (group: SessionGroup) =>
-    rank.get(group.projectPath) ?? Number.MAX_SAFE_INTEGER;
+    group.projectPath === CLOUD_PROJECT_PATH
+      ? Number.MAX_SAFE_INTEGER
+      : (rank.get(group.projectPath) ?? Number.MAX_SAFE_INTEGER);
 
   return groups.sort((a, b) => place(a) - place(b));
 }
@@ -407,7 +420,9 @@ export default function Sidebar({
   const projectName = useMemo(() => {
     const named = new Map(projects.map((p) => [p.path, p.name]));
     return (path: string) =>
-      named.get(path) ?? basename(path);
+      path === CLOUD_PROJECT_PATH
+        ? CLOUD_PROJECT_PATH
+        : (named.get(path) ?? basename(path));
   }, [projects]);
 
   // A filtered list that comes up empty is different from an empty app, and
