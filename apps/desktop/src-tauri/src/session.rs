@@ -33,6 +33,15 @@ use std::{
 use tauri::{AppHandle, Emitter};
 #[cfg(windows)]
 use std::process::Stdio;
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, HANDLE},
+    System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JobObjectExtendedLimitInformation,
+    },
+};
 use tokio::{
     io::AsyncWriteExt,
     process::{Child, ChildStdin},
@@ -397,7 +406,11 @@ impl SessionManager {
             // cover, and the shortest window is the one least able to go wrong.
             let branch = match branch {
                 Some(b) => Some(b.to_string()),
-                None => git::list_branches(cwd).await?.current,
+                // The full branch list is already loaded by the composer. If
+                // the send wins that race, only the current branch is needed
+                // here; listing refs, status, and the remote default would put
+                // several extra git processes on the startup critical path.
+                None => git::current_branch(cwd).await,
             };
 
             // Dray creates the tree itself because the harness cannot be told
@@ -476,22 +489,11 @@ impl SessionManager {
                 return Err(e);
             }
 
-            // Detached: generation takes ~16s and the snapshot below is what the
-            // composer waits on. The title written above stands until this lands.
-            //
-            // Spawned at the project root, not `session_cwd`, for the same
-            // reason the harness child is: a worktree's directory does not exist
-            // until the CLI creates it, and `current_dir` on a missing path
-            // fails the spawn outright. Nothing waits on this, so that took
-            // every worktree session's title with it in silence.
-            crate::title::spawn_title_generation(
-                session_id,
-                prompt,
-                cwd,
-                title_model.as_ref(),
-                title_effort,
-                app,
-            );
+            // The index is now durable, so let the sidebar render the session
+            // before the baseline snapshot and Pi startup finish. This is also
+            // useful when startup fails: the indexed row remains the recovery
+            // path instead of being invisible until the invoke returns.
+            app.emit(crate::orchestration::SESSION_CREATED, &item).ok();
 
             // Taken before the child exists, so nothing it does can end up
             // inside its own baseline. A worktree the CLI has yet to create has
@@ -541,6 +543,18 @@ impl SessionManager {
                 .lock()
                 .await
                 .insert(session_id.to_string(), session);
+
+            // Title generation is cosmetic and starts only after the main Pi
+            // process has received its prompt, so its extra Windows process
+            // cannot compete with startup Git work or the first turn.
+            crate::title::spawn_title_generation(
+                session_id,
+                prompt,
+                cwd,
+                title_model.as_ref(),
+                title_effort,
+                app,
+            );
 
             // Returned so the frontend learns the resolved worktree name and
             // the backend-truncated title rather than guessing either.
@@ -984,6 +998,63 @@ impl SessionManager {
     }
 }
 
+/// Owns a Windows job containing the Pi process and all of its descendants.
+/// Closing a job configured with `KILL_ON_JOB_CLOSE` terminates the whole tree
+/// without waiting for `taskkill` to enumerate and reap every process.
+#[cfg(windows)]
+#[derive(Debug)]
+pub struct ProcessJob {
+    // Raw Windows handles are pointers and are not marked `Send` by Rust,
+    // although this kernel handle is safe to move between threads. Keep its
+    // numeric representation so SessionManager remains transferable.
+    handle: usize,
+}
+
+#[cfg(windows)]
+impl ProcessJob {
+    /// Creates and configures a job after Pi is spawned. A failure falls back
+    /// to the taskkill path, since being unable to install the optimization
+    /// must not prevent a session from starting.
+    pub fn attach(child: &Child) -> Option<Self> {
+        let process = child.raw_handle()?;
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            eprintln!("[process job err] could not create Windows job");
+            return None;
+        }
+
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                &limits as *const _ as *const std::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) != 0
+        };
+        let assigned = configured
+            && unsafe { AssignProcessToJobObject(handle, process as HANDLE) != 0 };
+
+        if !assigned {
+            unsafe { CloseHandle(handle) };
+            eprintln!("[process job err] could not assign Pi to Windows job");
+            return None;
+        }
+
+        Some(Self {
+            handle: handle as usize,
+        })
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProcessJob {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.handle as HANDLE) };
+    }
+}
+
 #[derive(Debug)]
 pub struct Session {
     pub id: String,
@@ -1008,6 +1079,10 @@ pub struct Session {
     /// Set before a stop kills the child, so buffered stdout cannot publish
     /// stale events after the session has been stopped and removed from the map.
     pub stopped: Arc<AtomicBool>,
+    /// Native Windows process-tree ownership. Unix keeps its existing child
+    /// termination path and does not need an extra handle.
+    #[cfg(windows)]
+    pub process_job: Option<ProcessJob>,
     /// Pi extension dialogs waiting for an answer from the frontend.
     pub pi_ui_requests: pi::mapper::PendingUiRequests,
     /// Prompts typed during a running turn, waiting for the next boundary.
@@ -1286,16 +1361,26 @@ impl Session {
     /// revive a session after it has been stopped.
     pub async fn kill(mut self) -> Result<()> {
         self.stopped.store(true, Relaxed);
+
+        #[cfg(windows)]
+        if let Some(process_job) = self.process_job.take() {
+            // Closing the job is the fast, native tree termination path. Wait
+            // only for the direct child to be reaped; no process enumeration or
+            // synchronous taskkill command remains on the Stop critical path.
+            drop(process_job);
+            self.child.wait().await?;
+            return Ok(());
+        }
+
         terminate_child(&mut self.child).await
     }
 }
 
 /// Terminates a session's Pi process and, on Windows, every descendant tool.
 ///
-/// Pi is normally a Node process that launches shells and other tools. Killing
-/// only the direct child leaves those descendants running on Windows, where
-/// there is no Unix process group to signal. `taskkill /T` is built into the OS
-/// and guarantees that descendants do not survive a Windows Stop.
+/// New sessions use [`ProcessJob`] above. `taskkill /T` remains as a fallback
+/// for a process that could not be assigned to a job (for example, when the
+/// host has already placed it in an incompatible job).
 async fn terminate_child(child: &mut Child) -> Result<()> {
     if matches!(child.try_wait(), Ok(Some(_))) {
         return Ok(());

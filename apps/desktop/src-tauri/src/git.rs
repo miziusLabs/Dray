@@ -66,20 +66,25 @@ pub async fn list_branches(cwd: &str) -> Result<BranchList> {
         return Ok(BranchList::default());
     };
 
-    let current = git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"])
-        .await
-        .map(|s| s.trim().to_string())
-        // Detached HEAD reports the literal string rather than a branch name.
-        .filter(|s| !s.is_empty() && s != "HEAD");
-
-    let dirty = git(cwd, &["status", "--porcelain"])
-        .await
-        .map_or(0, |s| count_changes(&s));
+    // These reads do not depend on one another. Running them together matters
+    // on Windows, where starting several git processes serially makes opening
+    // the branch picker noticeably slower than on macOS.
+    let (current, dirty, default_base) = tokio::join!(
+        async {
+            git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"])
+                .await
+                .map(|s| s.trim().to_string())
+                // Detached HEAD reports the literal string rather than a branch name.
+                .filter(|s| !s.is_empty() && s != "HEAD")
+        },
+        async { git(cwd, &["status", "--porcelain"]).await.map_or(0, |s| count_changes(&s)) },
+        default_base(cwd),
+    );
 
     Ok(BranchList {
         current,
         branches: parse_branches(&raw),
-        default_base: default_base(cwd).await,
+        default_base,
         dirty,
     })
 }

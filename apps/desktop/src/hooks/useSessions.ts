@@ -257,6 +257,13 @@ const upsertSession = (snapshot: SessionSnapshot) =>
       : [...prev, snapshot],
   );
 
+const upsertSessionIndexItem = (item: SessionIndexItem) =>
+  setSessionIndexItems((prev) =>
+    prev.some((i) => i.sessionId === item.sessionId)
+      ? prev.map((i) => (i.sessionId === item.sessionId ? item : i))
+      : [...prev, item],
+  );
+
 const handleSendMsg = async (
   message: string,
   attachmentPaths: string[] = [],
@@ -341,7 +348,7 @@ const handleSendMsg = async (
       // A new session is never archived, so it belongs to the active list only —
       // pushed unconditionally it would show up under the archived filter too.
       if (!showArchived) {
-        setSessionIndexItems((prev) => [...prev, snapshot]);
+        upsertSessionIndexItem(snapshot);
       }
       return;
     }
@@ -1224,20 +1231,14 @@ useEffect(() => {
   };
 }, []);
 
-// The backend generates a title a few seconds after a session starts and writes
-// it to the index itself, so this only mirrors what's already on disk. Its own
-// listener rather than a branch in `agent_event`: nothing here came from the
-// agent, and it must not land in the session's event list.
-// A session created by something other than the composer — an agent calling the
-// `dray` CLI, which reaches the backend over its own socket. The row has to
-// appear without a refetch, the way a composer-created one does.
-//
-// The index item alone, never a `SessionSnapshot`: `agent_event` writes into
-// sessions this hook already holds and drops events for ids it doesn't, so a
-// snapshot here would start a transcript in memory that later events could miss.
-// Left as an index item, `handleSelectSessionIndexItem` loads it whole from disk
-// on first open — and `session_status` and `session_title` still land, since
-// both write by id into maps the sidebar reads rather than into `sessions`.
+// The backend emits this as soon as the index entry is durable, before process
+// startup and the first prompt have finished. The index item alone, never a
+// `SessionSnapshot`: `agent_event` writes into sessions this hook already holds
+// and drops events for ids it doesn't, so a snapshot here would start a
+// transcript in memory that later events could miss. Left as an index item,
+// `handleSelectSessionIndexItem` loads it whole from disk on first open — and
+// `session_status` and `session_title` still land, since both write by id into
+// maps the sidebar reads rather than into `sessions`.
 //
 // Deliberately not selected. The user is mid-conversation in the session that
 // spawned this one; yanking them out of it is the opposite of what fanning work
@@ -1248,11 +1249,7 @@ useEffect(() => {
     // A new session is never archived, so it belongs to the active list only.
     if (showArchivedRef.current) return;
 
-    setSessionIndexItems((prev) =>
-      prev.some((i) => i.sessionId === item.sessionId)
-        ? prev.map((i) => (i.sessionId === item.sessionId ? item : i))
-        : [...prev, item],
-    );
+    upsertSessionIndexItem(item);
   });
 
   return () => {
@@ -1260,6 +1257,10 @@ useEffect(() => {
   };
 }, []);
 
+// The backend generates a title a few seconds after a session starts and writes
+// it to the index itself, so this only mirrors what's already on disk. Its own
+// listener rather than a branch in `agent_event`: nothing here came from the
+// agent, and it must not land in the session's event list.
 useEffect(() => {
   const listenerPromise = listen<SessionTitleEvent>("session_title", (event) => {
     const { sessionId, title } = event.payload;

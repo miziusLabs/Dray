@@ -159,6 +159,9 @@ pub async fn init(
         .spawn()
         .context("couldn't start pi")?;
 
+    #[cfg(windows)]
+    let process_job = crate::session::ProcessJob::attach(&child);
+
     let stdin = Arc::new(Mutex::new(
         child.stdin.take().context("failed to take stdin")?,
     ));
@@ -231,6 +234,8 @@ pub async fn init(
         seq,
         status,
         stopped,
+        #[cfg(windows)]
+        process_job,
         pi_ui_requests: pending_ui,
         queued,
     })

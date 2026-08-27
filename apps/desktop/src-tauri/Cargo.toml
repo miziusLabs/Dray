@@ -51,4 +51,9 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 # Windows has AF_UNIX support, but Tokio does not expose it as an async stream.
 uds_windows = "1.2.1"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }

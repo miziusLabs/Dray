@@ -31,11 +31,11 @@ use std::path::Path;
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(windows)]
 use uds_windows::{UnixListener, UnixStream};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::runtime::Handle;
 
-/// Emitted when a session is created by something other than the composer, so
-/// the sidebar gains the row without a refetch.
+/// Emitted once a new session's index entry is durable, so the sidebar gains
+/// the row without waiting for process startup or a refetch.
 ///
 /// Carries the index item alone, not a `SessionSnapshot`. The frontend's
 /// `agent_event` listener writes into sessions it already holds and drops
@@ -336,9 +336,6 @@ async fn create_session(create: CreateSession, app: &AppHandle) -> Result<Respon
         .snapshot
         .map(|s| s.index_item)
         .context("the session was created but returned no index entry")?;
-
-    // After the send, so the row the sidebar gains is one that actually started.
-    app.emit(SESSION_CREATED, &item).ok();
 
     Ok(Response::Created {
         session: summarize(item),
