@@ -87,6 +87,11 @@ Build the image locally (Docker Desktop must be running):
 pnpm build:sandbox
 ```
 
+The build runs from the host on Windows, macOS, and Linux. On Windows it uses
+the same Docker daemon (Docker Desktop's WSL 2 backend) that Cloud Sessions
+run on, so no separate WSL setup is needed — the image is built where it will
+be used.
+
 Use `DRAY_CLOUD_IMAGE` to select a different image tag and `GITHUB_TOKEN` (or a
 logged-in `gh`) to provide the token passed to Cloud containers.
 

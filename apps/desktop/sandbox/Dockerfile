@@ -36,12 +36,21 @@ ENV PI_CODING_AGENT_DIR=/home/agent/.pi/agent
 
 RUN npm install --global "${PI_PACKAGE}"
 
-RUN useradd --create-home --uid 1000 --shell /bin/bash agent \
+# Ubuntu images ship a default `ubuntu` user at UID 1000, which would collide
+# with the agent user below; drop it first so fresh pulls of the base image
+# build identically on every host.
+RUN userdel -r ubuntu \
+  && useradd --create-home --uid 1000 --shell /bin/bash agent \
   && mkdir -p /home/agent/workspace \
   && chown -R agent:agent /home/agent
 
 COPY sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint
-RUN chmod 0755 /usr/local/bin/sandbox-entrypoint
+# Git for Windows checks shell scripts out with CRLF line endings when
+# core.autocrlf is set, and the container cannot execute a CRLF shebang. Strip
+# carriage returns defensively so the image runs regardless of host checkout
+# settings (fresh clones stay LF via .gitattributes).
+RUN sed -i 's/\r$//' /usr/local/bin/sandbox-entrypoint \
+  && chmod 0755 /usr/local/bin/sandbox-entrypoint
 
 USER agent
 WORKDIR /home/agent

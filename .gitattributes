@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Shell scripts and Dockerfiles end up inside Linux containers. Git for
+# Windows' autocrlf would otherwise check them out with CRLF endings and the
+# container cannot execute a CRLF shebang, so keep them LF everywhere.
+*.sh text eol=lf
+Dockerfile text eol=lf
