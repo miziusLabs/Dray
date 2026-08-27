@@ -96,7 +96,10 @@ export default function HandoffRow({
             "transition-transform delay-150 duration-200 ease-out " +
             // -28px clears the card's top edge, so the open row reads as sitting
             // above the composer rather than resting on it.
-            "group-hover:-translate-y-7 group-focus-within:-translate-y-7"
+            // `focus-visible`, rather than `focus-within`, keeps keyboard
+            // navigation accessible without letting a mouse click leave the
+            // row expanded after the pointer exits.
+            "group-hover:-translate-y-7 group-has-[:focus-visible]:-translate-y-7"
           }
         >
           {actions.map((action) => {
@@ -112,7 +115,7 @@ export default function HandoffRow({
                 onClick={() =>
                   action.kind === "push" ? onPush() : onSend(action.prompt)
                 }
-                className="pointer-events-none group-focus-within:pointer-events-auto group-hover:pointer-events-auto"
+                className="pointer-events-none group-has-[:focus-visible]:pointer-events-auto group-hover:pointer-events-auto"
               >
                 {busy ? (
                   <Loader2 className="size-3.5 animate-spin" strokeWidth={1.5} />
