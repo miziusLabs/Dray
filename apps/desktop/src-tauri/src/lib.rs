@@ -10,7 +10,10 @@ use crate::{
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot, SessionStatus},
 };
 use std::collections::HashMap;
-use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri::{AppHandle, Manager, State, WindowEvent};
+
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
 
 pub mod attachments;
 pub mod binpath;
@@ -491,13 +494,19 @@ async fn mark_session_idle(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
         .manage(updater::PendingUpdate::default())
-        .manage(quit::PendingQuit::default())
+        .manage(quit::PendingQuit::default());
+
+    // macOS needs a custom menu so Cmd+Q reaches the in-app confirmation.
+    // Other platforms use the window's preventable close event and should not
+    // get Tauri's default native menu bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder
         .menu(quit::menu)
         .on_menu_event(|app, event| {
             if event.id() == quit::QUIT_ID {
@@ -507,7 +516,9 @@ pub fn run() {
                     eprintln!("[check update emit err] {e}");
                 }
             }
-        })
+        });
+
+    builder
         .on_window_event(|window, event| {
             // The dialog answers with `confirm_quit`, which exits outright — so
             // this arm never has to let a close through.

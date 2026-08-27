@@ -14,10 +14,10 @@
 
 use std::sync::Mutex;
 
-use tauri::{
-    menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    AppHandle, Emitter, Manager, Runtime,
-};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+
+#[cfg(target_os = "macos")]
+use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
 pub const QUIT_ID: &str = "quit";
 
@@ -109,13 +109,6 @@ pub fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     )?;
 
     Menu::with_items(app, &[&app_menu, &edit_menu, &view_menu, &window_menu])
-}
-
-/// Elsewhere the window's close button is the only route out, and it already
-/// arrives as a preventable event — so the default menu is left alone.
-#[cfg(not(target_os = "macos"))]
-pub fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    Menu::default(app)
 }
 
 pub fn request<R: Runtime>(app: &AppHandle<R>) {
