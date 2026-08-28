@@ -1,4 +1,4 @@
-import { FolderPlus } from "lucide-react";
+import { FolderPlus, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -7,7 +7,6 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { basename } from "@/lib/format";
@@ -72,10 +71,8 @@ export default function ProjectSelector({
           ))}
         </DropdownMenuRadioGroup>
 
-        <DropdownMenuSeparator />
-
         <DropdownMenuItem onSelect={onAttach} className="text-ui">
-          <FolderPlus />
+          <Plus />
           Attach project…
         </DropdownMenuItem>
       </DropdownMenuContent>
