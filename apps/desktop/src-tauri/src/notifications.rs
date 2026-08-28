@@ -38,11 +38,16 @@ pub async fn notify_session(
         return Ok(());
     }
 
+    #[cfg(target_os = "windows")]
+    let app_id = app.config().identifier.clone();
+
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         request_auth_once();
 
         let mut notification = notify_rust::Notification::new();
+        #[cfg(target_os = "windows")]
+        notification.app_id(&app_id);
         notification.summary(&title).body(&body).auto_icon();
 
         #[cfg(target_os = "macos")]
