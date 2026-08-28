@@ -18,6 +18,8 @@
 
 Dray wraps coding-agent CLIs in a native chat UI, giving you a desktop home for running and managing coding-agent sessions.
 
+> This project is a fork of [monorepo-labs/dray](https://github.com/monorepo-labs/dray).
+
 ## License
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
