@@ -4,8 +4,11 @@ import {
   applyCommand,
   commandSource,
   filterCommands,
+  filterCommandsByPrefix,
+  findSkillInvocation,
   groupCommands,
   parseSlashCommand,
+  slashPrefix,
   slashQuery,
 } from "./slash";
 import type { SlashCommand } from "@/types/events";
@@ -27,6 +30,13 @@ describe("slashQuery", () => {
 
   it("opens skills with a leading dollar sign", () => {
     expect(slashQuery("$commit", 7)).toBe("commit");
+  });
+
+  it("opens skills in the middle of prose", () => {
+    const text = "finish with $commit-and-push when ready";
+    expect(slashQuery(text, 24)).toBe("commit-and-push");
+    expect(slashPrefix(text, 24)).toBe("$");
+    expect(slashQuery(text, text.length)).toBeNull();
   });
 
   /// A slash inside prose is a path or a date, not a command. Firing there
@@ -52,6 +62,18 @@ describe("slashQuery", () => {
 
   it("ignores a caret sitting on the slash itself", () => {
     expect(slashQuery("/rev", 0)).toBeNull();
+  });
+});
+
+describe("filterCommandsByPrefix", () => {
+  const commands = [command("review"), command("commit", "", [], true)];
+
+  it("keeps skills out of the slash menu", () => {
+    expect(filterCommandsByPrefix(commands, "/").map((c) => c.name)).toEqual(["review"]);
+  });
+
+  it("keeps commands out of the skills menu", () => {
+    expect(filterCommandsByPrefix(commands, "$").map((c) => c.name)).toEqual(["commit"]);
   });
 });
 
@@ -203,6 +225,13 @@ describe("applyCommand", () => {
       caret: 17,
     });
   });
+
+  it("completes a skill in prose without replacing the message", () => {
+    expect(applyCommand("finish with $comm when ready", "commit-and-push", true, 17)).toEqual({
+      text: "finish with $commit-and-push when ready",
+      caret: 29,
+    });
+  });
 });
 
 describe("parseSlashCommand", () => {
@@ -243,5 +272,19 @@ describe("parseSlashCommand", () => {
     expect(parseSlashCommand("/")).toBeNull();
     expect(parseSlashCommand("// a comment")).toBeNull();
     expect(parseSlashCommand("/ spaced")).toBeNull();
+  });
+});
+
+describe("findSkillInvocation", () => {
+  it("finds a skill used in prose", () => {
+    expect(findSkillInvocation("finish with $commit-and-push when ready")).toEqual({
+      name: "commit-and-push",
+      start: 12,
+      end: 28,
+    });
+  });
+
+  it("does not treat a dollar sign inside a word as a skill", () => {
+    expect(findSkillInvocation("the total is US$5")).toBeNull();
   });
 });

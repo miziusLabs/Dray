@@ -8,18 +8,41 @@
 /// [streaming.ts]: ./streaming.ts
 import type { SlashCommand } from "@/types/events";
 
+type InvocationSpan = {
+  start: number;
+  end: number;
+  prefix: "/" | "$";
+};
+
+function invocationSpan(text: string, caret: number): InvocationSpan | null {
+  if (caret < 1 || caret > text.length) return null;
+
+  let start = caret - 1;
+  while (start > 0 && !/\s/.test(text[start - 1])) start -= 1;
+
+  const prefix = text[start];
+  // Commands remain a whole-prompt construct. Skills can be referenced at the
+  // start of any word, which mirrors how @file mentions work in prose.
+  if (prefix !== "$" && !(prefix === "/" && start === 0)) return null;
+
+  let end = start + 1;
+  while (end < text.length && !/\s/.test(text[end])) end += 1;
+  if (caret > end) return null;
+
+  return { start, end, prefix };
+}
+
 /// The command or skill name being typed, or `null` when the caret isn't in one.
 ///
-/// A leading `/` opens commands and a leading `$` opens skills. Prefixes in
-/// prose remain ordinary text, so file paths never open the picker.
+/// Slash commands must lead the prompt, while `$skills` can open at any word.
+/// This keeps slashes in paths inert without limiting skills to command syntax.
 export function slashQuery(text: string, caret: number): string | null {
-  if (text[0] !== "/" && text[0] !== "$") return null;
+  const span = invocationSpan(text, caret);
+  return span ? text.slice(span.start + 1, span.end) : null;
+}
 
-  const space = text.search(/\s/);
-  const end = space === -1 ? text.length : space;
-  if (caret < 1 || caret > end) return null;
-
-  return text.slice(1, end);
+export function slashPrefix(text: string, caret: number): "/" | "$" | null {
+  return invocationSpan(text, caret)?.prefix ?? null;
 }
 
 /// Commands matching `query`, best first.
@@ -38,6 +61,16 @@ export function filterCommands(commands: SlashCommand[], query: string): SlashCo
     .map((match) => match.command);
 }
 
+/// Keeps the two invocation menus disjoint: `/` is for commands and `$` is for
+/// skills. The same composer serves new sessions and follow-ups, so this must
+/// be based on the typed prefix rather than on the composer's state.
+export function filterCommandsByPrefix(
+  commands: SlashCommand[],
+  prefix: "/" | "$",
+): SlashCommand[] {
+  return commands.filter((command) => command.isSkill === (prefix === "$"));
+}
+
 /// `null` when the command doesn't match at all. Lower is better.
 function score(command: SlashCommand, query: string): number | null {
   const name = command.name.toLowerCase();
@@ -54,12 +87,24 @@ function score(command: SlashCommand, query: string): number | null {
 }
 
 /// Replaces the command or skill being typed with its user-facing prefix.
-export function applyCommand(text: string, name: string, isSkill = false): { text: string; caret: number } {
-  const space = text.search(/\s/);
-  const args = space === -1 ? "" : text.slice(space);
+export function applyCommand(
+  text: string,
+  name: string,
+  isSkill = false,
+  caret = text.length,
+): { text: string; caret: number } {
+  const span = invocationSpan(text, caret);
+  const start = span?.start ?? 0;
+  const end = span?.end ?? (text.search(/\s/) === -1 ? text.length : text.search(/\s/));
   const head = `${isSkill ? "$" : "/"}${name}`;
+  const suffix = text.slice(end);
+  const separator = suffix ? "" : " ";
+  const caretOffset = separator || /^\s/.test(suffix) ? 1 : 0;
 
-  return { text: head + (args || " "), caret: head.length + 1 };
+  return {
+    text: text.slice(0, start) + head + separator + suffix,
+    caret: start + head.length + caretOffset,
+  };
 }
 
 /// Where a command came from, as far as the CLI will tell us.
@@ -132,10 +177,25 @@ export function groupCommands(commands: SlashCommand[], recent: string[]): Comma
   ].filter((group) => group.items.length > 0);
 }
 
-/// Splits a sent command or skill into its name and arguments.
+/// Splits a sent leading command or skill into its name and arguments.
 export function parseSlashCommand(text: string): { name: string; args: string } | null {
   const match = /^([/$])([^\s/]\S*)(.*)$/s.exec(text);
   if (!match) return null;
 
   return { name: match[2], args: match[3].trim() };
+}
+
+/// Finds the first skill reference in prose, for recents and transcript styling.
+export function findSkillInvocation(
+  text: string,
+): { name: string; start: number; end: number } | null {
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== "$" || (start > 0 && !/\s/.test(text[start - 1]))) continue;
+
+    let end = start + 1;
+    while (end < text.length && !/\s/.test(text[end])) end += 1;
+    if (end > start + 1) return { name: text.slice(start + 1, end), start, end };
+  }
+
+  return null;
 }

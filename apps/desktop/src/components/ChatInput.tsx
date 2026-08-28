@@ -22,8 +22,11 @@ import { applyMention, mentionSpan } from "@/lib/mention";
 import {
   applyCommand,
   filterCommands,
+  filterCommandsByPrefix,
+  findSkillInvocation,
   groupCommands,
   parseSlashCommand,
+  slashPrefix,
   slashQuery,
 } from "@/lib/slash";
 import { cn } from "@/lib/utils";
@@ -183,13 +186,15 @@ export default function ChatInput({
   // searching, and headers would hide matches behind section chrome, so the
   // ranked list is drawn flat.
   const query = slashQuery(message, caret);
+  const prefix = slashPrefix(message, caret);
   const groups = useMemo(() => {
-    if (query === null) return [];
-    if (query === "") return groupCommands(commands, recent);
+    if (query === null || prefix === null) return [];
+    const matchingKind = filterCommandsByPrefix(commands, prefix);
+    if (query === "") return groupCommands(matchingKind, recent);
 
-    const matches = filterCommands(commands, query);
+    const matches = filterCommands(matchingKind, query);
     return matches.length ? [{ label: null, items: matches }] : [];
-  }, [commands, query, recent]);
+  }, [commands, prefix, query, recent]);
 
   // The two pickers are mutually exclusive without needing to be arbitrated:
   // the caret sits in exactly one token, and a token opening with `/` at
@@ -222,7 +227,7 @@ export default function ChatInput({
   }, [query, mentionQuery]);
 
   const pickCommand = (command: SlashCommand) => {
-    const next = applyCommand(message, command.name, command.isSkill);
+    const next = applyCommand(message, command.name, command.isSkill, caret);
     pendingCaretRef.current = next.caret;
     setMessage(next.text);
     textareaRef.current?.focus();
@@ -421,8 +426,8 @@ export default function ChatInput({
     // Recorded on send rather than on pick: choosing a command from the list
     // and then deleting it is not using it. Taken from the text, so a command
     // typed by hand counts the same as one picked.
-    const command = parseSlashCommand(trimmed);
-    if (command) recordCommand(command.name);
+    const invocation = parseSlashCommand(trimmed) ?? findSkillInvocation(trimmed);
+    if (invocation) recordCommand(invocation.name);
 
     onSend(
       trimmed,
