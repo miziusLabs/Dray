@@ -67,14 +67,16 @@ pub async fn ensure_image() -> Result<()> {
 
 /// Builds a Docker command that runs Pi through the image entrypoint.
 ///
+/// The session manager verifies the image before indexing a new or resumed
+/// Cloud. Do not inspect it again here: every inspection launches another
+/// Docker client, which makes Windows session startup noticeably slower.
+///
 /// `GITHUB_TOKEN` is deliberately passed as an environment name rather than a
 /// `-e KEY=value` argument. Docker reads its value from this process's
 /// environment, so the secret does not appear in the command-line argument
 /// visible to local process inspectors. The entrypoint mirrors Agentsmith by
 /// exporting it as `GH_TOKEN` and running `gh auth setup-git`.
 pub async fn pi_command(session_id: &str, cloud_name: &str, pi_args: &[String]) -> Result<Command> {
-    ensure_image().await?;
-
     let home = dirs::home_dir().context("could not resolve home directory")?;
     let pi_agent = home.join(".pi").join("agent");
     let volume = volume_name(cloud_name);

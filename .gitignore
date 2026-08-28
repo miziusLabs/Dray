@@ -10,6 +10,10 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+# Cargo build trees can contain thousands of files. Besides being generated,
+# leaving nested targets visible makes the pre-turn Git snapshot especially
+# expensive on Windows.
+target/
 *.local
 
 # Editor directories and files
