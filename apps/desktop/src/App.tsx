@@ -35,7 +35,7 @@ import SubagentPanel from "@/components/SubagentPanel";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
-import { nextEffort } from "@/components/composer/ModelSelector";
+import { modelKey, nextEffort } from "@/components/composer/ModelSelector";
 import ViewTabs, { type ViewTab } from "@/components/layout/ViewTabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { pickAttachments } from "@/hooks/useAttachments";
@@ -129,6 +129,16 @@ function App() {
   };
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
+  // `null` means the user has not configured a subset, so newly discovered
+  // models join the cycle automatically. Once configured, the stored stable
+  // keys preserve that explicit choice across catalog refreshes and relaunches.
+  const [cycleModelKeys, setCycleModelKeys] = useLocalStorage<string[] | null>(
+    "ade.cycleModelKeys",
+    null,
+  );
+  const cycleModels = cycleModelKeys
+    ? models.filter((model) => cycleModelKeys.includes(modelKey(model)))
+    : models;
 
   const [panelOpen, setPanelOpen] = useState(false);
   // `null` is "never picked", and it is the whole of the default-tab rule.
@@ -506,17 +516,20 @@ function App() {
     },
     { meta: false, shift: true },
   );
-  // Ctrl+M cycles the model, leaving each model's own remembered effort alone,
-  // same as picking it from the menu.
+  // Ctrl+M cycles the configured model subset, leaving each model's own
+  // remembered effort alone, same as picking it from the menu.
   useHotkey("m", () => {
-    if (models.length < 2) return;
-    const index = models.findIndex(
+    if (cycleModels.length === 0) return;
+    const index = cycleModels.findIndex(
       (m) =>
         m.id === modelId &&
         (m.id !== "pi" ||
           (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
     );
-    const next = models[(index + 1) % models.length];
+    // A one-model cycle can still bring an excluded current model back into the
+    // configured set; once it is selected, there is nowhere else to move.
+    if (cycleModels.length === 1 && index === 0) return;
+    const next = cycleModels[(index + 1) % cycleModels.length];
     handleModelChange(next.id, null, next.piModel);
   });
   const fullscreen = useFullscreen();
@@ -771,6 +784,9 @@ function App() {
       onOpenChange={setSettingsOpen}
       showArchived={showArchived}
       onShowArchivedChange={setShowArchived}
+      models={models}
+      cycleModelKeys={cycleModelKeys}
+      onCycleModelKeysChange={setCycleModelKeys}
       titleModels={titleModelOptions}
       titleModelId={titlePrefs.modelId}
       titlePiModel={titlePrefs.piModel}

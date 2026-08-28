@@ -6,7 +6,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import ModelSelector from "@/components/composer/ModelSelector";
+import ModelSelector, { modelKey, modelLabel } from "@/components/composer/ModelSelector";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import type { Effort, Model, ModelId, PiModel } from "@/types/events";
 
@@ -21,6 +28,9 @@ export default function SettingsDialog({
   onOpenChange,
   showArchived,
   onShowArchivedChange,
+  models,
+  cycleModelKeys,
+  onCycleModelKeysChange,
   titleModels,
   titleModelId,
   titlePiModel,
@@ -31,6 +41,9 @@ export default function SettingsDialog({
   onOpenChange: (next: boolean) => void;
   showArchived: boolean;
   onShowArchivedChange: (next: boolean) => void;
+  models: Model[];
+  cycleModelKeys: string[] | null;
+  onCycleModelKeysChange: (next: string[]) => void;
   titleModels: Model[];
   titleModelId: ModelId;
   titlePiModel: PiModel | null;
@@ -57,6 +70,11 @@ export default function SettingsDialog({
             checked={showArchived}
             onChange={onShowArchivedChange}
           />
+          <CycleModelsRow
+            models={models}
+            selectedKeys={cycleModelKeys}
+            onChange={onCycleModelKeysChange}
+          />
           <TitleGenerationRow
             models={titleModels}
             modelId={titleModelId}
@@ -67,6 +85,67 @@ export default function SettingsDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function CycleModelsRow({
+  models,
+  selectedKeys,
+  onChange,
+}: {
+  models: Model[];
+  selectedKeys: string[] | null;
+  onChange: (next: string[]) => void;
+}) {
+  const id = useId();
+  const resolvedKeys = selectedKeys ?? models.map(modelKey);
+  const selectedCount = models.filter((model) => resolvedKeys.includes(modelKey(model))).length;
+  const summary =
+    selectedCount === models.length
+      ? "All models"
+      : selectedCount === 1
+        ? "1 model"
+        : `${selectedCount} models`;
+
+  const setChecked = (model: Model, checked: boolean) => {
+    const key = modelKey(model);
+    onChange(
+      checked
+        ? Array.from(new Set([...resolvedKeys, key]))
+        : resolvedKeys.filter((selected) => selected !== key),
+    );
+  };
+
+  return (
+    <SettingRow
+      id={id}
+      label="Cycle models"
+      description="Choose which models Ctrl+M cycles through."
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button id={id} type="button" variant="outline" size="sm" className="text-ui">
+            {summary}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-48">
+          {models.map((model) => {
+            const key = modelKey(model);
+            return (
+              <DropdownMenuCheckboxItem
+                key={key}
+                checked={resolvedKeys.includes(key)}
+                className="text-ui"
+                onCheckedChange={(checked) => setChecked(model, checked === true)}
+                onSelect={(event) => event.preventDefault()}
+              >
+                {modelLabel(model)}
+              </DropdownMenuCheckboxItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SettingRow>
   );
 }
 

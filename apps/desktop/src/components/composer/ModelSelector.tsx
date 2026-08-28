@@ -27,6 +27,11 @@ const EFFORT_LABELS: Record<Effort, string> = {
   max: "Max",
 };
 
+export const modelKey = (model: Model) =>
+  model.piModel ? `pi:${model.piModel.provider}/${model.piModel.id}` : model.id;
+
+export const modelLabel = (model: Model) => model.label || model.piModel?.id || model.id;
+
 /// Next effort level for `model`, wrapping — what Shift+Tab lands on. `null`
 /// where the model offers nothing to cycle, so the chord no-ops rather than
 /// inventing an effort the CLI would ignore.
@@ -68,10 +73,6 @@ export default function ModelSelector({
       (m.id !== "pi" ||
         (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
   ) ?? null;
-  const modelKey = (model: Model) =>
-    model.piModel ? `pi:${model.piModel.provider}/${model.piModel.id}` : model.id;
-  const modelLabel = (model: Model) => model.label || model.piModel?.id || model.id;
-
   /// What a row would resolve to if clicked: the live effort for the model
   /// already selected, each other model's own default. Mirrors the resolution
   /// in `useSessions`, so the menu can't advertise an effort the send wouldn't use.
