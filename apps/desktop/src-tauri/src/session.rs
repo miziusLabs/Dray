@@ -63,6 +63,8 @@ use tokio::process::Command;
 /// point.
 pub const SESSION_CREATED: &str = "session_created";
 
+const CLOUD_SESSION_PROMPT: &str = "You are working inside a Cloud environment. Clone repositories if needed.";
+
 /// Emitted as `session_status` when a session's status changes, so the sidebar
 /// and composer update without a refetch. Like `SessionTitleEvent`, this is not
 /// an `AgentEvent`: it's derived state, and must never reach the `.jsonl` log.
@@ -392,6 +394,12 @@ impl SessionManager {
                 }
                 None => cwd.to_string(),
             };
+            // Give the agent the Cloud-specific workspace instruction on the
+            // first prompt. Keep the original prompt for the session title.
+            let session_prompt = cloud_name
+                .is_some()
+                .then(|| format!("{CLOUD_SESSION_PROMPT}\n\n{prompt}"));
+            let session_prompt = session_prompt.as_deref().unwrap_or(prompt);
 
             // A Cloud has no checkout to inspect or modify. The selected branch
             // is metadata for the prompt and UI only; no local branch is
@@ -460,7 +468,7 @@ impl SessionManager {
             )
             .await?;
             session
-                .send_msg(prompt, attachment_paths, baseline, from, app)
+                .send_msg(session_prompt, attachment_paths, baseline, from, app)
                 .await?;
             let events = list_session_events(session_id).await?;
             self.sessions
