@@ -10,13 +10,13 @@
   <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white">
   <img alt="Vite" src="https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.7.3-blue?style=flat-square">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.7.4-blue?style=flat-square">
   <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-6B4EFF?style=flat-square">
 </p>
 
 ## Overview
 
-Dray wraps coding-agent CLIs in a native chat UI, giving you a desktop home for running and managing coding-agent sessions.
+Dray wraps coding-agent CLIs in a native chat UI, giving you a desktop home for running and managing coding-agent sessions. The current harness integrates with [Pi](https://github.com/badlogic/pi-mono).
 
 > This project is a fork of [monorepo-labs/dray](https://github.com/monorepo-labs/dray).
 
@@ -26,9 +26,17 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Features
 
-- Native desktop chat UI for coding-agent CLIs.
-- Session management with changes, diffs, pull requests, and isolated Cloud Sessions.
-- Attachments, slash commands, themes, and desktop notifications.
+- Persistent multi-session workspace with search, pinning, settling, forks, nested sessions, unread/waiting state, and desktop notifications.
+- Local Sessions inside attached projects, with project and Git branch switching.
+- Isolated Cloud Sessions that run Pi in Docker with their own persistent workspace volume.
+- Model and reasoning/effort controls, configurable permission modes, context usage, queued follow-ups, and generated session titles.
+- Rich chat transcripts with Markdown, syntax highlighting, reasoning, tool calls, file edits, diffs, subagents, background tasks, images, permission requests, and structured questions.
+- File/image attachments, drag and drop, `@file` fuzzy search, `/commands`, and `$skills` discovered from Pi.
+- Repository Changes view for uncommitted work, commit history, file lists, and highlighted diffs.
+- Turn-scoped change tracking backed by Git snapshots, so completed-turn diffs stay stable after later edits.
+- Git handoff actions for commit, push, and pull-request workflows.
+- GitHub pull request panel through `gh`, including checks, comments/reviews, draft/ready state, reopen, and merge controls.
+- Themes, native window integration, keyboard shortcuts, sounds, notices, and safe quit handling while work is active.
 
 ## Tech stack
 
@@ -43,6 +51,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 | -------------- | ------------------------------------------------------------- |
 | `apps/desktop` | The Tauri app. React 19 + Vite frontend, Rust backend.        |
 | `packages`     | Shared code. Empty until something is genuinely wanted twice. |
+| `AGENTS.md`    | Detailed architecture, component, feature, and agent guide.   |
 
 ## Development
 
