@@ -188,6 +188,30 @@ const handleSelectProject = (path: string) => {
   void invoke("set_last_selected_project", { path }).catch(() => {});
 };
 
+const handleRenameProject = async (path: string, name: string) => {
+  try {
+    setProjects(await invoke<Project[]>("rename_project", { path, name }));
+    return true;
+  } catch (e) {
+    setError(String(e));
+    return false;
+  }
+};
+
+const handleDeleteProject = async (path: string) => {
+  try {
+    const nextProjects = await invoke<Project[]>("remove_project", { path });
+    setProjects(nextProjects);
+    if (projectPath === path) {
+      setProjectPath(nextProjects[0]?.path ?? null);
+    }
+    return true;
+  } catch (e) {
+    setError(String(e));
+    return false;
+  }
+};
+
 // Checks the branch out for real, so the picker is the only thing that moves the
 // working tree — by send time the repo is already where the session expects it.
 const runCheckout = async (target: string, stash: boolean) => {
@@ -1368,6 +1392,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
 
 }

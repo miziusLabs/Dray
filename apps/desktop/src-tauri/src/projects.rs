@@ -15,8 +15,8 @@ pub struct Project {
     /// Canonicalized at attach time, so this is the only spelling of the path
     /// that ever reaches the index or the sidebar's grouping key.
     pub path: String,
-    /// Folder name as of attaching. Cached so a project whose directory was
-    /// since renamed or removed still has a label.
+    /// User-facing label. Starts as the folder name and can be edited without
+    /// changing the directory a session runs in.
     pub name: String,
     /// Doubles as the sort key and the "which project was last open" answer:
     /// selecting a project *is* what makes it most recent, so a separate
@@ -104,6 +104,26 @@ pub async fn add_project(path: &str) -> Result<Vec<Project>> {
     }
 
     projects.sort_by(|a, b| b.last_selected.cmp(&a.last_selected));
+    write_projects(&projects).await?;
+
+    Ok(projects)
+}
+
+/// Changes only the user-facing label; the directory and session history stay
+/// untouched. Empty names are rejected here as well as in the UI so persisted
+/// projects always have a usable picker label.
+pub async fn rename_project(path: &str, name: &str) -> Result<Vec<Project>> {
+    let name = name.trim();
+    anyhow::ensure!(!name.is_empty(), "project name cannot be empty");
+
+    let _guard = PROJECTS_LOCK.lock().await;
+    let mut projects = read_projects().await?;
+    let project = projects
+        .iter_mut()
+        .find(|project| project.path == path)
+        .with_context(|| format!("project is not attached: {path}"))?;
+
+    project.name = name.to_string();
     write_projects(&projects).await?;
 
     Ok(projects)

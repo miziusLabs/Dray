@@ -88,6 +88,8 @@ function App() {
     setPermissionMode,
     handleAttachProject,
     handleSelectProject,
+    handleRenameProject,
+    handleDeleteProject,
     handleSelectBranch,
     pendingBranch,
     setPendingBranch,
@@ -705,6 +707,8 @@ function App() {
               projectPath={projectPath}
               onSelectProject={handleSelectProject}
               onAttachProject={handleAttachProject}
+              onRenameProject={handleRenameProject}
+              onDeleteProject={handleDeleteProject}
               branches={branches}
               branch={branch}
               onSelectBranch={handleSelectBranch}

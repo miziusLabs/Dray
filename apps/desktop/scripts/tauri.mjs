@@ -8,6 +8,11 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const tauriCli = require.resolve("@tauri-apps/cli/tauri.js");
 const args = process.argv.slice(2);
+
+// Running the workspace `tauri` script without a subcommand is the convenient
+// way to start the app. Keep explicit CLI commands (including `--help`) intact.
+if (args.length === 0) args.push("dev");
+
 const noWatch = args.includes("--no-watch");
 if (noWatch) process.env.DRAY_NO_WATCH = "1";
 if (args[0] === "dev" && !args.some((a) => a === "-c" || a === "--config")) {

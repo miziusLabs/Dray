@@ -36,6 +36,8 @@ export type ComposerToolbarProps = {
   projectPath: string | null;
   onSelectProject: (path: string) => void;
   onAttachProject: () => void;
+  onRenameProject: (path: string, name: string) => Promise<boolean>;
+  onDeleteProject: (path: string) => Promise<boolean>;
 
   branches: BranchList | null;
   branch: string | null;
@@ -82,6 +84,8 @@ export default function ComposerToolbar({
   projectPath,
   onSelectProject,
   onAttachProject,
+  onRenameProject,
+  onDeleteProject,
   branches,
   branch,
   onSelectBranch,
@@ -137,6 +141,8 @@ export default function ComposerToolbar({
               value={projectPath}
               onSelect={onSelectProject}
               onAttach={onAttachProject}
+              onRename={onRenameProject}
+              onDelete={onDeleteProject}
             />
           )}
 

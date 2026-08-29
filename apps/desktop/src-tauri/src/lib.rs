@@ -183,6 +183,13 @@ async fn add_project(path: &str) -> Result<Vec<Project>, String> {
 }
 
 #[tauri::command]
+async fn rename_project(path: &str, name: &str) -> Result<Vec<Project>, String> {
+    projects::rename_project(path, name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn remove_project(path: &str) -> Result<Vec<Project>, String> {
     projects::remove_project(path)
         .await
@@ -501,6 +508,7 @@ pub fn run() {
             get_session_by_id,
             list_projects,
             add_project,
+            rename_project,
             remove_project,
             set_last_selected_project,
             list_branches,
