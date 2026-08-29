@@ -48,22 +48,27 @@ jobs:
           echo "version=$current" >> "$GITHUB_OUTPUT"
           echo "tag=v$current" >> "$GITHUB_OUTPUT"
 
-      - name: Extract changelog section
+      - name: Generate release notes from commits
         if: steps.version.outputs.bumped == 'true'
-        id: notes
         shell: bash
         run: |
-          version="${{ steps.version.outputs.version }}"
-          awk -v heading="## $version" '
-            $0 == heading { found = 1; next }
-            found && /^## / { exit }
-            found { print }
-          ' apps/desktop/CHANGELOG.md > release-notes.md
-
-          if [[ ! -s release-notes.md ]] || ! grep -q '[^[:space:]]' release-notes.md; then
-            echo "apps/desktop/CHANGELOG.md has no '## $version' section" >&2
-            exit 1
-          fi
+          git log "${{ github.event.before }}..${GITHUB_SHA}" \
+            --pretty=format:'%s%x1f%b%x1f%h%x1e' |
+            awk -v RS='\036' -F '\037' '
+              NF >= 3 {
+                title = $1
+                description = $2
+                hash = $3
+                gsub(/[[:space:]]+/, " ", title)
+                sub(/^ /, "", title)
+                sub(/ $/, "", title)
+                gsub(/[[:space:]]+/, " ", description)
+                sub(/^ /, "", description)
+                sub(/ $/, "", description)
+                if (description == "") description = "No description"
+                printf "- %s; %s (%s)\n", title, description, hash
+              }
+            ' > release-notes.md
 
       - name: Publish GitHub release
         if: steps.version.outputs.bumped == 'true'
@@ -75,5 +80,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "$TAG" \
-            --notes-file release-notes.md \
-            --generate-notes
+            --notes-file release-notes.md

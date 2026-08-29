@@ -95,6 +95,5 @@ logged-in `gh`) to provide the token passed to Cloud containers.
 ## Releasing the app
 
 Tag `vX.Y.Z`. The version in the tag has to match
-`apps/desktop/src-tauri/tauri.conf.json`, and a release needs a matching
-`## X.Y.Z` section in `apps/desktop/CHANGELOG.md` — the workflow fails loudly
-on either.
+`apps/desktop/src-tauri/tauri.conf.json`. Release notes are generated from the
+commits included in the release.
