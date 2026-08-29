@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - apps/desktop/package.json
+      - apps/desktop/src-tauri/tauri.conf.json
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the version bump
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read and validate the version
+        id: version
+        shell: bash
+        run: |
+          current=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
+          package_version=$(jq -r .version apps/desktop/package.json)
+
+          if [[ "$current" != "$package_version" ]]; then
+            echo "Version mismatch: tauri.conf.json has $current, package.json has $package_version" >&2
+            exit 1
+          fi
+
+          previous=$(git show "${{ github.event.before }}:apps/desktop/src-tauri/tauri.conf.json" 2>/dev/null | jq -r .version || true)
+          if [[ "$current" == "$previous" ]]; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "The version was not bumped; nothing to release."
+            exit 0
+          fi
+
+          if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $current" >&2
+            exit 1
+          fi
+
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+          echo "version=$current" >> "$GITHUB_OUTPUT"
+          echo "tag=v$current" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog section
+        if: steps.version.outputs.bumped == 'true'
+        id: notes
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          awk -v heading="## $version" '
+            $0 == heading { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' apps/desktop/CHANGELOG.md > release-notes.md
+
+          if [[ ! -s release-notes.md ]] || ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "apps/desktop/CHANGELOG.md has no '## $version' section" >&2
+            exit 1
+          fi
+
+      - name: Publish GitHub release
+        if: steps.version.outputs.bumped == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            --generate-notes
