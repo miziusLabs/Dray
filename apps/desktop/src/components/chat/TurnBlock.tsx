@@ -111,22 +111,24 @@ export default function TurnBlock({
         }}
         className="flex flex-col gap-3"
       >
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              "group/worked flex w-fit items-center gap-2 text-left text-chat text-muted-foreground",
-              running ? "cursor-default" : "cursor-pointer",
-            )}
-          >
-            <span>Worked for {formatDuration(duration)}</span>
-            <ChevronRight
-              className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")}
-            />
-          </button>
-        </CollapsibleTrigger>
+        <div className="flex flex-col gap-1.5">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "group/worked flex w-fit items-center gap-2 text-left text-chat text-muted-foreground",
+                running ? "cursor-default" : "cursor-pointer",
+              )}
+            >
+              <span>Worked for {formatDuration(duration)}</span>
+              <ChevronRight
+                className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")}
+              />
+            </button>
+          </CollapsibleTrigger>
 
-        <div className="border-t border-border" />
+          <div className="border-t border-border" />
+        </div>
 
         <CollapsibleContent className="collapsible-smooth">
           <div className="flex flex-col gap-3">
