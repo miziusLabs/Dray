@@ -128,10 +128,22 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         with:
           script: |
-            const { data: release } = await github.rest.repos.getReleaseByTag({
-              ...context.repo,
-              tag: process.env.TAG,
-            });
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              {
+                ...context.repo,
+                per_page: 100,
+              },
+            );
+            const release = releases.find(
+              ({ tag_name, draft }) =>
+                tag_name === process.env.TAG && draft,
+            );
+
+            if (!release) {
+              throw new Error(`Draft release not found for tag ${process.env.TAG}`);
+            }
+
             await github.rest.repos.updateRelease({
               ...context.repo,
               release_id: release.id,
