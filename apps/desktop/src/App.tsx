@@ -344,7 +344,15 @@ function App() {
   // resolves against the same directory for the same reason, and off the same
   // expression so the two can't answer for different trees.
   const composerCwd = selectedSession?.cwd ?? projectPath ?? (useCloud ? "." : null);
-  const slashCommands = useSlashCommands(composerCwd, harness);
+  const slashSkills = useSlashCommands(composerCwd, harness);
+
+  const settleCurrentSession = async () => {
+    if (!selectedSessionId) return;
+    const settled = await setSessionFlags(selectedSessionId, { archived: true });
+    if (!settled) return;
+    playCelebration();
+    handleNewSession();
+  };
 
   const { baseline, head } = useMemo(
     () => changeRange(selectedSession?.events ?? []),
@@ -572,10 +580,10 @@ function App() {
           onNewSession={handleNewSession}
           onDetach={detachSession}
           onSetFlags={async (sessionId, flags) => {
-            await setSessionFlags(sessionId, flags);
+            const updated = await setSessionFlags(sessionId, flags);
+            if (!updated) return;
             if (flags.archived === true) {
               playCelebration();
-
             }
             // Settling the open session leaves nothing to look at but the
             // unsettle bar, so it goes back to the empty composer instead.
@@ -681,7 +689,14 @@ function App() {
         selectedSession && viewTab !== "chat" ? null : (
         <ChatInput
           onSend={handleSendMsg}
-          commands={slashCommands}
+          commands={slashSkills}
+          models={models}
+          modelId={modelId}
+          piModel={piModel}
+          effort={effort}
+          onModelChange={handleModelChange}
+          onNewSession={handleNewSession}
+          onSettle={settleCurrentSession}
           cwd={composerCwd}
           onStop={handleInterrupt}
           onCancelQueued={handleCancelQueued}

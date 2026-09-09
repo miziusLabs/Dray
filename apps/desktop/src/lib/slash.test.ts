@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyCommand,
-  commandSource,
+  applyCommandArgument,
+  drayCommands,
   filterCommands,
   filterCommandsByPrefix,
-  findSkillInvocation,
-  groupCommands,
   parseSlashCommand,
+  slashArgumentQuery,
   slashPrefix,
   slashQuery,
 } from "./slash";
@@ -62,6 +62,18 @@ describe("slashQuery", () => {
 
   it("ignores a caret sitting on the slash itself", () => {
     expect(slashQuery("/rev", 0)).toBeNull();
+  });
+});
+
+describe("drayCommands", () => {
+  it("offers only model and effort in the New Task menu", () => {
+    expect(drayCommands(true).map((command) => command.name)).toEqual(["model", "effort"]);
+    expect(drayCommands(false).map((command) => command.name)).toEqual([
+      "model",
+      "effort",
+      "new",
+      "settle",
+    ]);
   });
 });
 
@@ -126,81 +138,21 @@ describe("filterCommands", () => {
   });
 });
 
-describe("commandSource", () => {
-  /// Verbatim shapes from a real `initialize` payload — the classification is
-  /// only as good as these strings, so they are copied rather than invented.
-  it("reads the two signals the payload actually carries", () => {
-    expect(commandSource(command("railway:deploy", "Deploy to Railway"))).toBe("plugin");
-    expect(commandSource(command("supalytics", "Query web analytics. (user)"))).toBe("user");
-    expect(commandSource(command("review", "Pre-landing PR review. (gstack) (user)"))).toBe("user");
-    expect(commandSource(command("compact", "Free up context by summarizing"))).toBe("harness");
+describe("slashArgumentQuery", () => {
+  it("opens model completion after the command name", () => {
+    expect(slashArgumentQuery("/model ", 7, ["model", "effort"])).toEqual({
+      commandName: "model",
+      query: "",
+    });
+    expect(slashArgumentQuery("/model claude", 12, ["model", "effort"])).toEqual({
+      commandName: "model",
+      query: "claude",
+    });
   });
 
-  /// A bundled skill is indistinguishable from a built-in and is meant to be:
-  /// neither was installed by anyone, so both read as "came with Pi".
-  it("files a bundled skill with the built-ins", () => {
-    expect(commandSource(command("dataviz", "Use this skill whenever...", [], true))).toBe("skill");
-  });
-
-  /// Descriptions end in parentheses for ordinary reasons, so only the scope
-  /// words count — otherwise `/clear` would file itself as a user command.
-  it("is not fooled by a description that merely ends in parentheses", () => {
-    expect(commandSource(command("clear", "Start a new session (resumable with /resume)"))).toBe(
-      "harness",
-    );
-    expect(commandSource(command("fast", "Toggle fast mode (Opus 5)"))).toBe("harness");
-  });
-});
-
-describe("groupCommands", () => {
-  const commands = [
-    command("compact", "Free up context"),
-    command("model", "Set the AI model"),
-    command("railway:deploy", "Deploy to Railway"),
-    command("supalytics", "Query analytics. (user)"),
-  ];
-
-  it("orders recents, then harness, then everything installed", () => {
-    expect(groupCommands(commands, ["supalytics"])).toEqual([
-      { label: "Recently used", items: [commands[3]] },
-      { label: null, items: [commands[0], commands[1]] },
-      { label: null, items: [commands[2]] },
-    ]);
-  });
-
-  /// A promoted command leaves its own group. Showing it twice would spend two
-  /// of the seven visible rows saying the same thing.
-  it("promotes rather than duplicates", () => {
-    const names = groupCommands(commands, ["compact"]).flatMap((g) =>
-      g.items.map((c) => c.name),
-    );
-
-    expect(names).toEqual(["compact", "model", "railway:deploy", "supalytics"]);
-    expect(new Set(names).size).toBe(names.length);
-  });
-
-  it("ranks recents by the stored order, newest first", () => {
-    const recent = groupCommands(commands, ["model", "compact"])[0];
-    expect(recent.items.map((c) => c.name)).toEqual(["model", "compact"]);
-  });
-
-  /// The store outlives the commands it names — a skill gets uninstalled, a
-  /// project-scoped command is left behind in another repo.
-  it("drops remembered names that no longer exist", () => {
-    const groups = groupCommands(commands, ["long-gone", "compact"]);
-    expect(groups[0].items.map((c) => c.name)).toEqual(["compact"]);
-  });
-
-  it("caps recents so they cannot fill the window", () => {
-    const many = ["a", "b", "c", "d", "e", "f"].map((n) => command(n));
-    const groups = groupCommands(many, ["a", "b", "c", "d", "e", "f"]);
-    expect(groups[0].items).toHaveLength(4);
-  });
-
-  it("drops empty groups rather than drawing an empty heading", () => {
-    expect(groupCommands([command("compact", "Free up context")], [])).toEqual([
-      { label: null, items: [command("compact", "Free up context")] },
-    ]);
+  it("does not open for another command or its later arguments", () => {
+    expect(slashArgumentQuery("/clear ", 7, ["model", "effort"])).toBeNull();
+    expect(slashArgumentQuery("/effort high now", 16, ["model", "effort"])).toBeNull();
   });
 });
 
@@ -230,6 +182,15 @@ describe("applyCommand", () => {
     expect(applyCommand("finish with $comm when ready", "commit-and-push", true, 17)).toEqual({
       text: "finish with $commit-and-push when ready",
       caret: 29,
+    });
+  });
+});
+
+describe("applyCommandArgument", () => {
+  it("completes a model argument and keeps the command prefix", () => {
+    expect(applyCommandArgument("/model cla", "model", "claude")).toEqual({
+      text: "/model claude ",
+      caret: 14,
     });
   });
 });
@@ -272,19 +233,5 @@ describe("parseSlashCommand", () => {
     expect(parseSlashCommand("/")).toBeNull();
     expect(parseSlashCommand("// a comment")).toBeNull();
     expect(parseSlashCommand("/ spaced")).toBeNull();
-  });
-});
-
-describe("findSkillInvocation", () => {
-  it("finds a skill used in prose", () => {
-    expect(findSkillInvocation("finish with $commit-and-push when ready")).toEqual({
-      name: "commit-and-push",
-      start: 12,
-      end: 28,
-    });
-  });
-
-  it("does not treat a dollar sign inside a word as a skill", () => {
-    expect(findSkillInvocation("the total is US$5")).toBeNull();
   });
 });

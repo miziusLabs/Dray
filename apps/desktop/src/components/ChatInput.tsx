@@ -5,6 +5,14 @@ import { ArrowUp, CornerDownLeft, Paperclip, Square, X } from "lucide-react";
 import AttachmentTray from "@/components/composer/AttachmentTray";
 import FileMentionMenu from "@/components/composer/FileMentionMenu";
 import SlashCommandMenu from "@/components/composer/SlashCommandMenu";
+import PickerMenu from "@/components/composer/PickerMenu";
+import {
+  EFFORT_LABELS,
+  filterEfforts,
+  filterModels,
+  modelKey,
+  modelLabel,
+} from "@/components/composer/ModelSelector";
 import { Button } from "@/components/ui/button";
 import {
   addAttachmentPaths,
@@ -16,31 +24,46 @@ import {
 import { useDraft } from "@/hooks/useDraft";
 import { useFileSearch } from "@/hooks/useFileSearch";
 import { useHotkey } from "@/hooks/useHotkey";
-import { useRecentCommands } from "@/hooks/useRecentCommands";
 import { SEGMENT_COLOR, highlightSegments, splitMention } from "@/lib/highlight";
 import { applyMention, mentionSpan } from "@/lib/mention";
 import {
   applyCommand,
+  applyCommandArgument,
+  drayCommands,
   filterCommands,
   filterCommandsByPrefix,
-  findSkillInvocation,
-  groupCommands,
   parseSlashCommand,
+  slashArgumentQuery,
   slashPrefix,
   slashQuery,
 } from "@/lib/slash";
 import { cn } from "@/lib/utils";
-import type { FileMatch, QueuedMessage, SlashCommand } from "@/types/events";
+import type {
+  Effort,
+  FileMatch,
+  Model,
+  QueuedMessage,
+  SlashCommand,
+} from "@/types/events";
 
 type ChatInputProps = {
   /// `attachmentPaths` is what the tray held, as absolute paths. The backend
   /// re-reads each one — nothing but paths crosses the bridge, so a pinned
   /// screenshot is never uploaded twice.
   onSend: (message: string, attachmentPaths: string[]) => void;
-  /// What the command and `$` skill picker offers. Empty until the backend's
-  /// probe lands, and empty forever if it failed — the picker simply never
-  /// opens, and text typed by hand still works, since the CLI parses it either way.
+  /// Pi-provided skills for the `$` picker. Empty until the backend's probe
+  /// lands, and empty forever if it failed — Dray commands remain available and
+  /// text typed by hand still works.
   commands?: SlashCommand[];
+  /// The model catalog and controls are also used by Dray's `/model` and
+  /// `/effort` commands, so those completions do not need a second picker path.
+  models: Model[];
+  modelId: Model["id"];
+  piModel: Model["piModel"];
+  effort: Effort | null;
+  onModelChange: (modelId: Model["id"], effort: Effort | null, piModel: Model["piModel"]) => void;
+  onNewSession: () => void;
+  onSettle: () => void | Promise<void>;
   /// Where the `@` picker searches for files. Cloud sessions expose an empty
   /// host-side marker because their actual workspace stays inside Docker.
   cwd?: string | null;
@@ -134,6 +157,13 @@ const WORDMARK_MASK = {
 export default function ChatInput({
   onSend,
   commands = [],
+  models,
+  modelId,
+  piModel,
+  effort,
+  onModelChange,
+  onNewSession,
+  onSettle,
   cwd = null,
   onStop,
   onCancelQueued,
@@ -166,8 +196,6 @@ export default function ChatInput({
   // completed command has arguments after it.
   const pendingCaretRef = useRef<number | null>(null);
 
-  const [recent, recordCommand] = useRecentCommands();
-
   const attachments = useAttachments(sessionId);
   // Set while the OS is dragging files over the window. Tauri intercepts the
   // native drop before the webview sees it, so there are no HTML drag events to
@@ -180,21 +208,45 @@ export default function ChatInput({
   const segments = useMemo(() => highlightSegments(message), [message]);
   const highlighted = segments.some((segment) => segment.kind !== "text");
 
+  // Dray owns slash commands. Pi only supplies skills, which remain useful as
+  // `$` prompt completions without allowing Pi's command registry to shape the
+  // command surface.
+  const availableCommands = useMemo(
+    () => [...drayCommands(isNewTask), ...commands],
+    [commands, isNewTask],
+  );
+
   // Two modes, and the difference is deliberate. With nothing typed this is
-  // browsing, so the list is grouped — what you just used, then what shipped
-  // with the harness, then what was installed. Once there is a query it is
-  // searching, and headers would hide matches behind section chrome, so the
-  // ranked list is drawn flat.
+  // browsing, so the list is grouped. Once there is a query it is searching,
+  // and headers would hide matches behind section chrome, so the ranked list is
+  // drawn flat.
   const query = slashQuery(message, caret);
   const prefix = slashPrefix(message, caret);
+  const argument = slashArgumentQuery(message, caret, ["model", "effort"]);
   const groups = useMemo(() => {
     if (query === null || prefix === null) return [];
-    const matchingKind = filterCommandsByPrefix(commands, prefix);
-    if (query === "") return groupCommands(matchingKind, recent);
-
-    const matches = filterCommands(matchingKind, query);
+    const matchingKind = filterCommandsByPrefix(availableCommands, prefix);
+    const matches = query === "" ? matchingKind : filterCommands(matchingKind, query);
     return matches.length ? [{ label: null, items: matches }] : [];
-  }, [commands, prefix, query, recent]);
+  }, [availableCommands, prefix, query]);
+
+  const selectedModel = models.find(
+    (model) =>
+      model.id === modelId &&
+      (model.id !== "pi" ||
+        (model.piModel?.provider === piModel?.provider && model.piModel?.id === piModel?.id)),
+  );
+  const modelMatches = useMemo(
+    () => (argument?.commandName === "model" ? filterModels(models, argument.query) : []),
+    [argument, models],
+  );
+  const effortMatches = useMemo(
+    () =>
+      argument?.commandName === "effort"
+        ? filterEfforts(argument.query, selectedModel?.efforts ?? [])
+        : [],
+    [argument, selectedModel?.efforts],
+  );
 
   // The two pickers are mutually exclusive without needing to be arbitrated:
   // the caret sits in exactly one token, and a token opening with `/` at
@@ -207,11 +259,19 @@ export default function ChatInput({
   // can't disagree about which row an index names.
   const commandMatches = useMemo(() => groups.flatMap((group) => group.items), [groups]);
 
-  // Only the count is shared between the two pickers — the lists themselves stay
-  // separate all the way to the pick, so nothing has to be narrowed back out of
-  // a union that `mention` already decided.
-  const rowCount = mention ? files.length : commandMatches.length;
-  const menuOpen = !dismissed && rowCount > 0 && (query !== null || mention !== null);
+  // Only the count is shared between the pickers — the lists themselves stay
+  // separate all the way to the pick, so nothing has to be narrowed back out
+  // of a union that `mention` already decided.
+  const argumentMatches = argument?.commandName === "model" ? modelMatches : effortMatches;
+  const rowCount = mention
+    ? files.length
+    : argument
+      ? argumentMatches.length
+      : commandMatches.length;
+  const menuOpen =
+    !dismissed &&
+    rowCount > 0 &&
+    (query !== null || mention !== null || argument !== null);
   // Clamped rather than trusted: both lists arrive asynchronously, so a list
   // that shrinks under an already-moved selection would otherwise index past
   // its end — and an undefined row only shows up as a crash on the keystroke
@@ -242,12 +302,27 @@ export default function ChatInput({
     textareaRef.current?.focus();
   };
 
+  const pickArgument = (value: string) => {
+    if (!argument) return;
+
+    const next = applyCommandArgument(message, argument.commandName, value, caret);
+    pendingCaretRef.current = next.caret;
+    setMessage(next.text);
+    textareaRef.current?.focus();
+  };
+
   /// The keyboard's way into whichever list is drawn. A click calls the same
   /// two functions directly, so the two routes cannot diverge.
   const pickRow = (index: number) => {
     if (mention) {
       const file = files[index];
       if (file) pickFile(file);
+      return;
+    }
+
+    if (argument) {
+      const value = argumentMatches[index];
+      if (value) pickArgument(typeof value === "string" ? value : modelLabel(value));
       return;
     }
 
@@ -417,17 +492,57 @@ export default function ChatInput({
   // rather than refused, and the CLI folds it into that turn on its own.
   const canSend = message.trim().length > 0 || attachments.length > 0;
 
+  const runInternalCommand = (text: string): boolean => {
+    const invocation = parseSlashCommand(text);
+    if (!invocation) return false;
+
+    const name = invocation.name.toLowerCase();
+    if (name === "model") {
+      const requested = invocation.args.toLowerCase();
+      const next = models.find((model) =>
+        [modelLabel(model), model.piModel?.id, modelKey(model)]
+          .filter((value): value is string => Boolean(value))
+          .some((value) => value.toLowerCase() === requested),
+      );
+      if (next) onModelChange(next.id, null, next.piModel);
+      return true;
+    }
+
+    if (name === "effort") {
+      const requested = invocation.args.toLowerCase();
+      const next = selectedModel?.efforts.find(
+        (level) => level === requested || EFFORT_LABELS[level].toLowerCase() === requested,
+      );
+      if (next) onModelChange(modelId, next, piModel);
+      return true;
+    }
+
+    if (name === "new") {
+      if (!isNewTask) onNewSession();
+      return true;
+    }
+
+    if (name === "settle") {
+      if (!isNewTask) void onSettle();
+      return true;
+    }
+
+    return false;
+  };
+
   const submit = () => {
     const trimmed = message.trim();
     // An attachment on its own is a real prompt — dropping a screenshot and
     // pressing Enter is asking about the screenshot.
     if (!trimmed && !attachments.length) return;
 
-    // Recorded on send rather than on pick: choosing a command from the list
-    // and then deleting it is not using it. Taken from the text, so a command
-    // typed by hand counts the same as one picked.
-    const invocation = parseSlashCommand(trimmed) ?? findSkillInvocation(trimmed);
-    if (invocation) recordCommand(invocation.name);
+    // Internal commands change Dray state and must never become Pi prompts.
+    // Skills and unknown slash text retain the ordinary send path.
+    if (runInternalCommand(trimmed)) {
+      setMessage("");
+      clearAttachments(sessionId);
+      return;
+    }
 
     onSend(
       trimmed,
@@ -564,6 +679,48 @@ export default function ChatInput({
                 onPick={pickFile}
                 onHover={setActiveIndex}
                 placement={isNewTask ? "below" : "above"}
+              />
+            ) : argument?.commandName === "model" ? (
+              <PickerMenu
+                groups={[{ label: null, items: modelMatches }]}
+                label="Models"
+                keyOf={modelKey}
+                activeIndex={active}
+                onPick={(model) => pickArgument(modelLabel(model))}
+                onHover={setActiveIndex}
+                placement={isNewTask ? "below" : "above"}
+                surface="composer"
+                renderItem={(model) => (
+                  <>
+                    <span className="shrink-0 font-medium">{modelLabel(model)}</span>
+                    {model.id === modelId &&
+                      (model.id !== "pi" ||
+                        (model.piModel?.provider === piModel?.provider &&
+                          model.piModel?.id === piModel?.id)) &&
+                      effort && (
+                        <span className="shrink-0 text-muted-foreground/60">
+                          {EFFORT_LABELS[effort]}
+                        </span>
+                      )}
+                    {model.piModel && (
+                      <span className="min-w-0 truncate text-muted-foreground">
+                        {model.piModel.provider}/{model.piModel.id}
+                      </span>
+                    )}
+                  </>
+                )}
+              />
+            ) : argument?.commandName === "effort" ? (
+              <PickerMenu
+                groups={[{ label: null, items: effortMatches }]}
+                label="Reasoning effort"
+                keyOf={(level) => level}
+                activeIndex={active}
+                onPick={pickArgument}
+                onHover={setActiveIndex}
+                placement={isNewTask ? "below" : "above"}
+                surface="composer"
+                renderItem={(level) => <span className="font-medium">{EFFORT_LABELS[level]}</span>}
               />
             ) : (
               <SlashCommandMenu
@@ -751,10 +908,8 @@ export default function ChatInput({
         </div>
 
         {isNewTask ? (
-          // Gone while a picker is open, and the list sitting over this row is
-          // the smaller half of why: Enter completes the highlighted row there
-          // rather than sending, and the picker draws its own ↵ hint saying so.
-          // Two Enter legends at once, one of them untrue.
+          // Gone while a picker is open: Enter completes the highlighted row
+          // rather than sending, so the send legend would be misleading.
           !menuOpen && (
             <div className="flex items-center gap-1 pt-2 text-ui text-muted-foreground/60">
               Press <CornerDownLeft className="size-3" strokeWidth={2} /> to send

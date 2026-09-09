@@ -9,7 +9,8 @@ import type { Harness, SlashCommand } from "@/types/events";
 /// keystroke after every switch.
 const cache = new Map<string, SlashCommand[]>();
 
-/// The slash commands available in `cwd`, empty until they land.
+/// Pi skills available in `cwd`, empty until they land. Pi commands are not
+/// returned to the composer; Dray owns the slash-command surface.
 ///
 /// A failed probe resolves to no commands rather than surfacing an error: the
 /// picker is an accelerator for text the user can always type by hand, so it
@@ -42,8 +43,9 @@ export function useSlashCommands(cwd: string | null, harness: Harness): SlashCom
 
     invoke<SlashCommand[]>("list_slash_commands", { cwd, harness })
       .then((list) => {
-        if (cacheKey) cache.set(cacheKey, list);
-        if (!cancelled) setCommands(list);
+        const skills = list.filter((command) => command.isSkill);
+        if (cacheKey) cache.set(cacheKey, skills);
+        if (!cancelled) setCommands(skills);
       })
       .catch((e) => {
         console.error("[slash commands]", e);

@@ -1,7 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { CornerDownLeft } from "lucide-react";
 
-import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 
 /// The list that opens over the composer while `/` or `@` is being typed.
@@ -55,8 +53,7 @@ export default function PickerMenu<T>({
   /// Which side of the composer to open on. Above by default, where the
   /// transcript is the only thing covered; below on a new task, where the
   /// toolbar sits above the input and the empty half of the window is
-  /// underneath it. The hint row swaps ends to match, so the list always stays
-  /// the half nearer the input.
+  /// underneath it, so the list always stays on the half nearer the input.
   placement?: "above" | "below";
   /// Follows the composer's own empty state, where the card drops its fill and
   /// border: the list drops them too and sits directly on the page. A separate
@@ -128,37 +125,6 @@ export default function PickerMenu<T>({
   let row = -1;
   const below = placement === "below";
 
-  /* Outside the box: nothing about a list that never holds focus says it is
-     navigable, but the hint is chrome about the list rather than part of it.
-     Escape is left out — it's the one key everyone already tries.
-
-     The fill masks the transcript scrolled behind the row — without it the text
-     sat on whatever happened to be there. Body's own colour, so it reads as a
-     gap in the page rather than as another surface, and the padding is the
-     row's own, since the fill has to cover the text and not just sit under the
-     box. Dropped with `bare` for the same reason the list drops its own. */
-  const hint = (
-    <div
-      className={cn(
-        "flex items-center gap-3 rounded-lg px-1.5 py-1 text-ui text-muted-foreground/50",
-        !bare && "bg-background",
-        below ? "mt-1.5" : "mb-1.5",
-      )}
-    >
-      <KbdGroup>
-        <Kbd>↑</Kbd>
-        <Kbd>↓</Kbd>
-        <span className="ml-0.5">navigate</span>
-      </KbdGroup>
-      <KbdGroup>
-        <Kbd>
-          <CornerDownLeft strokeWidth={2} />
-        </Kbd>
-        <span className="ml-0.5">select</span>
-      </KbdGroup>
-    </div>
-  );
-
   return (
     // Anchored to the card and lifted clear on whichever side it opens, so the
     // list grows into empty space rather than pushing the composer around as it
@@ -176,8 +142,6 @@ export default function PickerMenu<T>({
         !below && (bare ? "bottom-full -mb-1.5" : "bottom-full mb-1.5"),
       )}
     >
-      {!below && hint}
-
       {/* The frame and the scroller are separate elements on purpose. With the
           radius on the scrolling box itself, the scrollbar is laid out in that
           box's own corner and spills past the curve — visibly clipped by it at
@@ -229,9 +193,8 @@ export default function PickerMenu<T>({
               key={group.label ?? `group-${g}`}
               className={cn(
                 g > 0 && "mt-2",
-                // Only a labelled section is closed off by a rule, which today
-                // means recents and nothing else. The unlabelled groups are
-                // separated by their gap alone.
+                // Only a labelled section is closed off by a rule. The
+                // unlabelled groups are separated by their gap alone.
                 g > 0 && groups[g - 1].label !== null && "border-t border-dotted border-border/40 pt-2",
               )}
             >
@@ -281,7 +244,6 @@ export default function PickerMenu<T>({
         </div>
       </div>
 
-      {below && hint}
     </div>
   );
 }

@@ -693,7 +693,7 @@ const setSessionFlags = async (
       archived: flags.archived ?? null,
       pinned: flags.pinned ?? null,
     });
-    if (!updated) return;
+    if (!updated) return false;
     setSessionIndexItems((prev) =>
       prev.flatMap((i) => {
         if (i.sessionId !== sessionId) return [i];
@@ -713,8 +713,10 @@ const setSessionFlags = async (
           : s,
       ),
     );
+    return true;
   } catch (e) {
     setError(String(e));
+    return false;
   }
 };
 

@@ -8,6 +8,48 @@
 /// [streaming.ts]: ./streaming.ts
 import type { SlashCommand } from "@/types/events";
 
+/// Commands owned by Dray. Pi's command registry is intentionally not exposed
+/// in the composer; only its skills are useful prompt completions here.
+export const DRAY_COMMANDS: SlashCommand[] = [
+  {
+    name: "model",
+    description: "Switch the model",
+    argumentHint: "<model>",
+    aliases: [],
+    isSkill: false,
+  },
+  {
+    name: "effort",
+    description: "Set reasoning effort",
+    argumentHint: "<effort>",
+    aliases: [],
+    isSkill: false,
+  },
+  {
+    name: "new",
+    description: "Start a new task",
+    argumentHint: "",
+    aliases: [],
+    isSkill: false,
+  },
+  {
+    name: "settle",
+    description: "Archive this task",
+    argumentHint: "",
+    aliases: [],
+    isSkill: false,
+  },
+];
+
+/// `/new` and `/settle` only make sense while following up on a session. They
+/// remain executable when typed by hand, but are not offered in the empty task
+/// picker where both actions are already the current state or unavailable.
+export function drayCommands(isNewTask: boolean): SlashCommand[] {
+  return DRAY_COMMANDS.filter(
+    (command) => !isNewTask || (command.name !== "new" && command.name !== "settle"),
+  );
+}
+
 type InvocationSpan = {
   start: number;
   end: number;
@@ -48,9 +90,8 @@ export function slashPrefix(text: string, caret: number): "/" | "$" | null {
 /// Commands matching `query`, best first.
 ///
 /// Ranked rather than filtered so a typed prefix beats a chance mention in some
-/// other command's description. The sort is stable and an empty query scores
-/// every command alike, so "just opened" shows the CLI's own ordering — which
-/// groups user commands ahead of built-ins — rather than a re-alphabetized list.
+/// other command's description. The sort is stable and an empty query preserves
+/// the order supplied by Dray and the skills probe rather than re-alphabetizing.
 export function filterCommands(commands: SlashCommand[], query: string): SlashCommand[] {
   const q = query.toLowerCase();
 
@@ -107,74 +148,51 @@ export function applyCommand(
   };
 }
 
-/// Where a command came from, as far as the CLI will tell us.
-///
-/// The `initialize` payload carries no scope field — only `name`, `description`,
-/// `argumentHint` and `aliases` — so this reads the signals recoverable from
-/// the command and its description.
-///
-/// Skills are kept distinct so their `$` prefix survives every picker and
-/// transcript surface. `harness` means a built-in command.
-///
-/// The description test is the fragile half, since it reads display text rather
-/// than a field. It fails benignly — a reworded suffix files a command under the
-/// wrong heading and changes nothing else — so it is not worth a sturdier scheme
-/// that the wire doesn't support.
-export type CommandSource = "harness" | "plugin" | "skill" | "user";
+/// The first argument of a leading Dray command, used for model and effort
+/// completion after `/model ` or `/effort `. The returned span excludes the
+/// command and whitespace so it can be replaced without disturbing the prompt.
+export function slashArgumentQuery(
+  text: string,
+  caret: number,
+  commandNames: readonly string[],
+): { commandName: string; query: string } | null {
+  if (!text.startsWith("/") || caret < 1 || caret > text.length) return null;
 
-const SCOPE_SUFFIX = /\((?:user|project)\)\s*$/;
+  const commandEnd = text.search(/\s/);
+  if (commandEnd === -1) return null;
+  const end = commandEnd;
+  const commandName = text.slice(1, end).toLowerCase();
+  if (!commandNames.includes(commandName) || caret <= end) return null;
 
-export function commandSource(command: SlashCommand): CommandSource {
-  if (command.isSkill) return "skill";
-  if (command.name.includes(":")) return "plugin";
-  return SCOPE_SUFFIX.test(command.description) ? "user" : "harness";
+  let argumentStart = end;
+  while (argumentStart < text.length && /\s/.test(text[argumentStart])) argumentStart += 1;
+  let argumentEnd = argumentStart;
+  while (argumentEnd < text.length && !/\s/.test(text[argumentEnd])) argumentEnd += 1;
+  if (caret > argumentEnd) return null;
+
+  return { commandName, query: text.slice(argumentStart, argumentEnd) };
 }
 
-/// A run of commands drawn together. `label` is set only where the grouping
-/// isn't self-evident from the contents.
-///
-/// Structurally a `PickerGroup<SlashCommand>` — the field is `items` rather than
-/// `commands` so it can be handed to the shared menu without a mapping step
-/// whose only job would be renaming it.
-export type CommandGroup = {
-  label: string | null;
-  items: SlashCommand[];
-};
+/// Replaces the active first argument of a Dray command and leaves the caret
+/// ready for the command's remaining arguments.
+export function applyCommandArgument(
+  text: string,
+  _commandName: string,
+  value: string,
+  _caret = text.length,
+): { text: string; caret: number } {
+  const commandEnd = text.search(/\s/);
+  const end = commandEnd === -1 ? text.length : commandEnd;
+  let argumentStart = end;
+  while (argumentStart < text.length && /\s/.test(text[argumentStart])) argumentStart += 1;
+  let argumentEnd = argumentStart;
+  while (argumentEnd < text.length && !/\s/.test(text[argumentEnd])) argumentEnd += 1;
 
-/// Kept short on purpose: the list shows seven rows at a time, so a longer
-/// recents run would fill the window and leave nothing else visible — at which
-/// point it stops being a shortcut and becomes the whole list.
-const RECENT_LIMIT = 4;
-
-/// The browse ordering: what you just used, then what came with the harness,
-/// then everything installed.
-///
-/// A partition rather than an overlay — a command promoted into recents leaves
-/// its own group. Showing it twice would spend two of seven visible rows saying
-/// the same thing, and the groups below stay complete in the only sense that
-/// matters, which is that every command is reachable exactly once.
-///
-/// Only used with no query. A search is ranked flat by
-/// [`filterCommands`](#filterCommands): headers while filtering hide matches
-/// behind section chrome, which turns "is my match on screen" into a scan.
-export function groupCommands(commands: SlashCommand[], recent: string[]): CommandGroup[] {
-  const byName = new Map(commands.map((command) => [command.name, command]));
-
-  // Driven off the stored order, so recency ranks these; a name whose command
-  // has since been uninstalled simply drops out.
-  const recentCommands = recent
-    .map((name) => byName.get(name))
-    .filter((command): command is SlashCommand => command !== undefined)
-    .slice(0, RECENT_LIMIT);
-
-  const promoted = new Set(recentCommands.map((command) => command.name));
-  const rest = commands.filter((command) => !promoted.has(command.name));
-
-  return [
-    { label: "Recently used", items: recentCommands },
-    { label: null, items: rest.filter((c) => commandSource(c) === "harness") },
-    { label: null, items: rest.filter((c) => commandSource(c) !== "harness") },
-  ].filter((group) => group.items.length > 0);
+  const suffix = text.slice(argumentEnd);
+  const separator = suffix ? "" : " ";
+  const next = text.slice(0, argumentStart) + value + separator + suffix;
+  const nextCaret = argumentStart + value.length + (separator || /^\s/.test(suffix) ? 1 : 0);
+  return { text: next, caret: Math.min(nextCaret, next.length) };
 }
 
 /// Splits a sent leading command or skill into its name and arguments.
@@ -183,19 +201,4 @@ export function parseSlashCommand(text: string): { name: string; args: string } 
   if (!match) return null;
 
   return { name: match[2], args: match[3].trim() };
-}
-
-/// Finds the first skill reference in prose, for recents and transcript styling.
-export function findSkillInvocation(
-  text: string,
-): { name: string; start: number; end: number } | null {
-  for (let start = 0; start < text.length; start += 1) {
-    if (text[start] !== "$" || (start > 0 && !/\s/.test(text[start - 1]))) continue;
-
-    let end = start + 1;
-    while (end < text.length && !/\s/.test(text[end])) end += 1;
-    if (end > start + 1) return { name: text.slice(start + 1, end), start, end };
-  }
-
-  return null;
 }

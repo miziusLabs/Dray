@@ -39,6 +39,34 @@ export const modelKey = (model: Model) =>
 
 export const modelLabel = (model: Model) => model.label || model.piModel?.id || model.id;
 
+/// Model and effort completions use the same ranking shape as commands: an
+/// exact name prefix wins, while provider/model identifiers remain searchable.
+export function filterModels(models: Model[], query: string): Model[] {
+  const q = query.toLowerCase();
+  return models
+    .map((model) => {
+      const values = [modelLabel(model), model.id, model.piModel?.id, modelKey(model)]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => value.toLowerCase());
+      const score = values.some((value) => value.startsWith(q))
+        ? 0
+        : values.some((value) => value.includes(q))
+          ? 1
+          : null;
+      return { model, score };
+    })
+    .filter((match) => match.score !== null)
+    .sort((a, b) => a.score! - b.score!)
+    .map((match) => match.model);
+}
+
+export function filterEfforts(query: string, efforts: readonly Effort[]): Effort[] {
+  const q = query.toLowerCase();
+  return efforts.filter(
+    (effort) => effort.startsWith(q) || EFFORT_LABELS[effort].toLowerCase().startsWith(q),
+  );
+}
+
 /// Next effort level for `model`, wrapping — what Shift+Tab lands on. `null`
 /// where the model offers nothing to cycle, so the chord no-ops rather than
 /// inventing an effort the CLI would ignore.
