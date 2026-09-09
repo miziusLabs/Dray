@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 
+import packageJson from "../../package.json";
 import {
   Dialog,
   DialogContent,
@@ -97,6 +98,10 @@ export default function SettingsDialog({
             onChange={onTitleModelChange}
           />
         </div>
+
+        <footer className="border-t border-border pt-3 text-center text-xs text-muted-foreground">
+          Version {packageJson.version}
+        </footer>
       </DialogContent>
     </Dialog>
   );
