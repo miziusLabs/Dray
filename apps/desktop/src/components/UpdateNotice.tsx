@@ -98,7 +98,7 @@ export default function UpdateNotice() {
           : "The update is downloading in the background.";
 
   return (
-    <Alert className="fixed right-3 bottom-3 z-50 w-80 shadow-lg animate-in fade-in slide-in-from-bottom-2">
+    <Alert className="fixed right-3 bottom-3 z-50 w-80 border-0 shadow-lg animate-in fade-in slide-in-from-bottom-2">
       <AlertTitle>Dray {state.version} is available</AlertTitle>
       <AlertDescription className="mt-1 text-ui-sm text-muted-foreground">
         {detail}
