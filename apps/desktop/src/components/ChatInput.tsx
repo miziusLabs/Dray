@@ -553,12 +553,9 @@ export default function ChatInput({
             !isNewTask && "bg-composer shadow-sm",
           )}
         >
-          {/* Two separate consequences of the empty state, passed separately
-              because they are separate things that happen to coincide. The
-              toolbar sits above the input there and the window is empty below
-              it, so the list opens downward — upward it would cover the controls
-              it sits next to. And the card behind it has no fill or border, so
-              the list drops its own to match. */}
+          {/* The toolbar sits above the input in the empty state, so the list
+              opens downward — upward it would cover the controls it sits next
+              to. Its surface still matches the corresponding follow-up picker. */}
           {menuOpen &&
             (mention ? (
               <FileMentionMenu
@@ -567,7 +564,6 @@ export default function ChatInput({
                 onPick={pickFile}
                 onHover={setActiveIndex}
                 placement={isNewTask ? "below" : "above"}
-                bare={isNewTask}
               />
             ) : (
               <SlashCommandMenu
@@ -576,7 +572,6 @@ export default function ChatInput({
                 onPick={pickCommand}
                 onHover={setActiveIndex}
                 placement={isNewTask ? "below" : "above"}
-                bare={isNewTask}
               />
             ))}
 
