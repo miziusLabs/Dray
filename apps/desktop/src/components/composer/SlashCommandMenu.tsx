@@ -31,6 +31,7 @@ export default function SlashCommandMenu({
       onHover={onHover}
       placement={placement}
       bare={bare}
+      surface="composer"
       renderItem={(command) => (
         <>
           <span className="shrink-0 font-medium">{command.isSkill ? "$" : "/"}{command.name}</span>

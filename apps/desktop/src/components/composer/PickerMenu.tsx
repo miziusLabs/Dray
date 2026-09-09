@@ -37,6 +37,7 @@ export default function PickerMenu<T>({
   onHover,
   placement = "above",
   bare = false,
+  surface = "popover",
 }: {
   groups: PickerGroup<T>[];
   /// Named for assistive tech, which otherwise reads an unlabelled listbox.
@@ -63,6 +64,9 @@ export default function PickerMenu<T>({
   /// travel together today, but one is geometry and one is surface, and reading
   /// the second off the first is what makes a later third state impossible.
   bare?: boolean;
+  /// The command/skill list uses the same raised surface as the input bar;
+  /// file mentions keep the traditional popover surface.
+  surface?: "popover" | "composer";
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -161,10 +165,10 @@ export default function PickerMenu<T>({
     // filters.
     //
     // `top-full`/`bottom-full` clear the card's own `py-3`, so the gap is really
-    // 12px of that plus this margin. With a border to separate them that reads
-    // as one box beside another; with `bare` there is no edge, so the same gap
-    // reads as the list having drifted away from the input — hence the pull
-    // back, sized to leave the 6px the bordered state shows.
+    // 12px of that plus this margin. With the framed surface to separate them
+    // that reads as one box beside another; with `bare` there is no edge, so the
+    // same gap reads as the list having drifted away from the input — hence the
+    // pull back, sized to leave the 6px the framed state shows.
     <div
       className={cn(
         "absolute left-0 z-50 w-full",
@@ -181,9 +185,9 @@ export default function PickerMenu<T>({
           clips the scrollbar to the curve, so it stops short of the corners the
           way the rows do.
 
-          `bare` drops the fill along with the border, the radius and the
-          shadow, and they do go together: it is only ever the empty state,
-          where the composer stands alone and the transcript is not rendered at
+          `bare` drops the fill along with the radius and the shadow, and they do
+          go together: it is only ever the empty state, where the composer stands
+          alone and the transcript is not rendered at
           all, so there is nothing behind the list to mask and a fill can only
           be a slab of colour laid on the page. That read as free once the page
           was opaque and the slab was its exact colour — under vibrancy the page
@@ -197,7 +201,9 @@ export default function PickerMenu<T>({
           "overflow-hidden",
           bare
             ? "text-foreground"
-            : "rounded-xl border border-[oklch(1_0_0/8%)] bg-popover text-popover-foreground shadow-md",
+            : surface === "composer"
+              ? "rounded-2xl bg-composer text-foreground shadow-sm"
+              : "rounded-xl bg-popover text-popover-foreground shadow-md",
         )}
       >
         <div
@@ -205,10 +211,10 @@ export default function PickerMenu<T>({
           role="listbox"
           aria-label={label}
           // Seven rows either way, and that is why there are two heights: 7 ×
-          // the row's own `h-8` is 14rem, and the bordered state adds the
-          // 0.5rem of `py-2` at each end. Written out rather than computed, so
-          // it costs nothing at render — but it does mean these numbers, `h-8`
-          // and `py-2` have to move together.
+          // the row's own `h-8` is 14rem, and the framed state adds the 0.5rem
+          // of `py-2` at each end. Written out rather than computed, so it costs
+          // nothing at render — but it does mean these numbers, `h-8` and
+          // `py-2` have to move together.
           //
           // `bare` drops the inset with the box it was insetting from: with no
           // border there is nothing for the rows to be held away from, and the
