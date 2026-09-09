@@ -32,6 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { basename, isToday, relativeTime } from "@/lib/format";
 import { sessionBranch } from "@/lib/pr";
 import { IS_MAC } from "@/lib/platform";
@@ -362,6 +363,18 @@ export function DevBadge({ className }: { className?: string }) {
   );
 }
 
+const DEFAULT_SIDEBAR_WIDTH = 240;
+const MIN_SIDEBAR_WIDTH = 192;
+const MAX_SIDEBAR_WIDTH = 480;
+const SIDEBAR_RESIZE_STEP = 8;
+
+function clampSidebarWidth(value: unknown): number {
+  const width = typeof value === "number" && Number.isFinite(value)
+    ? value
+    : DEFAULT_SIDEBAR_WIDTH;
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
+}
+
 export default function Sidebar({
   items,
   search,
@@ -384,6 +397,44 @@ export default function Sidebar({
 }: SidebarProps) {
   const fullscreen = useFullscreen();
   const [searching, setSearching] = useState(false);
+  const [persistedWidth, setPersistedWidth] = useLocalStorage(
+    "ade.sidebarWidth",
+    DEFAULT_SIDEBAR_WIDTH,
+  );
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    clampSidebarWidth(persistedWidth),
+  );
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const asideRef = useRef<HTMLElement>(null);
+  const resizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+  const [resizing, setResizing] = useState(false);
+
+  const updateSidebarWidth = (next: number, persist = false) => {
+    const width = clampSidebarWidth(next);
+    sidebarWidthRef.current = width;
+    setSidebarWidth(width);
+    if (persist) setPersistedWidth(width);
+  };
+
+  // Keep text and the cursor stable while the pointer crosses the conversation.
+  // Pointer capture keeps delivering the drag to the narrow handle itself; these
+  // document styles make the rest of the window still feel like one splitter.
+  useEffect(() => {
+    if (!resizing) return;
+    const root = document.documentElement;
+    const previousCursor = root.style.cursor;
+    const previousUserSelect = root.style.userSelect;
+    root.style.cursor = "col-resize";
+    root.style.userSelect = "none";
+    return () => {
+      root.style.cursor = previousCursor;
+      root.style.userSelect = previousUserSelect;
+    };
+  }, [resizing]);
 
   const closeSearch = () => {
     setSearching(false);
@@ -425,7 +476,81 @@ export default function Sidebar({
   if (collapsed) return null;
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col bg-composer shadow-sm">
+    <aside
+      ref={asideRef}
+      className="relative flex shrink-0 flex-col bg-composer shadow-sm"
+      style={{ width: sidebarWidth }}
+    >
+      <div
+        role="separator"
+        aria-label="Resize sidebar"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_SIDEBAR_WIDTH}
+        aria-valuemax={MAX_SIDEBAR_WIDTH}
+        aria-valuenow={Math.round(sidebarWidth)}
+        tabIndex={0}
+        className={cn(
+          "group absolute inset-y-0 right-0 z-20 w-1 translate-x-1/2 cursor-col-resize touch-none outline-none",
+          resizing && "cursor-col-resize",
+        )}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          resizeRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth:
+              asideRef.current?.getBoundingClientRect().width ?? sidebarWidthRef.current,
+          };
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setResizing(true);
+        }}
+        onPointerMove={(event) => {
+          const resize = resizeRef.current;
+          if (!resize || resize.pointerId !== event.pointerId) return;
+          updateSidebarWidth(resize.startWidth + event.clientX - resize.startX);
+        }}
+        onPointerUp={(event) => {
+          if (resizeRef.current?.pointerId !== event.pointerId) return;
+          resizeRef.current = null;
+          setPersistedWidth(sidebarWidthRef.current);
+          setResizing(false);
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onPointerCancel={(event) => {
+          if (resizeRef.current?.pointerId !== event.pointerId) return;
+          resizeRef.current = null;
+          setPersistedWidth(sidebarWidthRef.current);
+          setResizing(false);
+        }}
+        onLostPointerCapture={(event) => {
+          if (resizeRef.current?.pointerId !== event.pointerId) return;
+          resizeRef.current = null;
+          setPersistedWidth(sidebarWidthRef.current);
+          setResizing(false);
+        }}
+        onKeyDown={(event) => {
+          let next = sidebarWidthRef.current;
+          if (event.key === "ArrowLeft") next -= SIDEBAR_RESIZE_STEP;
+          else if (event.key === "ArrowRight") next += SIDEBAR_RESIZE_STEP;
+          else if (event.key === "Home") next = MIN_SIDEBAR_WIDTH;
+          else if (event.key === "End") next = MAX_SIDEBAR_WIDTH;
+          else return;
+          event.preventDefault();
+          updateSidebarWidth(next, true);
+        }}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-sidebar-ring group-focus-visible:bg-sidebar-ring",
+            resizing && "bg-sidebar-ring",
+          )}
+        />
+      </div>
+
       {/* The toggle shares this strip with the traffic lights, so it sits at the
           right to clear them — except in fullscreen, where they're gone and the
           left edge is free. */}
