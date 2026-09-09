@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - apps/desktop/package.json
+      - apps/desktop/src-tauri/Cargo.toml
+      - apps/desktop/src-tauri/tauri.conf.json
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      bumped: ${{ steps.version.outputs.bumped }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - name: Check out the version bump
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read and validate the version
+        id: version
+        shell: bash
+        run: |
+          current=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
+          package_version=$(jq -r .version apps/desktop/package.json)
+          cargo_version=$(sed -n '/^\[package\]/,/^\[/{s/^version = "\([^"]*\)"/\1/p;}' apps/desktop/src-tauri/Cargo.toml | head -1)
+
+          if [[ "$current" != "$package_version" || "$current" != "$cargo_version" ]]; then
+            echo "Version mismatch: tauri=$current package=$package_version cargo=$cargo_version" >&2
+            exit 1
+          fi
+
+          previous=$(git show "${{ github.event.before }}:apps/desktop/src-tauri/tauri.conf.json" 2>/dev/null | jq -r .version || true)
+          if [[ "$current" == "$previous" ]]; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "The version was not bumped; nothing to release."
+            exit 0
+          fi
+
+          if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $current" >&2
+            exit 1
+          fi
+
+          tag="v$current"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists." >&2
+            exit 1
+          fi
+
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+          echo "version=$current" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Validate updater signing secret
+        if: steps.version.outputs.bumped == 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "The TAURI_SIGNING_PRIVATE_KEY repository secret is required." >&2
+            exit 1
+          fi
+
+      - name: Generate release notes from release commits
+        if: steps.version.outputs.bumped == 'true'
+        shell: bash
+        run: |
+          previous_tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_SHA}^" 2>/dev/null || true)
+          if [[ -n "$previous_tag" ]]; then
+            range="$previous_tag..$GITHUB_SHA"
+          else
+            range="$GITHUB_SHA"
+          fi
+
+          git log --reverse "$range" --format='%H%x1f%s%x1f%b%x1e' > release-commits.txt
+          python3 <<'PY'
+          from pathlib import Path
+
+          records = Path("release-commits.txt").read_text().split("\x1e")
+          notes = []
+          for record in records:
+              # Trim only the newline Git writes between records. Python treats
+              # the unit separator as whitespace, so plain `strip()` would
+              # erase the empty description field from bodyless commits.
+              fields = record.strip("\n").split("\x1f", 2)
+              if len(fields) != 3:
+                  continue
+              sha, title, description = fields
+              notes.append(f"### {title.strip()} (`{sha[:7]}`)")
+              if description.strip():
+                  notes.append(description.strip())
+              notes.append("")
+
+          Path("release-notes.md").write_text("\n".join(notes).rstrip() + "\n")
+          PY
+
+      - name: Create draft GitHub release
+        id: release
+        if: steps.version.outputs.bumped == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION" \
+            --notes-file release-notes.md \
+            --draft
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.bumped == 'true'
+    strategy:
+      fail-fast: false
+      # tauri-action merges each platform into latest.json. Serial uploads keep
+      # the read/merge/write sequence deterministic.
+      max-parallel: 1
+      matrix:
+        include:
+          - platform: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin --bundles app,dmg
+          - platform: windows-latest
+            rust-targets: x86_64-pc-windows-msvc
+            args: --bundles nsis
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and upload release artifacts
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          projectPath: apps/desktop
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseDraft: true
+          prerelease: false
+          updaterJsonPreferNsis: true
+          retryAttempts: 2
+          args: ${{ matrix.args }}
+
+  publish:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false

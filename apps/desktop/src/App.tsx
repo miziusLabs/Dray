@@ -32,6 +32,7 @@ import Sidebar, {
   sortSessions,
 } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
+import UpdateNotice from "@/components/UpdateNotice";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
@@ -791,6 +792,7 @@ function App() {
         setPanelOpen(true);
       }}
     />
+    <UpdateNotice />
     <QuitDialog />
     {/* Mounted here rather than in the sidebar, which unmounts whole when it
         collapses and would take ⌘, with it. */}

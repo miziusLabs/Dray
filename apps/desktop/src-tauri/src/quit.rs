@@ -141,3 +141,22 @@ pub fn dismiss_quit<R: Runtime>(app: AppHandle<R>) {
         *asked = false;
     }
 }
+
+/// Stops managed children before control passes to the platform installer.
+/// Windows exits from inside the updater plugin, so this must happen before
+/// installation rather than as part of the explicit macOS restart below.
+#[tauri::command]
+pub async fn prepare_for_update(
+    manager: State<'_, crate::session::SessionManager>,
+) -> Result<(), String> {
+    manager.kill_all().await;
+    Ok(())
+}
+
+/// Restarts after the updater has replaced the macOS application bundle. The
+/// user explicitly chose this action in the update notice, so it bypasses the
+/// ordinary quit confirmation.
+#[tauri::command]
+pub fn restart_after_update<R: Runtime>(app: AppHandle<R>) {
+    app.restart();
+}

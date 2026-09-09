@@ -460,6 +460,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SessionManager::default())
         .manage(quit::PendingQuit::default());
 
@@ -539,6 +540,8 @@ pub fn run() {
             github::mark_pr_ready,
             quit::confirm_quit,
             quit::dismiss_quit,
+            quit::prepare_for_update,
+            quit::restart_after_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

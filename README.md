@@ -103,6 +103,12 @@ logged-in `gh`) to provide the token passed to Cloud containers.
 
 ## Releasing the app
 
-Tag `vX.Y.Z`. The version in the tag has to match
-`apps/desktop/src-tauri/tauri.conf.json`. Release notes are generated from the
-commits included in the release.
+Push a commit to `main` that bumps the matching versions in
+`apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and
+`apps/desktop/src-tauri/tauri.conf.json`. The `CI` workflow builds macOS and
+Windows installers with signed update bundles, publishes them in a `vX.Y.Z`
+GitHub release, and makes the release available to the app's automatic updater. Release notes contain the
+titles and descriptions of commits since the previous version tag.
+
+The repository must provide a `TAURI_SIGNING_PRIVATE_KEY` Actions secret that
+matches the updater public key in `tauri.conf.json`.

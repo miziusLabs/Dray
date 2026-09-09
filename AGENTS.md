@@ -36,6 +36,7 @@ This file is the implementation map for agents working in this repository. Keep 
 - Context-window meter in the composer.
 - Per-session draft preservation and focus restoration.
 - Desktop notifications, in-app notices, dock/taskbar badge state, attention indicators, and notification/celebration sounds.
+- Signed automatic updates from GitHub Releases, with background download and an install/restart notice.
 - Main repository Changes view with uncommitted changes, commit history, changed-file lists, commit metadata, and file diffs.
 - Right inspector with turn-scoped Changes, Subagents, and Pull Request tabs.
 - Turn-scoped Git snapshots so a completed turn's diff remains stable even if the checkout changes afterward.
@@ -69,6 +70,7 @@ Top-level components in `src/components/`:
 - `PrStateIcon.tsx` — compact pull request state iconography.
 - `SettingsDialog.tsx` — settled-session toggle, model-cycle configuration, and title-generation model configuration.
 - `NoticeStack.tsx` — transient in-app notices.
+- `UpdateNotice.tsx` — startup update check, background download progress, retry, and install/restart action.
 - `QuitDialog.tsx` — quit confirmation for active work.
 - `DiffWorkerPool.tsx` — shared worker/rendering pool for highlighted diffs.
 - `FileIcon.tsx` — file-type icon selection.
