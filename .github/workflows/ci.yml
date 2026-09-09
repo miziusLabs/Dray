@@ -54,17 +54,19 @@ jobs:
           echo "tag=v$current" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build
+    name: Build (${{ matrix.name }})
     needs: prepare
     if: needs.prepare.outputs.bumped == 'true'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          - name: macOS
+            platform: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             args: --target universal-apple-darwin --bundles app,dmg
-          - platform: windows-latest
+          - name: Windows
+            platform: windows-latest
             rust-targets: x86_64-pc-windows-msvc
             args: --bundles nsis
     runs-on: ${{ matrix.platform }}
