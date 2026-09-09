@@ -160,11 +160,94 @@ export function shortenPath(path: string): string {
   return parts.slice(-2).join("/");
 }
 
-/// Formats a duration the way a reader scans it, not to full precision.
+type ToolDescriptor = {
+  name: string;
+  toolType: ToolType;
+};
+
+export type ToolCategory =
+  | "read"
+  | "command"
+  | "edit"
+  | "search"
+  | "web"
+  | "subagent"
+  | "other";
+
+/// The small visual vocabulary shared by individual calls and grouped calls.
+/// Prefer the normalized type, then recognize extension tools whose mapper type
+/// is necessarily `other`.
+export function toolCategory({ name, toolType }: ToolDescriptor): ToolCategory {
+  switch (toolType) {
+    case "file_read":
+      return "read";
+    case "shell":
+      return "command";
+    case "file_edit":
+      return "edit";
+    case "search":
+      return "search";
+    case "web":
+      return "web";
+    case "subagent_spawn":
+      return "subagent";
+    default:
+      break;
+  }
+
+  if (["Read", "NotebookRead", "read"].includes(name)) return "read";
+  if (["Bash", "BashOutput", "KillShell", "bash", "background_command"].includes(name)) {
+    return "command";
+  }
+  if (["Edit", "NotebookEdit", "Write", "edit", "write"].includes(name)) return "edit";
+  if (["Grep", "Glob", "grep", "find", "finder"].includes(name)) return "search";
+  if (["WebFetch", "WebSearch", "web_search", "libarian"].includes(name)) return "web";
+  return "other";
+}
+
+function actionPhrase(category: ToolCategory, count: number): string {
+  switch (category) {
+    case "read":
+      return "Read files";
+    case "command":
+      return count === 1 ? "Ran a command" : `Ran ${count} commands`;
+    case "edit":
+      return count === 1 ? "Edited a file" : "Edited files";
+    case "search":
+      return count === 1 ? "Searched files" : `Searched files ${count} times`;
+    case "web":
+      return count === 1 ? "Browsed the web" : `Browsed the web ${count} times`;
+    case "subagent":
+      return count === 1 ? "Ran a subagent" : `Ran ${count} subagents`;
+    case "other":
+      return count === 1 ? "Used a tool" : `Used ${count} tools`;
+  }
+}
+
+/// Summarizes a heterogeneous run in first-seen order: “Read files, ran 3
+/// commands”. Counts are retained where they disambiguate repeated actions,
+/// while file reads/edits follow the quieter wording in the reference UI.
+export function toolGroupLabel(calls: ToolDescriptor[]): string {
+  const counts = new Map<ToolCategory, number>();
+  for (const call of calls) {
+    const category = toolCategory(call);
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+
+  return [...counts]
+    .map(([category, count], index) => {
+      const phrase = actionPhrase(category, count);
+      return index === 0 ? phrase : `${phrase[0].toLowerCase()}${phrase.slice(1)}`;
+    })
+    .join(", ");
+}
+
+/// Formats a turn duration in the compact style used by the “Worked for …”
+/// disclosure.
 export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 /// Pretty-prints tool input for the expanded view, dropping the fields the row

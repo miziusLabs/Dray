@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
 
+import ToolCallIcon from "@/components/chat/ToolCallIcon";
 import { streamingLabel, toolLabel } from "@/lib/tools";
 import { streamingCall } from "@/lib/streaming";
 
@@ -33,13 +34,11 @@ export default function StreamingToolCall({
       {/* A div, not a disabled button: there is nothing under this row to open,
           and a button that never does anything is a focus stop that lies. */}
       <div className="flex w-full items-center gap-2 text-left text-chat">
-        <span className="shrink-0 shimmer-text text-foreground/80">{label}</span>
-
-        {target && (
-          <span className="min-w-0 max-w-fit truncate font-mono text-muted-foreground">
-            {target}
-          </span>
-        )}
+        <ToolCallIcon name={name} toolType="other" />
+        <span className="flex min-w-0 items-baseline gap-1.5 shimmer-text">
+          <span className="shrink-0">{label}</span>
+          {target && <span className="truncate font-mono">{target}</span>}
+        </span>
 
         {/* The same `+N` the settled row shows from its diff, in the same slot,
             so a `Write` that lands doesn't move its own counter. Climbing while

@@ -348,10 +348,48 @@
     color: transparent;
   }
 
-  /* Motion is decoration here — the label's tense already carries the state,
-     and the text stays legible without the animation. */
+  /* Radix exposes the measured content height, which lets nested transcript
+     disclosures animate to their real size without hard-coded max-heights. */
+  .collapsible-smooth {
+    overflow: hidden;
+    will-change: height, opacity;
+  }
+
+  .collapsible-smooth[data-state="open"] {
+    animation: collapsible-down 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .collapsible-smooth[data-state="closed"] {
+    animation: collapsible-up 180ms cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+      opacity: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+      opacity: 1;
+    }
+  }
+
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height);
+      opacity: 1;
+    }
+    to {
+      height: 0;
+      opacity: 0;
+    }
+  }
+
+  /* Motion is decoration here — labels and chevrons still carry state when a
+     reader has requested reduced motion. */
   @media (prefers-reduced-motion: reduce) {
-    .shimmer-text {
+    .shimmer-text,
+    .collapsible-smooth {
       animation: none;
     }
   }

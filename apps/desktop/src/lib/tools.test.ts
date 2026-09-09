@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatDuration,
   isRoutineError,
   shortenPath,
   streamingLabel,
+  toolGroupLabel,
   toolLabel,
   toolSummary,
 } from "./tools";
@@ -31,6 +33,29 @@ describe("Pi extension tool labels", () => {
 
   it("shortens Windows paths without treating the drive as a scheme", () => {
     expect(shortenPath("C:\\Users\\jan\\repo\\src\\App.tsx")).toBe("src/App.tsx");
+  });
+});
+
+describe("tool group labels", () => {
+  it("summarizes mixed calls in first-seen order", () => {
+    expect(
+      toolGroupLabel([
+        { name: "Read", toolType: "file_read" },
+        { name: "Bash", toolType: "shell" },
+      ]),
+    ).toBe("Read files, ran a command");
+
+    expect(
+      toolGroupLabel([
+        { name: "Bash", toolType: "shell" },
+        { name: "Bash", toolType: "shell" },
+      ]),
+    ).toBe("Ran 2 commands");
+  });
+
+  it("formats worked time without decimal noise", () => {
+    expect(formatDuration(26_000)).toBe("26s");
+    expect(formatDuration(86_000)).toBe("1m 26s");
   });
 });
 

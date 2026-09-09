@@ -1,9 +1,15 @@
 import { useMemo, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 
 import CodeView from "@/components/chat/CodeView";
 import DiffView from "@/components/chat/DiffView";
 import ImageRow from "@/components/chat/ImageRow";
+import ToolCallIcon from "@/components/chat/ToolCallIcon";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { countChanges, editSides, readRange } from "@/lib/diff";
 import { formatToolInput, isRoutineError, toolLabel, toolSummary } from "@/lib/tools";
@@ -61,10 +67,6 @@ type ToolCallProps = {
   rawInput: string | null;
   /// Absent while the call is still in flight.
   result?: ToolResult;
-  /// Set for a row inside a `ToolGroupRow`, whose header already names the tool
-  /// — repeating "Edited" down all 30 rows is noise, and the path is the only
-  /// thing that varies.
-  hideLabel?: boolean;
   /// Starts the row expanded. Initial state only, so the reader's own closes
   /// stick. For a row the reader reached deliberately — the call a subagent
   /// panel row opens onto — where making them click a second time to see the
@@ -79,7 +81,6 @@ export default function ToolCall({
   input,
   rawInput,
   result,
-  hideLabel = false,
   defaultOpen = false,
 }: ToolCallProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -93,10 +94,6 @@ export default function ToolCall({
   // on every one of them is red on a resting transcript. The row still reads as
   // failed either way — the "Error:" body says so — this only decides the colour.
   const alarming = failed && !isRoutineError(result?.text);
-
-  // Inside a group the label is redundant — except with no summary to stand in
-  // its place, where dropping it would leave a blank, unclickable row.
-  const showLabel = !hideLabel || !summary;
 
   // A file edit renders as a diff rather than as its raw arguments. `rawInput`
   // wins when present — it means the call is still streaming and the JSON has
@@ -130,13 +127,6 @@ export default function ToolCall({
   const read = toolType === "file_read" && !rawInput && !failed;
   const range = read ? readRange(input, output) : null;
 
-  // A successful whole-file read is a dead end on purpose: no diff, no code, no
-  // arguments, and its result is the file itself — so the row collapses to the
-  // tool name and the path with nothing to open. Anything else worth showing
-  // (a failure, a still-streaming call) leaves `read` false and takes the
-  // ordinary path.
-  const inert = read && range === null;
-
   // The reader answered this on a card of its own, so its arguments are the
   // questions and options they just read — reprinting them as JSON tells them
   // nothing. What survives is the harness's own sentence naming each question
@@ -144,13 +134,13 @@ export default function ToolCall({
   const asked = name === "AskUserQuestion" && !rawInput;
 
   const omit = sides ? EDIT_FIELDS : range ? READ_FIELDS : SUMMARY_FIELDS;
-  const body = inert || asked ? null : rawInput ?? formatToolInput(input, omit);
+  const body = asked ? null : rawInput ?? formatToolInput(input, omit);
 
   // A successful edit's result is boilerplate ("The file ... has been updated
   // successfully") that the diff above already demonstrates, and a rendered
-  // read repeats its own output verbatim. Failures always show — that text is
-  // the only place the reason lives.
-  const echoesViewer = (sides !== null || range !== null || inert) && !failed;
+  // ranged read repeats its own output verbatim. A whole-file read remains
+  // expandable and reveals its (scroll-bounded) result.
+  const echoesViewer = (sides !== null || range !== null) && !failed;
   const shownOutput = echoesViewer ? "" : output;
   const shown =
     shownOutput.length > PREVIEW_CHARS
@@ -160,43 +150,53 @@ export default function ToolCall({
   // Output stays behind the expander regardless of length. Auto-showing short
   // results only made rows inconsistent — some opened, some didn't, with no
   // visible reason why.
-  const expandable = Boolean(body) || Boolean(shown) || sides !== null || range !== null;
+  const shellDetail = toolType === "shell" && result !== undefined && summary;
+  const expandable =
+    result !== undefined || Boolean(body) || Boolean(shown) || sides !== null || range !== null;
+  const fallbackStatus =
+    result !== undefined &&
+    !shellDetail &&
+    !body &&
+    !shown &&
+    !sides &&
+    !range &&
+    images.length === 0;
 
   return (
-    <div className="group/tool flex flex-col gap-1.5">
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      disabled={!expandable}
+      className="group/tool flex flex-col gap-1.5"
+    >
       {/* The collapsed row is text on the page — no card, no padding. Chrome
           belongs to the expanded content, which is what needs the containment. */}
-      <button
-        type="button"
-        disabled={!expandable}
-        onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center gap-2 text-left text-chat"
-      >
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 text-left text-chat"
+        >
+        <ToolCallIcon name={name} toolType={toolType} />
         {/* The shimmer is the running state; it stops the moment the result
             lands, so a settled row is plain text again. The label carries the
             same information in its tense — "Reading" then "Read". */}
-        {showLabel && (
-          <span
-            className={cn(
-              "shrink-0",
-              alarming ? "text-destructive" : "text-foreground/80",
-              pending && "shimmer-text",
-            )}
-          >
-            {toolLabel(name, pending)}
-          </span>
-        )}
+        <span
+          className={cn(
+            "shrink-0",
+            alarming ? "text-destructive" : "text-foreground/80",
+            pending && "shimmer-text",
+          )}
+        >
+          {toolLabel(name, pending)}
+        </span>
 
         {/* `min-w-0` lets it shrink and `max-w-fit` stops it claiming the row's
-            free space, which would push the caret out to the far right. With the
-            label hidden this is the whole row, so it inherits the shimmer and
-            the failure color the label would have carried. */}
+            free space, which would push the caret out to the far right. */}
         {summary && (
           <span
             className={cn(
-              "min-w-0 max-w-fit truncate font-mono",
-              !showLabel && alarming ? "text-destructive" : "text-muted-foreground",
-              !showLabel && pending && "shimmer-text",
+              "min-w-0 max-w-fit truncate font-mono text-muted-foreground",
+              pending && "shimmer-text",
             )}
           >
             {summary}
@@ -218,8 +218,8 @@ export default function ToolCall({
             part of the row instead of a column of its own. */}
         <ChevronRight
           className={cn(
-            "size-3 shrink-0 text-muted-foreground transition-all",
-            open ? "rotate-90 opacity-100" : "opacity-0 group-hover/tool:opacity-100",
+            "size-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-90",
             !expandable && "invisible",
           )}
         />
@@ -237,18 +237,52 @@ export default function ToolCall({
             exit {result.exitCode}
           </span>
         )}
-      </button>
+        </button>
+      </CollapsibleTrigger>
 
       <ImageRow images={images} />
 
-      {open && sides && <DiffView sides={sides} />}
+      <CollapsibleContent className="collapsible-smooth">
+        <div className="flex flex-col gap-1.5">
+          {sides && <DiffView sides={sides} />}
 
-      {open && range && <CodeView range={range} />}
+          {range && <CodeView range={range} />}
 
-      {open && body && (
-        <pre className="overflow-x-auto rounded-md bg-surface-raised px-2.5 py-2 font-mono text-tool text-muted-foreground">
+          {shellDetail && (
+        <div className="rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-muted-foreground">
+          <div className="mb-2 text-chat">Shell</div>
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-tool">
+            $ {summary}
+            {shown && `\n\n${shown}`}
+          </pre>
+          <div
+            className={cn(
+              "mt-2 flex items-center justify-end gap-1 text-chat",
+              failed && "text-destructive",
+            )}
+          >
+            {!failed && <Check className="size-4" />}
+            {failed ? "Error" : "Success"}
+          </div>
+        </div>
+      )}
+
+          {body && !shellDetail && (
+        <pre className="overflow-x-auto rounded-md border border-border bg-surface-raised px-2.5 py-2 font-mono text-tool text-muted-foreground">
           {body}
         </pre>
+      )}
+
+          {fallbackStatus && (
+        <div
+          className={cn(
+            "flex items-center justify-end gap-1 rounded-md border border-border bg-surface-raised px-3 py-2 text-chat text-muted-foreground",
+            failed && "text-destructive",
+          )}
+        >
+          {!failed && <Check className="size-4" />}
+          {failed ? "Error" : "Success"}
+        </div>
       )}
 
       {/* Two results drop the box and read at the row's own size. A failure,
@@ -257,7 +291,7 @@ export default function ToolCall({
           it as a sentence and a code box would frame prose as output. Neither is
           tinted — the "Error:" lead-in names the text on its own, which is also
           what carries a routine failure that the label above left uncoloured. */}
-      {open && shown && (
+          {shown && !shellDetail && (
         <pre
           className={cn(
             "max-h-96 overflow-auto whitespace-pre-wrap",
@@ -275,7 +309,9 @@ export default function ToolCall({
           {failed && "Error: "}
           {shown}
         </pre>
-      )}
-    </div>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

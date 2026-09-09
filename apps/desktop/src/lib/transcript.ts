@@ -1,4 +1,3 @@
-import { toolSummary } from "@/lib/tools";
 import type { AgentEvent, ToolResult, Usage } from "@/types/events";
 
 export type SubagentRun = {
@@ -29,26 +28,17 @@ export type SubagentRun = {
   spawn: AgentEvent | null;
 };
 
-/// A run of consecutive same-tool calls, collapsed behind one row. Built from
-/// the turn's work so the renderer walks a single list rather than re-deriving
-/// the runs while it draws.
+/// Consecutive tool calls, possibly of different types, collapsed behind one
+/// summary row. Assistant output ends a group; invisible lifecycle/result
+/// events do not.
 export type ToolGroup = {
   kind: "tool_group";
-  /// The tool every call in the run shares — the grouping key.
-  name: string;
-  /// The spawning events, in `seq` order. Never fewer than `GROUP_MIN`.
+  /// The spawning events, in `seq` order. Never fewer than two.
   calls: AgentEvent[];
-  /// Distinct targets across the run, which is what the label counts — three
-  /// edits to one file is "Edited 1 file", not 3. Falls back to the call count
-  /// for a tool whose calls carry no identifying field.
-  targets: number;
-  /// The single target's summary when the whole run hit one, else null. Lets the
-  /// row name it — "Edited src/lib/tools.ts" — instead of counting to one.
-  target: string | null;
   key: string;
 };
 
-/// Either a lone event or a collapsed run of same-tool calls.
+/// Either a lone event or a collapsed run of tool calls.
 export type WorkItem = AgentEvent | ToolGroup;
 
 /// The `permission_requested` payload, narrowed out of the union once here so
@@ -73,89 +63,13 @@ export function isToolGroup(item: WorkItem): item is ToolGroup {
   return "kind" in item && item.kind === "tool_group";
 }
 
-/// A prompt typed into the running turn, which is the only kind of user message
-/// that lives in a turn's `work` rather than opening one of its own.
-///
-/// It is the reader's own words, so it is the one work item a collapsed turn
-/// keeps on screen — hiding it behind "12 steps" files what someone just typed
-/// under the agent's activity. That exemption is also why it is subtracted from
-/// `rows`: that count is what the toggle promises to reveal, and a row already
-/// visible is not part of the promise.
-export function isQueuedPrompt(item: WorkItem): boolean {
-  return !isToolGroup(item) && item.payload.type === "user_message";
-}
-
-/// A stretch of a turn's work between queued prompts: the items to hide behind
-/// one summary line, and the prompt that ends the stretch (`null` on the last).
-export type TurnSegment = {
-  items: WorkItem[];
-  prompt: AgentEvent | null;
-  toolCalls: number;
-  messages: number;
-  /// Rendered rows in `items` — zero means the segment draws no summary line,
-  /// which happens between two back-to-back queued prompts.
-  rows: number;
-};
-
-/// Cuts a turn's work at each queued prompt, for the collapsed view.
-///
-/// Hiding the work flattens its order: with every row between them gone, the
-/// prompts all bunch together above the final answer, which misplaces the one
-/// thing in the turn the reader wrote — *when* they said it is part of what
-/// they said. Each stretch gets its own summary line instead, so a prompt sits
-/// after the work it interrupted, collapsed or not.
-///
-/// The last segment's counts absorb the same discount `groupTurns` applies to
-/// the turn: `finalText` re-renders the turn's last message, and that message is
-/// always in the last segment — a queued prompt after it would have unset the
-/// discount by being the last rendered row itself.
-export function segmentWork(turn: Turn): TurnSegment[] {
-  const segments: TurnSegment[] = [];
-  let items: WorkItem[] = [];
-
-  const push = (prompt: AgentEvent | null) => {
-    let toolCalls = 0;
-    let messages = 0;
-    let rows = 0;
-    for (const item of items) {
-      if (isToolGroup(item)) {
-        toolCalls += item.calls.length;
-        rows += 1;
-        continue;
-      }
-      if (item.payload.type === "tool_call_started") toolCalls += 1;
-      if (item.payload.type === "assistant_text") messages += 1;
-      if (rendersRow(item)) rows += 1;
-    }
-    segments.push({ items, prompt, toolCalls, messages, rows });
-    items = [];
-  };
-
-  for (const item of turn.work) {
-    if (isQueuedPrompt(item)) {
-      push(item as AgentEvent);
-      continue;
-    }
-    items.push(item);
-  }
-  push(null);
-
-  const raw = segments.reduce((n, s) => n + s.messages, 0);
-  const discount = raw - turn.messages;
-  const last = segments[segments.length - 1];
-  last.messages -= discount;
-  last.rows -= discount;
-
-  return segments;
-}
-
 export type Turn = {
   /// The user's prompt opening this turn, absent only for a transcript that
   /// starts mid-conversation.
   prompt: AgentEvent | null;
   /// Everything the agent did between the prompt and completion — tool calls,
-  /// subagent spawns, reasoning, and its intermediate messages. Runs of
-  /// consecutive same-tool calls arrive pre-collapsed into a `ToolGroup`.
+  /// subagent spawns, reasoning, and its intermediate messages. Consecutive
+  /// tool calls arrive pre-collapsed into a `ToolGroup`.
   work: WorkItem[];
   /// The closing `turn_completed`, absent while the turn is still running.
   completed: AgentEvent | null;
@@ -165,28 +79,18 @@ export type Turn = {
   /// `assistant_text` directly, so a collapsed turn always ends on what the
   /// agent last said; still `null` when the turn produced no text at all.
   finalText: string | null;
-  toolCalls: number;
-  messages: number;
-  /// How many rows collapsing this turn would actually hide — groups count as
-  /// one, events the transcript renders nothing for count as none, and the
-  /// message duplicated into `finalText` counts as none because the collapsed
-  /// view shows it anyway. What the toggle is worth is a function of this, not
-  /// of `work.length`.
-  rows: number;
   key: string;
 };
 
 /// Payload types that put something on screen — the complement of the
 /// `return null` arms in [EventRow](../components/chat/EventRow.tsx). Keep the
-/// two in step: this set decides what a collapse would reveal, what can break a
-/// tool run, and whether `finalText` duplicates the last visible row, so a
-/// missing entry miscounts turns and splits groups on an invisible event.
+/// two in step: this set decides what breaks a tool run and which existing row
+/// a streaming tool preview may join.
 const RENDERS = new Set([
   // Only ever reached by a *queued* prompt. An ordinary one is a turn's header
   // rather than its work, so it never enters `work` for this to be asked about.
   "user_message",
   "assistant_text",
-  "reasoning",
   "tool_call_started",
   "file_edits",
   "error",
@@ -197,12 +101,9 @@ const RENDERS = new Set([
 ]);
 
 /// Whether an item draws a row. A group always does — it is built from tool
-/// calls, which always draw.
-///
-/// Module-private: the working indicator used to gate on this to mean "nothing
-/// has happened in this turn yet", which only ever described a turn's *first*
-/// wait. It reads `model_request_started` instead now.
-function rendersRow(item: WorkItem): boolean {
+/// calls, which always draw. Exported so the live preview can locate the last
+/// visible item without maintaining a second event-type list.
+export function rendersWorkItem(item: WorkItem): boolean {
   return isToolGroup(item) || RENDERS.has(item.payload.type);
 }
 
@@ -211,200 +112,96 @@ function bySeq(a: AgentEvent, b: AgentEvent) {
   return a.seq - b.seq;
 }
 
-/// How many consecutive same-tool calls collapse into one group row.
-///
-/// Any repeat groups. Consistency is the point: the tool name never appears
-/// twice in a row, so a run reads the same whether it is two calls or thirty.
-///
-/// Constrained by `COLLAPSE_MIN` in [TurnBlock](../components/chat/TurnBlock.tsx):
-/// keep this at or below it. A run too short to group still costs a row each,
-/// so raising this above the collapse threshold puts ungrouped repeats inside a
-/// collapsed turn — expand it and you find two rows of the same tool under a
-/// summary, which is the double summary the row count exists to prevent. That
-/// is exactly what a 3/3 pairing did before: a run of 2 grouped nowhere and
-/// collapsed anyway.
-export const GROUP_MIN = 2;
-
-/// Bookkeeping the summary count needs while a turn is open, dropped from the
-/// `Turn` handed to the UI.
-type OpenTurn = Omit<Turn, "work" | "rows"> & {
-  /// Ungrouped while the turn is open; `groupTools` runs once on close.
+type OpenTurn = Omit<Turn, "work"> & {
+  /// Ungrouped while the turn is open; `groupTools` runs whenever the snapshot
+  /// handed to the UI is built.
   work: AgentEvent[];
-  lastWasAssistantText: boolean;
 };
 
-/// The grouping key: same tool name, and only for calls that render as a
-/// `ToolCall` row. A subagent spawn draws a `SubagentRow` instead, so folding
-/// several into a "Task 4 calls" row would hide the panel links they exist for.
-///
-/// A call that came back with pictures is left out for the same reason. "Read 3
-/// files" is an honest summary of three files and no summary at all of three
-/// screenshots — the row draws them without being opened precisely because they
-/// are the whole of what the call returned, and grouping puts them back behind a
-/// click.
-function groupKey(
-  event: AgentEvent,
-  subagentIds: Set<string>,
-  withImages: Set<string>,
-): string | null {
+function groupableTool(event: AgentEvent, subagentIds: Set<string>): boolean {
   const { payload } = event;
-  if (payload.type !== "tool_call_started") return null;
-  if (payload.toolType === "subagent_spawn") return null;
-  if (subagentIds.has(payload.callId)) return null;
-  if (withImages.has(payload.callId)) return null;
-  return payload.name;
-}
-
-/// Distinct summaries across a run — the same string a row shows, so the label
-/// counts exactly what the reader will see listed. A call with no summary counts
-/// as its own target: it is something that happened, just unnamed.
-///
-/// Returns the count and, when the run hit exactly one *named* target, that name.
-/// Unnamed calls never yield a name — there is nothing to print — so a pair of
-/// them stays a count.
-function countTargets(run: AgentEvent[]): { count: number; only: string | null } {
-  const seen = new Set<string>();
-  let unnamed = 0;
-  for (const event of run) {
-    if (event.payload.type !== "tool_call_started") continue;
-    const { title, name, toolType, input } = event.payload;
-    const summary = title ?? toolSummary(name, toolType, input);
-    if (summary === null) unnamed += 1;
-    else seen.add(summary);
-  }
-  const count = seen.size + unnamed;
-  return { count, only: count === 1 && seen.size === 1 ? [...seen][0] : null };
-}
-
-/// Collapses runs of `GROUP_MIN`+ consecutive calls to the same tool into one
-/// item. Only *consecutive* runs group: anything the transcript actually draws
-/// between them — a message, a reasoning block — is the agent changing subject,
-/// and swallowing that into a single row would reorder the transcript.
-///
-/// `calls` holds only the spawning events. The transparent events that fell
-/// between them are re-emitted after the group — they draw nothing, so their
-/// exact position among the calls carries no meaning, and keeping `calls` pure
-/// means the row can count it directly.
-function groupTools(work: AgentEvent[], subagentIds: Set<string>): WorkItem[] {
-  // Read off the results in the same array: a call's images arrive on the event
-  // that answers it, and those sit here unrendered between the calls.
-  const withImages = new Set(
-    work.flatMap((event) =>
-      event.payload.type === "tool_call_completed" && event.payload.result.images.length > 0
-        ? [event.payload.callId]
-        : [],
-    ),
+  return (
+    payload.type === "tool_call_started" &&
+    payload.toolType !== "subagent_spawn" &&
+    !subagentIds.has(payload.callId)
   );
+}
 
+/// Groups every uninterrupted run of two or more calls, regardless of type.
+/// Assistant text and other visible rows end a run; result/lifecycle events are
+/// transparent, so the normal started/completed/started sequence stays whole.
+function groupTools(work: AgentEvent[], subagentIds: Set<string>): WorkItem[] {
   const items: WorkItem[] = [];
   let run: AgentEvent[] = [];
-  let runKey: string | null = null;
-  // Transparent events seen since the last call. Held rather than emitted so a
-  // run that continues past them isn't broken in two.
   let held: AgentEvent[] = [];
-  // The held events from *inside* a run, which must outlive `held` being reset
-  // as the run continues.
-  let passthrough: AgentEvent[] = [];
 
   const flush = () => {
-    if (runKey !== null && run.length >= GROUP_MIN) {
-      const { count, only } = countTargets(run);
-      items.push({
-        kind: "tool_group",
-        name: runKey,
-        calls: run,
-        targets: count,
-        target: only,
-        key: `group-${run[0].id}`,
-      });
+    if (run.length >= 2) {
+      items.push({ kind: "tool_group", calls: run, key: `group-${run[0].id}` });
     } else {
       items.push(...run);
     }
-    items.push(...passthrough, ...held);
+    items.push(...held);
     run = [];
     held = [];
-    passthrough = [];
-    runKey = null;
   };
 
   for (const event of work) {
-    // Anything that draws nothing cannot break a run — derived from `RENDERS`
-    // rather than kept as a second list, which drifted. It matters constantly: a
-    // `tool_call_completed` lands between every pair of calls (consumed via
-    // `resultByCallId`, never rendered), so treating those as breakers would
-    // mean no run ever exceeds length 1.
-    if (runKey !== null && !rendersRow(event)) {
+    if (groupableTool(event, subagentIds)) {
+      run.push(event);
+      continue;
+    }
+
+    if (run.length > 0 && !rendersWorkItem(event)) {
       held.push(event);
       continue;
     }
 
-    const key = groupKey(event, subagentIds, withImages);
-    if (key !== null && key === runKey) {
-      run.push(event);
-      passthrough.push(...held);
-      held = [];
-      continue;
-    }
-
     flush();
-    if (key !== null) {
-      run = [event];
-      runKey = key;
-    } else {
-      items.push(event);
-    }
+    items.push(event);
   }
   flush();
-
   return items;
 }
 
 /// Cuts the main thread into turns: each runs from a user prompt to the
-/// `turn_completed` that closes it. A turn's intermediate work collapses behind
-/// one summary line, leaving the prompt and the final answer as the default view.
+/// `turn_completed` that closes it. The renderer places all intermediate work
+/// in one disclosure and keeps the final answer outside it.
 function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
   const turns: Turn[] = [];
   let current: OpenTurn | null = null;
 
-  // A turn is only pushed once, here, so the tool grouping runs exactly once
-  // per turn rather than on every render.
+  // A turn is only pushed once per transcript build, here, so grouping has one
+  // source of truth for both live and settled turns.
   const close = (turn: OpenTurn) => {
-    const { lastWasAssistantText, ...rest } = turn;
-    const work = groupTools(turn.work, subagentIds);
-    // An interrupted or otherwise cut-short turn closes with no `finalText` —
-    // the CLI only writes one for a turn that ended on its own terms. Fall back
-    // to the turn's last message so the collapsed view still ends on what the
-    // agent last said, instead of filing every row including that message
-    // behind the summary. Only for a *closed* turn: a running one shows its
-    // work anyway, and a turn a dead child never closed does too.
     let finalText = turn.finalText;
     if (finalText === null && turn.completed !== null) {
       for (let i = turn.work.length - 1; i >= 0; i--) {
-        const p = turn.work[i].payload;
-        if (p.type === "assistant_text") {
-          finalText = p.text;
+        const payload = turn.work[i].payload;
+        if (payload.type === "assistant_text") {
+          finalText = payload.text;
           break;
         }
       }
     }
-    // `finalText` is a verbatim copy of the turn's last `assistant_text`, and
-    // the collapsed view renders it in that message's place — so when the last
-    // rendered row really is that message, it is on screen either way:
-    // collapsing hides one fewer row, and the summary has one fewer message to
-    // claim. An interrupted turn has no `finalText`, and a tool call after the
-    // last message means the copy is of an earlier one; neither discounts.
-    const duplicated = finalText !== null && lastWasAssistantText ? 1 : 0;
-    // Queued prompts stay on screen through a collapse, so they are not rows
-    // the toggle has to account for. Without this a turn whose only extra row is
-    // a queued prompt offers a toggle that reveals nothing.
-    const alwaysShown = work.filter(isQueuedPrompt).length;
-    turns.push({
-      ...rest,
-      finalText,
-      work,
-      messages: turn.messages - duplicated,
-      rows: work.filter(rendersRow).length - duplicated - alwaysShown,
-    });
+
+    // The completion payload copies the final assistant message. Keep that
+    // message permanently outside the disclosure—even after it is expanded—so
+    // “everything except the final output” remains an honest boundary.
+    const detailWork = groupTools(turn.work, subagentIds);
+    if (finalText !== null && turn.completed !== null) {
+      for (let i = detailWork.length - 1; i >= 0; i--) {
+        const item = detailWork[i];
+        if (isToolGroup(item)) continue;
+        const payload = item.payload;
+        if (payload.type === "assistant_text" && payload.text === finalText) {
+          detailWork.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+    turns.push({ ...turn, finalText, work: detailWork });
   };
 
   const open = (prompt: AgentEvent | null, key: string): OpenTurn => ({
@@ -412,10 +209,7 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
     work: [],
     completed: null,
     finalText: null,
-    toolCalls: 0,
-    messages: 0,
     key,
-    lastWasAssistantText: false,
   });
 
   for (const event of events) {
@@ -448,22 +242,11 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
       continue;
     }
 
-    if (event.payload.type === "tool_call_started") current.toolCalls += 1;
-    if (event.payload.type === "assistant_text") current.messages += 1;
-    // Only a *rendered* row unseats the flag. A replayed log carries trailing
-    // `delta`s the live path filters out of `events` — let those clear it and
-    // the finalText discount applies live but not on reload, so the same turn
-    // counts differently across a restart.
-    if (rendersRow(event)) {
-      current.lastWasAssistantText = event.payload.type === "assistant_text";
-    }
     current.work.push(event);
   }
 
-  // The open trailing turn groups too — a run of reads collapses as it arrives
-  // rather than only once the turn closes. A run still below `GROUP_MIN` renders
-  // as loose rows until the call that reaches it, which is the same thing the
-  // reader would see anyway.
+  // The open trailing turn groups too, so a run collapses as it arrives rather
+  // than only once the turn closes.
   if (current) close(current);
   return turns;
 }

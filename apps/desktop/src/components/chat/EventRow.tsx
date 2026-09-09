@@ -46,7 +46,6 @@ function Notice({
 export default function EventRow({
   event,
   resultByCallId,
-  hideToolLabel = false,
   openTool = false,
   onOpenSession,
 }: {
@@ -54,8 +53,6 @@ export default function EventRow({
   /// Results keyed by call id, so a started call renders its own outcome without
   /// searching the event list itself.
   resultByCallId: Map<string, ToolResult>;
-  /// Passed down by `ToolGroupRow`, whose header already names the tool.
-  hideToolLabel?: boolean;
   /// Draws a tool call already expanded. Only the subagent panel sets it, for
   /// the call the reader opened the run to see.
   openTool?: boolean;
@@ -91,7 +88,6 @@ export default function EventRow({
           input={payload.input}
           rawInput={payload.rawInput}
           result={resultByCallId.get(payload.callId)}
-          hideLabel={hideToolLabel}
           defaultOpen={openTool}
         />
       );

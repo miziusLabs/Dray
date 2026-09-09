@@ -10,7 +10,6 @@ import QueuedMessages from "@/components/chat/QueuedMessages";
 import QuestionRequest from "@/components/chat/QuestionRequest";
 import Reasoning from "@/components/chat/Reasoning";
 import WorkingIndicator from "@/components/chat/WorkingIndicator";
-import StreamingToolCall from "@/components/chat/StreamingToolCall";
 import TurnBlock from "@/components/chat/TurnBlock";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
@@ -461,22 +460,18 @@ export default function Chat({
                 footer={
                   turn === waitingTurn ? (
                     <WorkingIndicator tokens={working?.tokens ?? 0} />
-                  ) : turn !== streamingTurn ? (
+                  ) : turn !== streamingTurn || streamingTool ? (
                     undefined
                   ) : streamingThinking ? (
                     // The same component the committed `reasoning` event renders
                     // with, in its `streaming` presentation — details stay hidden
                     // until the user opens the thinking section.
                     <Reasoning text={streamingThinking} encrypted={false} streaming />
-                  ) : streamingTool ? (
-                    // Must come before the text arm: a tool block leaves
-                    // `streamingText` empty, so falling through would render an
-                    // empty message where the row belongs.
-                    <StreamingToolCall {...streamingTool} />
                   ) : (
                     <AssistantMessage text={streamingText} streaming />
                   )
                 }
+                streamingTool={turn === streamingTurn ? streamingTool : null}
               />
             </div>
           ))}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTranscript, segmentWork } from "@/lib/transcript";
+import { buildTranscript, isToolGroup } from "@/lib/transcript";
 import type { AgentEvent, AgentEventPayload } from "@/types/events";
 
 /// Only the envelope fields `buildTranscript` orders and keys by are filled;
@@ -23,12 +23,17 @@ function prompt(seq: number, text: string, queued: boolean): AgentEvent {
   return event(seq, { type: "user_message", text, images: [], baseline: null, queued, from: null });
 }
 
-function callStarted(seq: number, callId: string): AgentEvent {
+function callStarted(
+  seq: number,
+  callId: string,
+  name = "Bash",
+  toolType: "shell" | "file_read" | "other" = "other",
+): AgentEvent {
   return event(seq, {
     type: "tool_call_started",
     callId,
-    name: "Bash",
-    toolType: "other",
+    name,
+    toolType,
     input: {},
     rawInput: null,
     title: null,
@@ -106,23 +111,7 @@ describe("a queued prompt", () => {
     );
   });
 
-  /// It stays on screen through a collapse, so it is not a row the toggle
-  /// promises to reveal. Counting it would offer a toggle over rows already
-  /// visible — and in the one-call case, over nothing at all.
-  it("does not count toward the rows a collapse would hide", () => {
-    const withQueued = buildTranscript(
-      [prompt(0, "go", false), callStarted(1, "c1"), prompt(2, "and also", true), completed(3)],
-      false,
-    );
-    const without = buildTranscript(
-      [prompt(0, "go", false), callStarted(1, "c1"), completed(2)],
-      false,
-    );
-
-    expect(withQueued.turns[0].rows).toBe(without.turns[0].rows);
-  });
-
-  /// It renders, so it breaks a run of same-tool calls rather than being held
+  /// It renders, so it breaks a run of tool calls rather than being held
   /// and re-emitted after the group — which would move it away from the point in
   /// the turn where it was actually typed.
   it("splits a run of tool calls rather than folding into the group", () => {
@@ -185,71 +174,48 @@ describe("a turn that closed without finalText", () => {
   });
 });
 
-describe("segmentWork", () => {
-  /// The collapsed view's whole reason: work is cut at each queued prompt so
-  /// the prompt stays after the stretch it interrupted rather than bunching
-  /// with the other prompts once the rows between them are hidden.
-  it("cuts the work at each queued prompt", () => {
+describe("tool groups", () => {
+  it("groups consecutive calls of different types", () => {
+    const { turns } = buildTranscript(
+      [
+        prompt(0, "go", false),
+        callStarted(1, "c1", "Read", "file_read"),
+        callStarted(2, "c2", "Bash", "shell"),
+        completed(3),
+      ],
+      false,
+    );
+
+    const group = turns[0].work.find(isToolGroup);
+    expect(group?.calls.map((call) => call.id)).toEqual(["e-1", "e-2"]);
+  });
+
+  it("ends a group when the agent outputs text", () => {
     const { turns } = buildTranscript(
       [
         prompt(0, "go", false),
         callStarted(1, "c1"),
         callStarted(2, "c2"),
-        prompt(3, "and also", true),
+        text(3, "update"),
         callStarted(4, "c3"),
-        completed(5),
+        callStarted(5, "c4"),
+        completed(6),
       ],
       false,
     );
 
-    const segments = segmentWork(turns[0]);
-    expect(segments).toHaveLength(2);
-    expect(segments[0].toolCalls).toBe(2);
-    expect(segments[0].prompt).not.toBeNull();
-    expect(segments[1].toolCalls).toBe(1);
-    expect(segments[1].prompt).toBeNull();
+    expect(turns[0].work.filter((item) => "kind" in item)).toHaveLength(2);
   });
 
-  /// `finalText` re-renders the turn's last message, and the turn-level counts
-  /// discount it — the last segment has to agree, or the summary line promises
-  /// a message the collapse isn't hiding.
-  it("mirrors the finalText discount on the last segment", () => {
+  it("keeps the final output outside the worked details", () => {
     const { turns } = buildTranscript(
-      [
-        prompt(0, "go", false),
-        callStarted(1, "c1"),
-        prompt(2, "and also", true),
-        callStarted(3, "c2"),
-        text(4, "done"),
-        completed(5, "done"),
-      ],
+      [prompt(0, "go", false), text(1, "done"), completed(2, "done")],
       false,
     );
 
-    const segments = segmentWork(turns[0]);
-    const last = segments[segments.length - 1];
-    expect(last.messages).toBe(0);
-    expect(segments.reduce((n, s) => n + s.messages, 0)).toBe(turns[0].messages);
-  });
-
-  /// Two prompts with nothing between them: the empty stretch draws no summary
-  /// line, so `rows` has to say so.
-  it("gives an empty stretch zero rows", () => {
-    const { turns } = buildTranscript(
-      [
-        prompt(0, "go", false),
-        callStarted(1, "c1"),
-        prompt(2, "first", true),
-        prompt(3, "second", true),
-        callStarted(4, "c2"),
-        completed(5),
-      ],
-      false,
-    );
-
-    const segments = segmentWork(turns[0]);
-    expect(segments).toHaveLength(3);
-    expect(segments[1].rows).toBe(0);
+    expect(turns[0].finalText).toBe("done");
+    expect(turns[0].work.some((item) => !('kind' in item) && item.payload.type === "assistant_text"))
+      .toBe(false);
   });
 });
 
@@ -360,10 +326,9 @@ describe("a tool call that came back with pictures", () => {
     } as AgentEventPayload);
   }
 
-  /// "Read 2 files" is an honest summary of two files and no summary at all of
-  /// two screenshots — the row draws them unopened because they are the whole of
-  /// what the call returned, and a group puts them back behind a click.
-  it("stays its own row instead of joining the run", () => {
+  /// Image-producing calls follow the same consecutive-call rule. Expanding
+  /// the group reveals the individual row and its images.
+  it("joins the surrounding tool-call group", () => {
     const { turns } = buildTranscript(
       [
         prompt(0, "look", false),
@@ -378,13 +343,9 @@ describe("a tool call that came back with pictures", () => {
       false,
     );
 
-    const work = turns[0].work;
-    expect(work.filter((item) => "kind" in item && item.kind === "tool_group")).toHaveLength(1);
-    expect(
-      work.some(
-        (item) => !("kind" in item) && item.payload.type === "tool_call_started" && item.payload.callId === "c1",
-      ),
-    ).toBe(true);
+    const groups = turns[0].work.filter(isToolGroup);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].calls).toHaveLength(3);
   });
 
   /// The rule it bends has to keep working, or every run of reads would come
