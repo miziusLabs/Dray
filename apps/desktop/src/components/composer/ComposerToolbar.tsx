@@ -49,6 +49,7 @@ export type ComposerToolbarProps = {
   onCancelBranchSwitch: () => void;
 
   useCloud: boolean;
+  cloudAvailable: boolean;
   onToggleCloud: () => void;
 
   /// Opens the file picker. The attachments themselves are held in a
@@ -93,6 +94,7 @@ export default function ComposerToolbar({
   onConfirmBranchSwitch,
   onCancelBranchSwitch,
   useCloud,
+  cloudAvailable,
   onToggleCloud,
   onAttach,
   contextUsage,
@@ -146,13 +148,18 @@ export default function ComposerToolbar({
             />
           )}
 
-          {/* Cloud is available even before a local project is selected. A
-              project, when selected, supplies branch metadata only; it is never
-              mounted into the Docker sandbox. Both pickers hide in Cloud for
+          {/* When Docker is available, Cloud can be selected even before a local
+              project is selected. A project, when selected, supplies branch
+              metadata only; it is never mounted into the Docker sandbox. Both
+              pickers hide in Cloud for
               the same reason: the controls that decide where a session runs
               vanish once the mode is set, and the branch the Cloud starts from
               is the selected project's own. */}
-          <CloudToggle on={useCloud} onToggle={onToggleCloud} />
+          <CloudToggle
+            on={useCloud}
+            onToggle={onToggleCloud}
+            disabled={!cloudAvailable}
+          />
 
           {projectPath && !useCloud && (
             <div className="relative flex min-w-0 items-center">

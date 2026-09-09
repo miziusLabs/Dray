@@ -86,6 +86,10 @@ export function useSessions(titlePrefs: TitlePrefs) {
     // has uncommitted changes. Null when nothing is pending.
     const [pendingBranch, setPendingBranch] = useState<string | null>(null);
     const [useCloud, setUseCloudState] = useState(() => prefs.useCloud);
+    // Null means the capability check is still in flight. Cloud remains off until
+    // Docker is confirmed reachable, so an unavailable daemon cannot be selected
+    // during startup or leave the new-task composer in a misleading state.
+    const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null);
     // Per-session, not global: sessions run concurrently and all of their events
     // arrive on the same channel, so a single value would clear on another's
     // turn. The backend drives this via `session_status`, and this map is the
@@ -117,6 +121,10 @@ export function useSessions(titlePrefs: TitlePrefs) {
     // one could never be answered.
     const [asksBySession, setAsksBySession] = useState<Record<string, string[]>>({});
     const [error, setError] = useState<string | null>(null);
+
+// The preference can remain sticky across launches, but Cloud is only an active
+// mode after Docker has answered the capability check successfully.
+const cloudEnabled = useCloud && dockerAvailable === true;
 
 // What actually gets sent for the current model: its remembered pick, else its
 // own default, and null for a model that takes no effort flag at all.
@@ -245,7 +253,7 @@ const handleSelectBranch = async (target: string) => {
 
   // Cloud only records the branch as prompt metadata. Never check out or
   // mutate the host project: the sandbox does not contain that repository.
-  if (useCloud) {
+  if (cloudEnabled) {
     setBranch(target);
     return;
   }
@@ -326,7 +334,7 @@ const handleSendMsg = async (
   // Keep the selected project as metadata when there is one, but use the
   // current app directory as a valid launch context when there is not.
   const cwd = isNewSession
-    ? useCloud
+    ? cloudEnabled
       ? projectPath ?? "."
       : projectPath
     : existing?.cwd ?? projectPath;
@@ -373,7 +381,7 @@ const handleSendMsg = async (
       // Cloud only records branch context; it never checks out the selected
       // project.
       branch: isNewSession ? branch : null,
-      useCloud: isNewSession && useCloud,
+      useCloud: isNewSession && cloudEnabled,
       cloudName: null,
       isNewSession,
     });
@@ -800,6 +808,22 @@ useEffect(() => {
     cancelled = true;
   };
 }, [harness, projectPath])
+
+useEffect(() => {
+  let cancelled = false;
+  invoke<boolean>("docker_available")
+    .then((available) => {
+      if (!cancelled) setDockerAvailable(available);
+    })
+    .catch(() => {
+      // Docker is optional for local sessions, so an unavailable capability is
+      // represented by the disabled Cloud control rather than an app error.
+      if (!cancelled) setDockerAvailable(false);
+    });
+  return () => {
+    cancelled = true;
+  };
+}, [])
 
 useEffect(() => {
   invoke<Project[]>("list_projects")
@@ -1392,6 +1416,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud: cloudEnabled, dockerAvailable: dockerAvailable === true, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
 
 }

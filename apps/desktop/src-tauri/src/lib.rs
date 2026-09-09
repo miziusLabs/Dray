@@ -32,6 +32,11 @@ pub mod store;
 pub mod title;
 
 #[tauri::command]
+async fn docker_available() -> bool {
+    sandbox::is_available().await
+}
+
+#[tauri::command]
 async fn send_msg(
     session_id: &str,
     prompt: &str,
@@ -498,6 +503,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            docker_available,
             send_msg,
             read_attachments,
             list_models,

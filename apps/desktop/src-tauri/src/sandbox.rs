@@ -38,6 +38,26 @@ pub fn container_name(session_id: &str) -> String {
     format!("{CONTAINER_PREFIX}{safe}")
 }
 
+/// Checks whether the Docker CLI can reach a running daemon. Cloud creation
+/// performs the more specific image check later; this is only the lightweight
+/// capability query used to enable the composer's Cloud control.
+pub async fn is_available() -> bool {
+    let mut command = docker_command();
+    command
+        .args(["info", "--format", "{{.ServerVersion}}"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    command_succeeded(command).await
+}
+
+async fn command_succeeded(mut command: Command) -> bool {
+    command
+        .status()
+        .await
+        .is_ok_and(|status| status.success())
+}
+
 /// Verifies that the requested image exists before a session is indexed. A
 /// missing image otherwise looks like a successful `docker run` until the
 /// first stderr line arrives, leaving a session that cannot be recovered.
@@ -187,6 +207,25 @@ mod tests {
         assert_eq!(volume_name("abc"), "dray-cloud-abc");
         assert_eq!(container_name("abc"), "dray-cloud-abc");
         assert_eq!(container_name("a/b c"), "dray-cloud-abc");
+    }
+
+    #[tokio::test]
+    async fn availability_requires_a_successful_command() {
+        #[cfg(windows)]
+        fn exit_command(code: u8) -> Command {
+            let mut command = Command::new("cmd");
+            command.args(["/C", &format!("exit {code}")]);
+            command
+        }
+
+        #[cfg(not(windows))]
+        fn exit_command(code: u8) -> Command {
+            Command::new(if code == 0 { "true" } else { "false" })
+        }
+
+        assert!(command_succeeded(exit_command(0)).await);
+        assert!(!command_succeeded(exit_command(1)).await);
+        assert!(!command_succeeded(Command::new("dray-no-such-command")).await);
     }
 
     #[test]

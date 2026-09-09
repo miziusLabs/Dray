@@ -82,6 +82,7 @@ function App() {
     branches,
     branch,
     useCloud,
+    dockerAvailable,
     busy,
     backgroundTasks,
     compacting,
@@ -730,6 +731,7 @@ function App() {
               }
               onCancelBranchSwitch={() => setPendingBranch(null)}
               useCloud={useCloud}
+              cloudAvailable={dockerAvailable}
               onToggleCloud={() => setUseCloud((v) => !v)}
               onAttach={() => void pickAttachments(selectedSessionId)}
               contextUsage={contextUsage}
