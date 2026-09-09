@@ -100,7 +100,7 @@ export default function SettingsDialog({
         </div>
 
         <footer className="border-t border-border pt-3 text-center text-xs text-muted-foreground">
-          Version {packageJson.version}
+          © miziusLabs | v{packageJson.version}
         </footer>
       </DialogContent>
     </Dialog>
