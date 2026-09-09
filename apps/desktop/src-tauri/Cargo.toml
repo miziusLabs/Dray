@@ -36,7 +36,7 @@ tokio = { version = "1", features = [
 ] }
 uuid = { version = "1.16", features = ["v4", "v7"] }
 # Generates the TS mirror of the event model; `cargo test` writes ../src/types/.
-ts-rs = { version = "12", features = ["serde-json-impl"] }
+ts-rs = { version = "12", features = ["serde-json-impl", "no-serde-warnings"] }
 dirs = "6.0.0"
 tauri-plugin-dialog = "2"
 fff-search = "0.10.3"
