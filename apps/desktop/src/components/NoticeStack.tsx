@@ -154,7 +154,7 @@ function NoticeCard({
       // `flex` beats the component's own `grid`: that layout is for a title
       // over a description beside an icon, and this is one row of three
       // things. `overflow-hidden` is what clips the bar to the radius.
-      className="group/notice pointer-events-auto relative flex w-fit items-center gap-2 overflow-hidden py-1.5 pr-1.5 pl-3 shadow-lg ring-1 ring-foreground/10 has-[[data-slot=alert-description]]:items-start has-[[data-slot=alert-description]]:py-2.5 animate-in fade-in slide-in-from-top-2"
+      className="group/notice pointer-events-auto relative flex w-fit items-center gap-2 overflow-hidden py-1.5 pr-1.5 pl-3 shadow-lg has-[[data-slot=alert-description]]:items-start has-[[data-slot=alert-description]]:py-2.5 animate-in fade-in slide-in-from-top-2"
     >
       {/* A column only when there is a second line to stack. The other kinds
           stay the single row they have always been — wrapping a lone title in a

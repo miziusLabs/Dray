@@ -531,7 +531,7 @@ export default function Chat({
               size="icon-sm"
               aria-label="Scroll to bottom"
               onClick={scrollToBottom}
-              className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border-border shadow-sm"
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-sm"
             >
               <ArrowDown />
             </Button>

@@ -69,7 +69,7 @@ export default function BranchSwitchDialog({
           onInteractOutside={(e) => {
             if (!armed.current) e.preventDefault();
           }}
-          className="z-50 flex w-72 flex-col gap-3 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-lg data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+          className="z-50 flex w-72 flex-col gap-3 rounded-xl bg-popover p-3 text-popover-foreground shadow-lg data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
         >
           <div className="flex flex-col gap-0.5">
             <p className="text-ui font-medium">

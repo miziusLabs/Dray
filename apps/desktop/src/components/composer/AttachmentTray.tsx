@@ -70,7 +70,7 @@ export default function AttachmentTray({
             onClick={() => onRemove(attachment.path)}
             aria-label={`Remove ${attachment.name}`}
             className={cn(
-              "absolute -top-1.5 -right-1.5 rounded-full border border-[oklch(1_0_0/10%)] bg-secondary p-0.5 text-secondary-foreground opacity-0 transition-opacity",
+              "absolute -top-1.5 -right-1.5 rounded-full border-0 bg-secondary p-0.5 text-secondary-foreground opacity-0 transition-opacity",
               "group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none",
             )}
           >
