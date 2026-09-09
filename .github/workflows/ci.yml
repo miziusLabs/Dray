@@ -156,12 +156,12 @@ jobs:
               ? await github.paginate(github.rest.repos.compareCommits, {
                   ...context.repo,
                   base: previousRelease.tag_name,
-                  head: tag,
+                  head: context.sha,
                   per_page: 100,
                 })
               : await github.paginate(github.rest.repos.listCommits, {
                   ...context.repo,
-                  sha: tag,
+                  sha: context.sha,
                   per_page: 100,
                 });
 
