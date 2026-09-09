@@ -14,17 +14,15 @@ permissions:
 
 jobs:
   prepare:
+    name: Prepare
     runs-on: ubuntu-latest
     outputs:
       bumped: ${{ steps.version.outputs.bumped }}
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
-      release_id: ${{ steps.release.outputs.release_id }}
     steps:
       - name: Check out the version bump
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Read and validate the version
         id: version
@@ -51,81 +49,12 @@ jobs:
             exit 1
           fi
 
-          tag="v$current"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $tag already exists." >&2
-            exit 1
-          fi
-
           echo "bumped=true" >> "$GITHUB_OUTPUT"
           echo "version=$current" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - name: Validate updater signing secret
-        if: steps.version.outputs.bumped == 'true'
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
-            echo "The TAURI_SIGNING_PRIVATE_KEY repository secret is required." >&2
-            exit 1
-          fi
-
-      - name: Generate release notes from release commits
-        if: steps.version.outputs.bumped == 'true'
-        shell: bash
-        run: |
-          previous_tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_SHA}^" 2>/dev/null || true)
-          if [[ -n "$previous_tag" ]]; then
-            range="$previous_tag..$GITHUB_SHA"
-          else
-            range="$GITHUB_SHA"
-          fi
-
-          git log --reverse "$range" --format='%H%x1f%s%x1f%b%x1e' > release-commits.txt
-          python3 <<'PY'
-          from pathlib import Path
-
-          records = Path("release-commits.txt").read_text().split("\x1e")
-          notes = []
-          for record in records:
-              # Trim only the newline Git writes between records. Python treats
-              # the unit separator as whitespace, so plain `strip()` would
-              # erase the empty description field from bodyless commits.
-              fields = record.strip("\n").split("\x1f", 2)
-              if len(fields) != 3:
-                  continue
-              sha, title, description = fields
-              notes.append(f"### {title.strip()} (`{sha[:7]}`)")
-              if description.strip():
-                  notes.append(description.strip())
-              notes.append("")
-
-          Path("release-notes.md").write_text("\n".join(notes).rstrip() + "\n")
-          PY
-
-      - name: Create draft GitHub release
-        id: release
-        if: steps.version.outputs.bumped == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "$VERSION" \
-            --notes-file release-notes.md \
-            --draft
-          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "tag=v$current" >> "$GITHUB_OUTPUT"
 
   build:
+    name: Build
     needs: prepare
     if: needs.prepare.outputs.bumped == 'true'
     strategy:
@@ -173,21 +102,33 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           projectPath: apps/desktop
-          releaseId: ${{ needs.prepare.outputs.release_id }}
           tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: ${{ needs.prepare.outputs.version }}
           releaseDraft: true
           prerelease: false
+          generateReleaseNotes: true
           updaterJsonPreferNsis: true
           retryAttempts: 2
           args: ${{ matrix.args }}
 
   publish:
+    name: Publish
     needs: [prepare, build]
     if: needs.prepare.outputs.bumped == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Publish GitHub release
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
-        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+        with:
+          script: |
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              ...context.repo,
+              tag: process.env.TAG,
+            });
+            await github.rest.repos.updateRelease({
+              ...context.repo,
+              release_id: release.id,
+              draft: false,
+            });
