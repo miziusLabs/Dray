@@ -452,6 +452,9 @@ export default function Chat({
                 resultByCallId={resultByCallId}
                 onOpenSubagent={onOpenSubagent}
                 onOpenSession={onOpenSession}
+                // An interrupted turn has no completion event, so only the
+                // trailing turn of a busy session may keep its timer running.
+                live={busy && turn === lastTurn}
                 // Both cover the wait for output, and never at once —
                 // `waitingTurn` requires no streaming text. Inside the block so
                 // they sit at the gap the committed event will occupy, rather

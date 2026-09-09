@@ -35,6 +35,10 @@ type TurnBlockProps = {
   onOpenSubagent: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
   footer?: ReactNode;
+  /// Whether this is the trailing turn of a session with a live agent process.
+  /// An unclosed turn can remain in the transcript after Stop, so the missing
+  /// completion event alone is not enough to decide that its timer is running.
+  live: boolean;
   /// A not-yet-committed tool block. When it follows an existing collapsed
   /// group, that group's title temporarily becomes this active state.
   streamingTool?: StreamingTool | null;
@@ -48,13 +52,15 @@ function firstEventTime(turn: Turn): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function useTurnDuration(turn: Turn): number {
-  const running = turn.completed === null;
+function useTurnDuration(turn: Turn, running: boolean): number {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!running) return;
+    // Capture both edges: the first tick starts from the moment the turn becomes
+    // live, and the final one freezes at the moment the process stops even when
+    // no `turn_completed` event was emitted.
     setNow(Date.now());
+    if (!running) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [running]);
@@ -82,12 +88,13 @@ export default function TurnBlock({
   onOpenSubagent,
   onOpenSession,
   footer,
+  live,
   streamingTool = null,
 }: TurnBlockProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const running = turn.completed === null;
+  const running = live && turn.completed === null;
   const open = running || detailsOpen;
-  const duration = useTurnDuration(turn);
+  const duration = useTurnDuration(turn, running);
 
   const trailingItem = [...turn.work].reverse().find(rendersWorkItem);
   const streamingGroup =
@@ -119,6 +126,8 @@ export default function TurnBlock({
           </button>
         </CollapsibleTrigger>
 
+        <div className="border-t border-border" />
+
         <CollapsibleContent className="collapsible-smooth">
           <div className="flex flex-col gap-3">
             {turn.work.map((item) =>
@@ -135,8 +144,6 @@ export default function TurnBlock({
             {footer}
           </div>
         </CollapsibleContent>
-
-        <div className="border-t border-border" />
       </Collapsible>
 
       {turn.finalText && <AssistantMessage text={turn.finalText} />}
