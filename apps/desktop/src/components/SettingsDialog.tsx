@@ -6,7 +6,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import ModelSelector, { modelKey, modelLabel } from "@/components/composer/ModelSelector";
+import ModelSelector, {
+  DEFAULT_CYCLE_EFFORTS,
+  EFFORT_LABELS,
+  EFFORTS,
+  modelKey,
+  modelLabel,
+} from "@/components/composer/ModelSelector";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -31,6 +37,8 @@ export default function SettingsDialog({
   models,
   cycleModelKeys,
   onCycleModelKeysChange,
+  cycleEfforts,
+  onCycleEffortsChange,
   titleModels,
   titleModelId,
   titlePiModel,
@@ -44,6 +52,8 @@ export default function SettingsDialog({
   models: Model[];
   cycleModelKeys: string[] | null;
   onCycleModelKeysChange: (next: string[]) => void;
+  cycleEfforts: Effort[] | null;
+  onCycleEffortsChange: (next: Effort[]) => void;
   titleModels: Model[];
   titleModelId: ModelId;
   titlePiModel: PiModel | null;
@@ -74,6 +84,10 @@ export default function SettingsDialog({
             models={models}
             selectedKeys={cycleModelKeys}
             onChange={onCycleModelKeysChange}
+          />
+          <CycleEffortsRow
+            selectedEfforts={cycleEfforts}
+            onChange={onCycleEffortsChange}
           />
           <TitleGenerationRow
             models={titleModels}
@@ -143,6 +157,61 @@ function CycleModelsRow({
               </DropdownMenuCheckboxItem>
             );
           })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SettingRow>
+  );
+}
+
+function CycleEffortsRow({
+  selectedEfforts,
+  onChange,
+}: {
+  selectedEfforts: Effort[] | null;
+  onChange: (next: Effort[]) => void;
+}) {
+  const id = useId();
+  const resolvedEfforts = selectedEfforts ?? DEFAULT_CYCLE_EFFORTS;
+  const selectedCount = EFFORTS.filter((effort) => resolvedEfforts.includes(effort)).length;
+  const summary =
+    selectedCount === EFFORTS.length
+      ? "All levels"
+      : selectedCount === 1
+        ? "1 level"
+        : `${selectedCount} levels`;
+
+  const setChecked = (effort: Effort, checked: boolean) => {
+    onChange(
+      checked
+        ? EFFORTS.filter((level) => level === effort || resolvedEfforts.includes(level))
+        : resolvedEfforts.filter((level) => level !== effort),
+    );
+  };
+
+  return (
+    <SettingRow
+      id={id}
+      label="Cycle reasoning levels"
+      description="Choose which reasoning levels Shift+Tab cycles through."
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button id={id} type="button" variant="outline" size="sm" className="text-ui">
+            {summary}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-48">
+          {EFFORTS.map((effort) => (
+            <DropdownMenuCheckboxItem
+              key={effort}
+              checked={resolvedEfforts.includes(effort)}
+              className="text-ui"
+              onCheckedChange={(checked) => setChecked(effort, checked === true)}
+              onSelect={(event) => event.preventDefault()}
+            >
+              {EFFORT_LABELS[effort]}
+            </DropdownMenuCheckboxItem>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
     </SettingRow>

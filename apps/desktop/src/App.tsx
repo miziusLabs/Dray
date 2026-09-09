@@ -35,7 +35,11 @@ import SubagentPanel from "@/components/SubagentPanel";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
-import { modelKey, nextEffort } from "@/components/composer/ModelSelector";
+import {
+  DEFAULT_CYCLE_EFFORTS,
+  modelKey,
+  nextEffort,
+} from "@/components/composer/ModelSelector";
 import ViewTabs, { type ViewTab } from "@/components/layout/ViewTabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { pickAttachments } from "@/hooks/useAttachments";
@@ -141,6 +145,12 @@ function App() {
   const cycleModels = cycleModelKeys
     ? models.filter((model) => cycleModelKeys.includes(modelKey(model)))
     : models;
+  // `null` preserves the original Medium-through-Max cycle. An explicit list,
+  // including an empty one, is the user's configured reasoning cycle.
+  const [cycleEfforts, setCycleEfforts] = useLocalStorage<Effort[] | null>(
+    "ade.cycleEfforts",
+    null,
+  );
 
   const [panelOpen, setPanelOpen] = useState(false);
   // `null` is "never picked", and it is the whole of the default-tab rule.
@@ -513,6 +523,7 @@ function App() {
               (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
         ),
         effort,
+        cycleEfforts ?? DEFAULT_CYCLE_EFFORTS,
       );
       if (next) handleModelChange(modelId, next, piModel);
     },
@@ -791,6 +802,8 @@ function App() {
       models={models}
       cycleModelKeys={cycleModelKeys}
       onCycleModelKeysChange={setCycleModelKeys}
+      cycleEfforts={cycleEfforts}
+      onCycleEffortsChange={setCycleEfforts}
       titleModels={titleModelOptions}
       titleModelId={titlePrefs.modelId}
       titlePiModel={titlePrefs.piModel}

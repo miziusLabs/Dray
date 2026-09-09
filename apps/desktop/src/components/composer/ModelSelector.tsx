@@ -18,7 +18,7 @@ import {
 import { IS_MAC } from "@/lib/platform";
 import type { Effort, Model, ModelId, PiModel } from "@/types/events";
 
-const EFFORT_LABELS: Record<Effort, string> = {
+export const EFFORT_LABELS: Record<Effort, string> = {
   off: "Off",
   low: "Low",
   medium: "Medium",
@@ -26,6 +26,13 @@ const EFFORT_LABELS: Record<Effort, string> = {
   xhigh: "Extra High",
   max: "Max",
 };
+
+export const EFFORTS: Effort[] = ["off", "low", "medium", "high", "xhigh", "max"];
+
+// Preserve the original shortcut behavior until the user explicitly configures
+// the cycle. Off and Low remain available both in the picker and as opt-in
+// cycle levels.
+export const DEFAULT_CYCLE_EFFORTS: Effort[] = ["medium", "high", "xhigh", "max"];
 
 export const modelKey = (model: Model) =>
   model.piModel ? `pi:${model.piModel.provider}/${model.piModel.id}` : model.id;
@@ -36,12 +43,14 @@ export const modelLabel = (model: Model) => model.label || model.piModel?.id || 
 /// where the model offers nothing to cycle, so the chord no-ops rather than
 /// inventing an effort the CLI would ignore.
 ///
-/// `off` and `low` are left out of the cycle and stay pickable from the menu:
-/// a blind chord landing on either changes the model's behavior too much for a
-/// shortcut. An effort outside the remaining list — `off` and `low` included —
-/// enters at the start.
-export function nextEffort(model: Model | undefined, current: Effort | null): Effort | null {
-  const cycle: Effort[] = model?.efforts.filter((e) => e !== "off" && e !== "low") ?? [];
+/// Levels outside the configured cycle stay pickable from the menu and enter
+/// the cycle at its first supported level when the shortcut is pressed.
+export function nextEffort(
+  model: Model | undefined,
+  current: Effort | null,
+  included: readonly Effort[] = DEFAULT_CYCLE_EFFORTS,
+): Effort | null {
+  const cycle = model?.efforts.filter((effort) => included.includes(effort)) ?? [];
   if (cycle.length === 0) return null;
   const from = current ?? model?.defaultEffort ?? null;
   const i = from ? cycle.indexOf(from) : -1;
