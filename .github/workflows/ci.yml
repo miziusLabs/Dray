@@ -111,7 +111,7 @@ jobs:
           releaseName: ${{ needs.prepare.outputs.version }}
           releaseDraft: true
           prerelease: false
-          generateReleaseNotes: true
+          generateReleaseNotes: false
           updaterJsonPreferNsis: true
           retryAttempts: 2
           args: ${{ matrix.args }}
@@ -135,17 +135,51 @@ jobs:
                 per_page: 100,
               },
             );
+            const tag = process.env.TAG;
             const release = releases.find(
-              ({ tag_name, draft }) =>
-                tag_name === process.env.TAG && draft,
+              ({ tag_name, draft }) => tag_name === tag && draft,
             );
 
             if (!release) {
-              throw new Error(`Draft release not found for tag ${process.env.TAG}`);
+              throw new Error(`Draft release not found for tag ${tag}`);
             }
+
+            const previousRelease = releases
+              .filter(({ tag_name, draft }) => !draft && tag_name !== tag)
+              .sort(
+                (a, b) =>
+                  Date.parse(b.published_at ?? b.created_at) -
+                  Date.parse(a.published_at ?? a.created_at),
+              )[0];
+
+            const commits = previousRelease
+              ? await github.paginate(github.rest.repos.compareCommits, {
+                  ...context.repo,
+                  base: previousRelease.tag_name,
+                  head: tag,
+                  per_page: 100,
+                })
+              : await github.paginate(github.rest.repos.listCommits, {
+                  ...context.repo,
+                  sha: tag,
+                  per_page: 100,
+                });
+
+            const body = commits
+              .map(({ commit, html_url }) => {
+                const [title, ...descriptionLines] = commit.message.split(/\r?\n/);
+                const description = descriptionLines
+                  .join(" ")
+                  .replace(/\s+/g, " ")
+                  .trim();
+
+                return `- ${title.trim()}; ${description} (${html_url}).`;
+              })
+              .join("\n");
 
             await github.rest.repos.updateRelease({
               ...context.repo,
               release_id: release.id,
+              body,
               draft: false,
             });
