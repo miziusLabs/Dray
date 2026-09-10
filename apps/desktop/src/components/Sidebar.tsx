@@ -1201,11 +1201,14 @@ function SessionRow({
             long title truncates before either one and nothing reflows on hover.
             The two children stack via `absolute` on the date and crossfade on
             `opacity` over the same duration, so they never both read at once;
-            the shortcut state's wider minimum reserves room for its card. */}
+            the shortcut state's platform-sized minimum reserves room for its
+            card without adding unnecessary space beside it. */}
         <div
           className={cn(
-            "relative flex shrink-0 items-center justify-end self-stretch pl-2",
-            modifierPressed && shortcutIndex && "min-w-11",
+            "relative flex shrink-0 items-center justify-end self-stretch pl-1",
+            modifierPressed &&
+              shortcutIndex &&
+              (IS_MAC ? "min-w-9" : "min-w-11"),
           )}
         >
           {/* `pointer-events-none` unconditionally: it's never a target, and a
