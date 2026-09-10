@@ -48,6 +48,7 @@ export default function EventRow({
   resultByCallId,
   openTool = false,
   onOpenSession,
+  cwd = null,
 }: {
   event: AgentEvent;
   /// Results keyed by call id, so a started call renders its own outcome without
@@ -59,6 +60,7 @@ export default function EventRow({
   /// Opens the session that relayed a prompt. Only a `user_message` reads it,
   /// and only one that carries a sender.
   onOpenSession?: (sessionId: string) => void;
+  cwd?: string | null;
 }) {
   const { payload } = event;
 
@@ -69,12 +71,13 @@ export default function EventRow({
           text={payload.text}
           images={payload.images}
           from={payload.from}
+          cwd={cwd}
           onOpenSession={onOpenSession}
         />
       );
 
     case "assistant_text":
-      return <AssistantMessage text={payload.text} />;
+      return <AssistantMessage text={payload.text} cwd={cwd} />;
 
     case "reasoning":
       return <Reasoning text={payload.text} encrypted={payload.encrypted} />;

@@ -452,6 +452,7 @@ export default function Chat({
                 resultByCallId={resultByCallId}
                 onOpenSubagent={onOpenSubagent}
                 onOpenSession={onOpenSession}
+                cwd={session.cwd}
                 // An interrupted turn has no completion event, so only the
                 // trailing turn of a busy session may keep its timer running.
                 live={busy && turn === lastTurn}
@@ -471,7 +472,7 @@ export default function Chat({
                     // until the user opens the thinking section.
                     <Reasoning text={streamingThinking} encrypted={false} streaming />
                   ) : (
-                    <AssistantMessage text={streamingText} streaming />
+                    <AssistantMessage text={streamingText} streaming cwd={session.cwd} />
                   )
                 }
                 streamingTool={turn === streamingTurn ? streamingTool : null}
@@ -501,7 +502,7 @@ export default function Chat({
             ),
           )}
 
-          <QueuedMessages messages={queuedMessages} />
+          <QueuedMessages messages={queuedMessages} cwd={session.cwd} />
 
           {backgroundTaskCount > 0 && (
             <BackgroundTasksIndicator

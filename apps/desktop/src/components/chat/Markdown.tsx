@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, type ComponentProps, type ReactNode } from "react";
 import {
   defaultRehypePlugins,
   Streamdown,
@@ -6,11 +6,14 @@ import {
   type ThemeInput,
 } from "streamdown";
 
+import FileLink from "@/components/chat/FileLink";
 import LinkDialog from "@/components/chat/LinkDialog";
-import { isLocalLink, proxyLocalLink } from "@/lib/fileLinks";
 import { useCodeTheme } from "@/hooks/useCodeTheme";
+import { absolutePath, isFilePath, isRelativePath } from "@/lib/filePath";
+import { isLocalLink, proxyLocalLink } from "@/lib/fileLinks";
 import { createSharedCodePlugin } from "@/lib/codePlugin";
 import type { CodeThemePair } from "@/lib/codeTheme";
+import { FILE_PATH_CLASS, rehypeFilePaths } from "@/lib/markdownPlugins";
 import { cn } from "@/lib/utils";
 
 type MarkdownProps = {
@@ -18,6 +21,11 @@ type MarkdownProps = {
   /// True while deltas are still arriving, so incomplete blocks render as
   /// prose instead of flickering through half-parsed markdown.
   streaming?: boolean;
+  /// Working directory used to resolve relative paths in assistant prose.
+  cwd?: string | null;
+  /// Enables bare path links for assistant messages. Other markdown surfaces
+  /// may contain paths from a different checkout.
+  linkFilePaths?: boolean;
   className?: string;
 };
 
@@ -82,9 +90,23 @@ const REHYPE_PLUGINS = [
   defaultRehypePlugins.harden,
 ];
 
+const REHYPE_PLUGINS_WITH_FILE_PATHS = [
+  defaultRehypePlugins.raw,
+  defaultRehypePlugins.sanitize,
+  rehypeFilePaths,
+  proxyLocalLinks,
+  defaultRehypePlugins.harden,
+];
+
 /// Streamdown is built on the same shadcn tokens as the rest of the app, so it
 /// inherits the palette; only typography scale is ours to set.
-function MarkdownImpl({ children, streaming = false, className }: MarkdownProps) {
+function MarkdownImpl({
+  children,
+  streaming = false,
+  cwd = null,
+  linkFilePaths = false,
+  className,
+}: MarkdownProps) {
   // Shiki takes a [light, dark] pair and picks by the `.dark` class our theme
   // already sets, so this needs no mode of its own — only the user's pick.
   const { pair } = useCodeTheme();
@@ -99,7 +121,8 @@ function MarkdownImpl({ children, streaming = false, className }: MarkdownProps)
       mode={streaming ? "streaming" : "static"}
       isAnimating={streaming}
       plugins={plugins}
-      rehypePlugins={REHYPE_PLUGINS}
+      components={linkFilePaths ? { span: (props) => <FilePathSpan {...props} cwd={cwd} /> } : undefined}
+      rehypePlugins={linkFilePaths ? REHYPE_PLUGINS_WITH_FILE_PATHS : REHYPE_PLUGINS}
       controls={CONTROLS}
       linkSafety={LINK_SAFETY}
       shikiTheme={shikiTheme}
@@ -202,6 +225,48 @@ function MarkdownImpl({ children, streaming = false, className }: MarkdownProps)
       {children}
     </Streamdown>
   );
+}
+
+function FilePathSpan({
+  className,
+  title,
+  children,
+  cwd,
+  "data-line": dataLine,
+  ...props
+}: ComponentProps<"span"> & { cwd: string | null; "data-line"?: string }) {
+  const classes = className?.split(" ") ?? [];
+  if (classes.includes(FILE_PATH_CLASS) && title && (isFilePath(title) || isRelativePath(title))) {
+    const path = absolutePath(title, cwd);
+    const line = Number(dataLine);
+    const label = textOf(children);
+    const locator = label?.startsWith(title) ? label.slice(title.length) : "";
+    const name = title.split("/").filter(Boolean).at(-1) ?? title;
+    const body = `@${name}${locator}`;
+
+    if (!path) {
+      return <span className="text-accent-mention" title={title} {...props}>{body}</span>;
+    }
+
+    return (
+      <FileLink
+        path={path}
+        line={Number.isInteger(line) && line > 0 ? line : undefined}
+        title={title}
+        className="text-accent-mention"
+      >
+        {body}
+      </FileLink>
+    );
+  }
+
+  return <span className={className} title={title} {...props}>{children}</span>;
+}
+
+function textOf(node: ReactNode): string | null {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node) && node.length === 1) return textOf(node[0]);
+  return null;
 }
 
 // Every delta re-renders the transcript, so identical text must not re-parse.

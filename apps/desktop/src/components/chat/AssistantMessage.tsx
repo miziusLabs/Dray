@@ -1,13 +1,15 @@
 import { Markdown } from "@/components/chat/Markdown";
 
-/// Full-width and unbubbled — assistant output is the page's main content, and
-/// wrapping code blocks or tables in a bubble only costs horizontal room.
+/// Full-width and unbubbled assistant output. Bare paths in agent prose are
+/// resolved against the session that produced the message.
 export default function AssistantMessage({
   text,
   streaming = false,
+  cwd = null,
 }: {
   text: string;
   streaming?: boolean;
+  cwd?: string | null;
 }) {
-  return <Markdown streaming={streaming}>{text}</Markdown>;
+  return <Markdown streaming={streaming} cwd={cwd} linkFilePaths>{text}</Markdown>;
 }

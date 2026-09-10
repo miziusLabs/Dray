@@ -34,6 +34,7 @@ type TurnBlockProps = {
   resultByCallId: Map<string, ToolResult>;
   onOpenSubagent: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
+  cwd?: string | null;
   footer?: ReactNode;
   /// Whether this is the trailing turn of a session with a live agent process.
   /// An unclosed turn can remain in the transcript after Stop, so the missing
@@ -87,6 +88,7 @@ export default function TurnBlock({
   resultByCallId,
   onOpenSubagent,
   onOpenSession,
+  cwd = null,
   footer,
   live,
   streamingTool = null,
@@ -102,7 +104,7 @@ export default function TurnBlock({
 
   return (
     <div className="flex flex-col gap-3">
-      {turn.prompt && <UserMessage {...userProps(turn)} onOpenSession={onOpenSession} />}
+      {turn.prompt && <UserMessage {...userProps(turn)} cwd={cwd} onOpenSession={onOpenSession} />}
 
       <Collapsible
         open={open}
@@ -139,6 +141,7 @@ export default function TurnBlock({
                 resultByCallId,
                 onOpenSubagent,
                 onOpenSession,
+                cwd,
                 item === streamingGroup ? streamingTool : null,
               ),
             )}
@@ -148,9 +151,11 @@ export default function TurnBlock({
         </CollapsibleContent>
       </Collapsible>
 
-      {turn.finalText && <AssistantMessage text={turn.finalText} />}
+      {turn.finalText && <AssistantMessage text={turn.finalText} cwd={cwd} />}
 
-      {turn.completed && <EventRow event={turn.completed} resultByCallId={resultByCallId} />}
+      {turn.completed && (
+        <EventRow event={turn.completed} resultByCallId={resultByCallId} cwd={cwd} />
+      )}
     </div>
   );
 }
@@ -161,6 +166,7 @@ function renderItem(
   resultByCallId: Map<string, ToolResult>,
   onOpenSubagent: (id: string) => void,
   onOpenSession: (sessionId: string) => void,
+  cwd: string | null,
   streamingTool: StreamingTool | null,
 ) {
   if (isToolGroup(item)) {
@@ -187,6 +193,7 @@ function renderItem(
       event={item}
       resultByCallId={resultByCallId}
       onOpenSession={onOpenSession}
+      cwd={cwd}
     />
   );
 }

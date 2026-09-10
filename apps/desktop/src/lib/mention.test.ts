@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { highlightSegments, splitMention } from "./highlight";
+import {
+  highlightSegments,
+  splitMention,
+  withLineBreaks,
+  withPaths,
+} from "./highlight";
 import { applyMention, mentionSpan } from "./mention";
 
 /// Written against caret positions rather than "the text looks right", because
@@ -137,6 +142,52 @@ describe("highlightSegments", () => {
     roundTrips("@a @b @c");
     roundTrips("");
     roundTrips("/compact");
+  });
+});
+
+describe("inline prompt rendering", () => {
+  it("keeps delimiters in segments while exposing their inner text", () => {
+    expect(highlightSegments("make **bold**, *italic*, `code` and ~~gone~~")).toEqual([
+      { kind: "text", text: "make " },
+      { kind: "strong", text: "**bold**", inner: "bold" },
+      { kind: "text", text: ", " },
+      { kind: "em", text: "*italic*", inner: "italic" },
+      { kind: "text", text: ", " },
+      { kind: "code", text: "`code`", inner: "code" },
+      { kind: "text", text: " and " },
+      { kind: "strike", text: "~~gone~~", inner: "gone" },
+    ]);
+  });
+
+  it("recognizes links and leaves block markdown literal", () => {
+    expect(highlightSegments("see [docs](https://example.com/a)\n# heading")).toEqual([
+      {
+        kind: "text",
+        text: "see ",
+      },
+      {
+        kind: "link",
+        text: "[docs](https://example.com/a)",
+        inner: "docs",
+        href: "https://example.com/a",
+      },
+      { kind: "text", text: "\n# heading" },
+    ]);
+  });
+
+  it("turns relay escapes into visual breaks and finds bare paths", () => {
+    expect(withLineBreaks("one\\ntwo")).toBe("one\ntwo");
+    expect(withPaths(highlightSegments("fix src/lib/a.ts:12"))).toContainEqual({
+      kind: "path",
+      text: "src/lib/a.ts:12",
+      inner: "src/lib/a.ts",
+      line: 12,
+    });
+  });
+
+  it("keeps the composer segmentation lossless", () => {
+    const text = "**bold** and @src/a.ts [docs](https://example.com)";
+    expect(highlightSegments(text).map((segment) => segment.text).join("")).toBe(text);
   });
 });
 

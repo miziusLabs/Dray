@@ -1,61 +1,73 @@
-import { SEGMENT_COLOR, highlightSegments, splitMention } from "@/lib/highlight";
+import { inlineMark } from "@/components/chat/InlineMark";
+import {
+  SEGMENT_COLOR,
+  highlightSegments,
+  splitMention,
+  withLineBreaks,
+  withPaths,
+} from "@/lib/highlight";
+import { absolutePath } from "@/lib/filePath";
+import { openLink } from "@/lib/openLink";
 import { stripSenderPrefix } from "@/lib/relay";
 import type { QueuedMessage } from "@/types/events";
+import FileLink from "@/components/chat/FileLink";
 
-/// Prompts typed into the running turn that the app is still holding.
-///
-/// They render below the transcript rather than inside it, alongside the
-/// permission and question cards, for the same reason those do: none of them is
-/// persisted, so none can be built from the event log. A queued prompt joins the
-/// transcript proper the moment the backend hands it to the CLI, which arrives
-/// as an ordinary `user_message` and retires the row drawn here.
-///
-/// Deliberately the same bubble `UserMessage` uses, dimmed rather than
-/// restyled — it is the same message a moment early, and giving it its own
-/// shape would read as a different kind of thing.
-export default function QueuedMessages({ messages }: { messages: QueuedMessage[] }) {
+/// Prompts held while a turn is running. It uses the same inline renderer as a
+/// delivered prompt so queued text does not change meaning when it is sent.
+export default function QueuedMessages({
+  messages,
+  cwd = null,
+}: {
+  messages: QueuedMessage[];
+  cwd?: string | null;
+}) {
   if (!messages.length) return null;
 
   return (
     <div className="flex flex-col items-end gap-1.5">
-      {messages.map((message, i) => (
-        <div key={message.id} className="flex w-full flex-col items-end gap-1">
-          <div className="max-w-[85%] rounded-xl bg-card px-3 py-2 text-chat text-card-foreground opacity-55">
-            {/* Same bubble, same break rule — see `UserMessage`. */}
-            <span className="whitespace-pre-wrap wrap-anywhere">
-              {/* Same strip the delivered bubble makes: a relayed prompt waits
-                  here carrying the line written for the receiving agent, and it
-                  must not read one way queued and another way sent. */}
-              {segmentsOf(message).map((segment, s) => {
-                if (segment.kind === "mention") {
-                  const { dir, name } = splitMention(segment.text);
-                  return (
-                    <span key={s} className={SEGMENT_COLOR.mention}>
-                      <span className="opacity-45">{dir}</span>
-                      {name}
-                    </span>
-                  );
-                }
-                return (
-                  <span key={s} className={SEGMENT_COLOR[segment.kind]}>
-                    {segment.text}
-                  </span>
-                );
-              })}
-            </span>
-          </div>
+      {messages.map((message, i) => {
+        const body = withLineBreaks(stripSenderPrefix(message.text, message.from));
+        const segments = withPaths(highlightSegments(body));
+        return (
+          <div key={message.id} className="flex w-full flex-col items-end gap-1">
+            <div className="max-w-[85%] rounded-xl bg-card px-3 py-2 text-chat text-card-foreground opacity-55">
+              <span className="whitespace-pre-wrap wrap-anywhere">
+                {segments.map((segment, s) => {
+                  const mark = inlineMark(segment, s);
+                  if (mark) return mark;
 
-          {/* Only under the newest, because Esc takes that one back and a hint
-              on every row would promise each of them a key that reaches one. */}
-          {i === messages.length - 1 && (
-            <span className="pr-1 text-ui text-muted-foreground/60">Esc to cancel</span>
-          )}
-        </div>
-      ))}
+                  if (segment.kind === "mention" || segment.kind === "path") {
+                    const raw = segment.kind === "mention" ? segment.text.slice(1) : segment.inner ?? segment.text;
+                    const { name } = splitMention(`@${raw}`);
+                    const path = absolutePath(raw, cwd);
+                    if (!path) {
+                      return <span key={s} className={SEGMENT_COLOR[segment.kind]} title={raw}>@{name}</span>;
+                    }
+                    return (
+                      <FileLink key={s} path={path} line={segment.line} title={segment.text} className={SEGMENT_COLOR[segment.kind]}>
+                        @{name}
+                      </FileLink>
+                    );
+                  }
+
+                  if (segment.kind === "url") {
+                    return (
+                      <button key={s} type="button" className={SEGMENT_COLOR.url} onClick={(event) => openLink(segment.text, event)}>
+                        {segment.text}
+                      </button>
+                    );
+                  }
+
+                  return <span key={s} className={SEGMENT_COLOR[segment.kind]}>{segment.text}</span>;
+                })}
+              </span>
+            </div>
+            {i === messages.length - 1 && (
+              <span className="pr-1 text-ui text-muted-foreground/60">Esc to cancel</span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
-}
-
-function segmentsOf(message: QueuedMessage) {
-  return highlightSegments(stripSenderPrefix(message.text, message.from));
 }
