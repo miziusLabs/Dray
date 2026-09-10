@@ -15,7 +15,7 @@ export const DRAY_COMMANDS: SlashCommand[] = [
     name: "model",
     description: "Switch the model",
     argumentHint: "<model>",
-    aliases: [],
+    aliases: ["models"],
     isSkill: false,
   },
   {

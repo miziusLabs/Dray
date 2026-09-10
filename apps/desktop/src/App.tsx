@@ -39,7 +39,7 @@ import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
 import {
   DEFAULT_CYCLE_EFFORTS,
-  modelKey,
+  modelsForKeys,
   nextEffort,
 } from "@/components/composer/ModelSelector";
 import ViewTabs, { type ViewTab } from "@/components/layout/ViewTabs";
@@ -140,15 +140,22 @@ function App() {
 
   const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
   // `null` means the user has not configured a subset, so newly discovered
+  // models appear in the picker automatically. Once configured, the stored
+  // stable keys preserve that explicit choice across catalog refreshes and
+  // relaunches.
+  const [visibleModelKeys, setVisibleModelKeys] = useLocalStorage<string[] | null>(
+    "ade.visibleModelKeys",
+    null,
+  );
+  const visibleModels = modelsForKeys(models, visibleModelKeys);
+  // `null` means the user has not configured a subset, so newly discovered
   // models join the cycle automatically. Once configured, the stored stable
   // keys preserve that explicit choice across catalog refreshes and relaunches.
   const [cycleModelKeys, setCycleModelKeys] = useLocalStorage<string[] | null>(
     "ade.cycleModelKeys",
     null,
   );
-  const cycleModels = cycleModelKeys
-    ? models.filter((model) => cycleModelKeys.includes(modelKey(model)))
-    : models;
+  const cycleModels = modelsForKeys(models, cycleModelKeys);
   // `null` preserves the original Medium-through-Max cycle. An explicit list,
   // including an empty one, is the user's configured reasoning cycle.
   const [cycleEfforts, setCycleEfforts] = useLocalStorage<Effort[] | null>(
@@ -710,7 +717,7 @@ function App() {
         <ChatInput
           onSend={handleSendMsg}
           commands={slashSkills}
-          models={models}
+          models={visibleModels}
           modelId={modelId}
           piModel={piModel}
           effort={effort}
@@ -744,7 +751,7 @@ function App() {
           toolbar={
             <ComposerToolbar
               harness={harness}
-              models={models}
+              models={visibleModels}
               modelId={modelId}
               piModel={piModel}
               effort={effort}
@@ -845,6 +852,8 @@ function App() {
       showArchived={showArchived}
       onShowArchivedChange={setShowArchived}
       models={models}
+      visibleModelKeys={visibleModelKeys}
+      onVisibleModelKeysChange={setVisibleModelKeys}
       cycleModelKeys={cycleModelKeys}
       onCycleModelKeysChange={setCycleModelKeys}
       cycleEfforts={cycleEfforts}

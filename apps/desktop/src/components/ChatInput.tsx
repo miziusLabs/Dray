@@ -55,8 +55,9 @@ type ChatInputProps = {
   /// lands, and empty forever if it failed — Dray commands remain available and
   /// text typed by hand still works.
   commands?: SlashCommand[];
-  /// The model catalog and controls are also used by Dray's `/model` and
-  /// `/effort` commands, so those completions do not need a second picker path.
+  /// The shown model catalog and controls are also used by Dray's `/model`,
+  /// `/models`, and `/effort` commands, so those completions do not need a
+  /// second picker path.
   models: Model[];
   modelId: Model["id"];
   piModel: Model["piModel"];
@@ -222,7 +223,7 @@ export default function ChatInput({
   // drawn flat.
   const query = slashQuery(message, caret);
   const prefix = slashPrefix(message, caret);
-  const argument = slashArgumentQuery(message, caret, ["model", "effort"]);
+  const argument = slashArgumentQuery(message, caret, ["model", "models", "effort"]);
   const groups = useMemo(() => {
     if (query === null || prefix === null) return [];
     const matchingKind = filterCommandsByPrefix(availableCommands, prefix);
@@ -237,7 +238,10 @@ export default function ChatInput({
         (model.piModel?.provider === piModel?.provider && model.piModel?.id === piModel?.id)),
   );
   const modelMatches = useMemo(
-    () => (argument?.commandName === "model" ? filterModels(models, argument.query) : []),
+    () =>
+      (argument?.commandName === "model" || argument?.commandName === "models")
+        ? filterModels(models, argument.query)
+        : [],
     [argument, models],
   );
   const effortMatches = useMemo(
@@ -262,7 +266,10 @@ export default function ChatInput({
   // Only the count is shared between the pickers — the lists themselves stay
   // separate all the way to the pick, so nothing has to be narrowed back out
   // of a union that `mention` already decided.
-  const argumentMatches = argument?.commandName === "model" ? modelMatches : effortMatches;
+  const argumentMatches =
+    argument?.commandName === "model" || argument?.commandName === "models"
+      ? modelMatches
+      : effortMatches;
   const rowCount = mention
     ? files.length
     : argument
@@ -497,7 +504,7 @@ export default function ChatInput({
     if (!invocation) return false;
 
     const name = invocation.name.toLowerCase();
-    if (name === "model") {
+    if (name === "model" || name === "models") {
       const requested = invocation.args.toLowerCase();
       const next = models.find((model) =>
         [modelLabel(model), model.piModel?.id, modelKey(model)]
@@ -680,7 +687,7 @@ export default function ChatInput({
                 onHover={setActiveIndex}
                 placement={isNewTask ? "below" : "above"}
               />
-            ) : argument?.commandName === "model" ? (
+            ) : argument?.commandName === "model" || argument?.commandName === "models" ? (
               <PickerMenu
                 groups={[{ label: null, items: modelMatches }]}
                 label="Models"

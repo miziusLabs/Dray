@@ -36,6 +36,8 @@ export default function SettingsDialog({
   showArchived,
   onShowArchivedChange,
   models,
+  visibleModelKeys,
+  onVisibleModelKeysChange,
   cycleModelKeys,
   onCycleModelKeysChange,
   cycleEfforts,
@@ -51,6 +53,8 @@ export default function SettingsDialog({
   showArchived: boolean;
   onShowArchivedChange: (next: boolean) => void;
   models: Model[];
+  visibleModelKeys: string[] | null;
+  onVisibleModelKeysChange: (next: string[]) => void;
   cycleModelKeys: string[] | null;
   onCycleModelKeysChange: (next: string[]) => void;
   cycleEfforts: Effort[] | null;
@@ -81,10 +85,19 @@ export default function SettingsDialog({
             checked={showArchived}
             onChange={onShowArchivedChange}
           />
-          <CycleModelsRow
+          <ModelSelectionRow
+            models={models}
+            selectedKeys={visibleModelKeys}
+            onChange={onVisibleModelKeysChange}
+            label="Shown models"
+            description="Choose which models appear in the model selector and /model or /models commands."
+          />
+          <ModelSelectionRow
             models={models}
             selectedKeys={cycleModelKeys}
             onChange={onCycleModelKeysChange}
+            label="Cycle models"
+            description="Choose which models Ctrl+M cycles through."
           />
           <CycleEffortsRow
             selectedEfforts={cycleEfforts}
@@ -107,14 +120,18 @@ export default function SettingsDialog({
   );
 }
 
-function CycleModelsRow({
+function ModelSelectionRow({
   models,
   selectedKeys,
   onChange,
+  label,
+  description,
 }: {
   models: Model[];
   selectedKeys: string[] | null;
   onChange: (next: string[]) => void;
+  label: string;
+  description: string;
 }) {
   const id = useId();
   const resolvedKeys = selectedKeys ?? models.map(modelKey);
@@ -136,11 +153,7 @@ function CycleModelsRow({
   };
 
   return (
-    <SettingRow
-      id={id}
-      label="Cycle models"
-      description="Choose which models Ctrl+M cycles through."
-    >
+    <SettingRow id={id} label={label} description={description}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button id={id} type="button" variant="outline" size="sm" className="text-ui">

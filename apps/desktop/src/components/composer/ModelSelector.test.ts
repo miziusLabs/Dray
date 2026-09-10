@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { nextEffort } from "./ModelSelector";
+import { modelsForKeys, nextEffort } from "./ModelSelector";
 import type { Model } from "@/types/events";
 
 const model: Model = {
@@ -10,6 +10,23 @@ const model: Model = {
   efforts: ["off", "low", "medium", "high", "xhigh", "max"],
   defaultEffort: "high",
 };
+
+describe("modelsForKeys", () => {
+  const otherModel: Model = {
+    ...model,
+    piModel: { provider: "test", id: "other" },
+    label: "Other",
+  };
+
+  it("shows the full catalog until a subset is configured", () => {
+    expect(modelsForKeys([model, otherModel], null)).toEqual([model, otherModel]);
+  });
+
+  it("matches explicit selections by stable model key", () => {
+    expect(modelsForKeys([model, otherModel], ["pi:test/other"])).toEqual([otherModel]);
+    expect(modelsForKeys([model, otherModel], ["pi:test/model"])).toEqual([model]);
+  });
+});
 
 describe("nextEffort", () => {
   it("preserves the default Medium-through-Max cycle", () => {

@@ -68,6 +68,7 @@ describe("slashQuery", () => {
 describe("drayCommands", () => {
   it("offers only model and effort in the New Task menu", () => {
     expect(drayCommands(true).map((command) => command.name)).toEqual(["model", "effort"]);
+    expect(drayCommands(true)[0].aliases).toEqual(["models"]);
     expect(drayCommands(false).map((command) => command.name)).toEqual([
       "model",
       "effort",
@@ -143,6 +144,10 @@ describe("slashArgumentQuery", () => {
     expect(slashArgumentQuery("/model ", 7, ["model", "effort"])).toEqual({
       commandName: "model",
       query: "",
+    });
+    expect(slashArgumentQuery("/models claude", 13, ["model", "models", "effort"])).toEqual({
+      commandName: "models",
+      query: "claude",
     });
     expect(slashArgumentQuery("/model claude", 12, ["model", "effort"])).toEqual({
       commandName: "model",

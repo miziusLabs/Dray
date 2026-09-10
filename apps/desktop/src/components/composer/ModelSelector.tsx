@@ -39,6 +39,12 @@ export const modelKey = (model: Model) =>
 
 export const modelLabel = (model: Model) => model.label || model.piModel?.id || model.id;
 
+/// `null` means the catalog is unconfigured, so every discovered model is
+/// shown. Stable keys let an explicit selection survive catalog refreshes.
+export function modelsForKeys(models: Model[], selectedKeys: readonly string[] | null): Model[] {
+  return selectedKeys ? models.filter((model) => selectedKeys.includes(modelKey(model))) : models;
+}
+
 /// Model and effort completions use the same ranking shape as commands: an
 /// exact name prefix wins, while provider/model identifiers remain searchable.
 export function filterModels(models: Model[], query: string): Model[] {
