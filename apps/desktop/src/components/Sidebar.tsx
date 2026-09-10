@@ -1163,10 +1163,12 @@ function SessionRow({
 
         <span className="min-w-0 flex-1 truncate text-ui">{item.title.trimEnd()}</span>
 
-        {/* The timestamp stays in normal flex flow so the title truncates before
-            it rather than allowing a short value such as `now` to overlap the
-            title. It remains in the same trailing slot as the hover controls,
-            and its reserved width does not change when the controls appear. */}
+        {/* One slot for both, sized by the buttons and the shortcut card — so a
+            long title truncates before either one and nothing reflows on hover.
+            The two children stack via `absolute` on the date and crossfade on
+            `opacity` over the same duration, so they never both read at once;
+            the shortcut state's platform-sized minimum reserves room for its
+            card without adding unnecessary space beside it. */}
         <div
           className={cn(
             "relative flex shrink-0 items-center justify-end self-stretch pl-0",
@@ -1176,10 +1178,10 @@ function SessionRow({
           )}
         >
           {/* `pointer-events-none` unconditionally: it's never a target, and a
-              faded-but-present element still hit-tests — it would otherwise
-              swallow the cursor over the last button, which reads as that one
-              button being dead while its neighbour works. */}
-          <span className="pointer-events-none flex shrink-0 items-center pl-2 text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0">
+              faded-but-present element still hit-tests — stacked on `right-0` it
+              would otherwise swallow the cursor over the last button, which reads
+              as that one button being dead while its neighbour works. */}
+          <span className="pointer-events-none absolute right-0 flex items-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0">
             {/* The orb takes the timestamp's place rather than a slot of its
                 own: a row that's working right now is the one row whose "last
                 activity" reads as stale, and one indicator per row is what keeps
