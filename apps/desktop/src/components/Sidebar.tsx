@@ -1197,14 +1197,17 @@ function SessionRow({
 
         <span className="min-w-0 flex-1 truncate text-ui">{item.title.trimEnd()}</span>
 
-        {/* One slot for both, sized by the buttons and always holding that width
-            — so a long title truncates against it either way and nothing reflows
-            on hover. The two children stack via `absolute` on the date and
-            crossfade on `opacity` over the same duration, so they never both
-            read at once; `visibility` would flip instantly while the button's
-            inherited `transition-all` still crossfades, which is what read as an
-            overlap. */}
-        <div className="relative flex shrink-0 items-center justify-end self-stretch pl-2">
+        {/* One slot for both, sized by the buttons and the shortcut card — so a
+            long title truncates before either one and nothing reflows on hover.
+            The two children stack via `absolute` on the date and crossfade on
+            `opacity` over the same duration, so they never both read at once;
+            the shortcut state's wider minimum reserves room for its card. */}
+        <div
+          className={cn(
+            "relative flex shrink-0 items-center justify-end self-stretch pl-2",
+            modifierPressed && shortcutIndex && "min-w-11",
+          )}
+        >
           {/* `pointer-events-none` unconditionally: it's never a target, and a
               faded-but-present element still hit-tests — stacked on `right-0` it
               would otherwise swallow the cursor over the last button, which reads
@@ -1237,10 +1240,7 @@ function SessionRow({
                 against the orb's 20px box, and both are flush right, so without
                 it the mark shifts sideways row to row. */}
             {modifierPressed && shortcutIndex ? (
-              <KbdGroup className="gap-0.5">
-                <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
-                <Kbd>{shortcutIndex}</Kbd>
-              </KbdGroup>
+              <Kbd>{`${IS_MAC ? "⌘" : "Ctrl"} ${shortcutIndex}`}</Kbd>
             ) : marksLive && pr?.checksState === "RUNNING" ? (
               <CircleDashed
                 className="mr-[3px] size-3.5 animate-spin text-accent-command [animation-duration:3s]"
