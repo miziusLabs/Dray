@@ -6,6 +6,7 @@ import "./App.css";
 import Chat from "@/components/Chat";
 import ChangesPanel from "@/components/ChangesPanel";
 import ChangesView from "@/components/changes/ChangesView";
+import AnalyticsDialog from "@/components/AnalyticsDialog";
 import ChatInput from "@/components/ChatInput";
 import DeveloperDialog from "@/components/DeveloperDialog";
 import DiffWorkerPool from "@/components/DiffWorkerPool";
@@ -54,6 +55,7 @@ import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { titleModels, useTitlePrefs } from "@/hooks/useTitlePrefs";
 import { useSessions } from "@/hooks/useSessions";
 import type { Effort, Model, PiModel } from "@/types/events";
+import type { UsageDisplayMode } from "@/types/usage";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
 import { changeRange, turnChangedTree } from "@/lib/changes";
 import { prBadgeCount, sessionBranch } from "@/lib/pr";
@@ -181,6 +183,11 @@ function App() {
   // reopening the app into them would be the app remembering the wrong half of
   // a session.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [usageDisplayMode, setUsageDisplayMode] = useLocalStorage<UsageDisplayMode>(
+    "ade.usageDisplayMode",
+    "left",
+  );
   const [developerOpen, setDeveloperOpen] = useState(false);
 
   const viewTab: ViewTab = selectedSessionId ? viewTabs[selectedSessionId] ?? "chat" : "chat";
@@ -601,6 +608,7 @@ function App() {
           collapsed={collapsed}
           onToggleCollapsed={toggleSidebar}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenAnalytics={() => setAnalyticsOpen(true)}
           onOpenDeveloper={() => setDeveloperOpen(true)}
           onSelect={handleSelectSessionIndexItem}
           onNewSession={handleNewSession}
@@ -846,11 +854,18 @@ function App() {
         onFakeUpdateAvailable={update.fakeUpdateAvailable}
       />
     )}
+    <AnalyticsDialog
+      open={analyticsOpen}
+      onOpenChange={setAnalyticsOpen}
+      displayMode={usageDisplayMode}
+    />
     <SettingsDialog
       open={settingsOpen}
       onOpenChange={setSettingsOpen}
       showArchived={showArchived}
       onShowArchivedChange={setShowArchived}
+      usageDisplayMode={usageDisplayMode}
+      onUsageDisplayModeChange={setUsageDisplayMode}
       models={models}
       visibleModelKeys={visibleModelKeys}
       onVisibleModelKeysChange={setVisibleModelKeys}

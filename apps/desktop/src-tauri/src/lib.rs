@@ -30,6 +30,12 @@ pub mod quit;
 pub mod session;
 pub mod store;
 pub mod title;
+pub mod usage;
+
+#[tauri::command]
+async fn get_codex_usage() -> Result<usage::CodexUsage, String> {
+    usage::fetch().await.map_err(|error| error.to_string())
+}
 
 #[tauri::command]
 async fn docker_available() -> bool {
@@ -504,6 +510,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             docker_available,
+            get_codex_usage,
             send_msg,
             read_attachments,
             list_models,

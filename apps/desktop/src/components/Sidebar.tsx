@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
+  BarChart3,
   Check,
   CircleDashed,
   Hammer,
@@ -69,6 +70,7 @@ type SidebarProps = {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onOpenSettings: () => void;
+  onOpenAnalytics: () => void;
   onOpenDeveloper: () => void;
   onSelect: (sessionId: string) => Promise<void>;
   onNewSession: () => void;
@@ -327,6 +329,25 @@ export function SidebarToggle({
 ///
 /// Gone with a collapsed sidebar, since the sidebar is. ⌘, is the route that
 /// survives that, which is why the tooltip names it.
+export function AnalyticsButton({ onOpen }: { onOpen: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onOpen}
+          aria-label="Analytics"
+          className="opacity-80 transition-opacity hover:opacity-100"
+        >
+          <BarChart3 className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="right">Analytics</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function SettingsButton({ onOpen }: { onOpen: () => void }) {
   return (
     <Tooltip>
@@ -420,6 +441,7 @@ export default function Sidebar({
   projects,
   onDetach,
   onOpenSettings,
+  onOpenAnalytics,
   onOpenDeveloper,
   update,
 }: SidebarProps) {
@@ -608,10 +630,12 @@ export default function Sidebar({
           <>
             <SidebarToggle onToggle={onToggleCollapsed} />
             {import.meta.env.DEV && <DeveloperButton onOpen={onOpenDeveloper} />}
+            <AnalyticsButton onOpen={onOpenAnalytics} />
             <SettingsButton onOpen={onOpenSettings} />
           </>
         ) : (
           <>
+            <AnalyticsButton onOpen={onOpenAnalytics} />
             <SettingsButton onOpen={onOpenSettings} />
             {import.meta.env.DEV && <DeveloperButton onOpen={onOpenDeveloper} />}
             <SidebarToggle onToggle={onToggleCollapsed} />

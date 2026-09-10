@@ -19,10 +19,13 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import type { Effort, Model, ModelId, PiModel } from "@/types/events";
+import type { UsageDisplayMode } from "@/types/usage";
 import type { UpdateCheckResult } from "@/components/UpdateNotice";
 
 /// The app's preferences, such as they are.
@@ -36,6 +39,8 @@ export default function SettingsDialog({
   onOpenChange,
   showArchived,
   onShowArchivedChange,
+  usageDisplayMode,
+  onUsageDisplayModeChange,
   models,
   visibleModelKeys,
   onVisibleModelKeysChange,
@@ -55,6 +60,8 @@ export default function SettingsDialog({
   onOpenChange: (next: boolean) => void;
   showArchived: boolean;
   onShowArchivedChange: (next: boolean) => void;
+  usageDisplayMode: UsageDisplayMode;
+  onUsageDisplayModeChange: (next: UsageDisplayMode) => void;
   models: Model[];
   visibleModelKeys: string[] | null;
   onVisibleModelKeysChange: (next: string[]) => void;
@@ -89,6 +96,10 @@ export default function SettingsDialog({
           <SettledSessionsRow
             checked={showArchived}
             onChange={onShowArchivedChange}
+          />
+          <UsageDisplayRow
+            mode={usageDisplayMode}
+            onChange={onUsageDisplayModeChange}
           />
           <UpdateCheckRow
             checking={checkingForUpdates}
@@ -126,6 +137,47 @@ export default function SettingsDialog({
         </footer>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function UsageDisplayRow({
+  mode,
+  onChange,
+}: {
+  mode: UsageDisplayMode;
+  onChange: (next: UsageDisplayMode) => void;
+}) {
+  const id = useId();
+
+  return (
+    <SettingRow
+      id={id}
+      label="Usage display"
+      description="Choose whether Codex analytics bars show what is left or already used."
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button id={id} type="button" variant="outline" size="sm" className="text-ui">
+            {mode === "left" ? "Left" : "Used"}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-24">
+          <DropdownMenuRadioGroup
+            value={mode}
+            onValueChange={(value) => {
+              if (value === "left" || value === "used") onChange(value);
+            }}
+          >
+            <DropdownMenuRadioItem value="left" className="text-ui">
+              Left
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="used" className="text-ui">
+              Used
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SettingRow>
   );
 }
 
