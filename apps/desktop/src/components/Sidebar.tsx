@@ -1171,7 +1171,7 @@ function SessionRow({
             card without adding unnecessary space beside it. */}
         <div
           className={cn(
-            "relative flex shrink-0 items-center justify-end self-stretch pl-0",
+            "relative ml-2 flex shrink-0 items-center justify-end self-stretch pl-0",
             modifierPressed &&
               shortcutIndex &&
               (IS_MAC ? "min-w-8" : "min-w-10"),
