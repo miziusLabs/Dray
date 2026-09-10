@@ -179,7 +179,7 @@ jobs:
                   .replace(/\s+/g, " ")
                   .trim();
 
-                return `- ${title.trim()}; ${description} (${html_url}).`;
+                return `- ${title.trim()}; ${description} (${html_url})`;
               })
               .join("\n");
 
