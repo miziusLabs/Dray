@@ -312,3 +312,8 @@ Prefer the smallest verification that covers a change. Documentation-only edits 
 - Keep README feature claims aligned with the actual UI and backend; keep implementation detail here instead.
 - When bumping the app version, keep `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, `apps/desktop/src-tauri/tauri.conf.json`, and the README badge aligned.
 
+## Version control workflow
+
+- After completing each requested change or task, create a Git commit and push it to the configured remote.
+- Every commit must have a concise title and a descriptive body explaining what changed and why.
+
