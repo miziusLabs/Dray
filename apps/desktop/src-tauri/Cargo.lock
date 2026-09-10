@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "dray"
-version = "0.7.9"
+version = "0.7.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
