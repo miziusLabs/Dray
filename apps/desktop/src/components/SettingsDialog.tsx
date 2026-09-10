@@ -99,7 +99,7 @@ export default function SettingsDialog({
           />
         </div>
 
-        <footer className="border-t border-border pt-3 text-center text-xs text-muted-foreground">
+        <footer className="pt-3 text-center text-xs text-muted-foreground">
           © miziusLabs | v{packageJson.version}
         </footer>
       </DialogContent>
