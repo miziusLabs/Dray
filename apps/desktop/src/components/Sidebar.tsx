@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
+import { useModifierPressed } from "@/hooks/useHotkey";
 import { basename, isToday, relativeTime } from "@/lib/format";
 import { sessionBranch } from "@/lib/pr";
 import { IS_MAC } from "@/lib/platform";
@@ -423,6 +424,7 @@ export default function Sidebar({
   update,
 }: SidebarProps) {
   const fullscreen = useFullscreen();
+  const modifierPressed = useModifierPressed();
   const [searching, setSearching] = useState(false);
   const [persistedWidth, setPersistedWidth] = useLocalStorage(
     "ade.sidebarWidth",
@@ -478,6 +480,14 @@ export default function Sidebar({
     () => groups.reduce((n, group) => n + group.rows.length, 0),
     [groups],
   );
+  const shortcutIndexBySessionId = useMemo(() => {
+    const index = new Map<string, number>();
+    groups
+      .flatMap((group) => group.rows)
+      .slice(0, 9)
+      .forEach(({ item }, rowIndex) => index.set(item.sessionId, rowIndex + 1));
+    return index;
+  }, [groups]);
 
   // A session under a repo nobody attached still has a project, so the folder
   // name stands in rather than the heading being dropped — the row has to sit
@@ -688,6 +698,8 @@ export default function Sidebar({
                   depth={depth}
                   guides={guides}
                   opens={opens}
+                  modifierPressed={modifierPressed}
+                  shortcutIndex={shortcutIndexBySessionId.get(item.sessionId)}
                   status={statusBySession[item.sessionId] ?? item.status}
                   asking={askingSessions.has(item.sessionId)}
                   pr={prFor(item.projectPath, sessionBranch(item))}
@@ -943,6 +955,8 @@ function SessionRow({
   depth,
   guides,
   opens,
+  modifierPressed,
+  shortcutIndex,
   status,
   asking,
   pr,
@@ -962,6 +976,8 @@ function SessionRow({
   depth: number;
   guides: boolean[];
   opens: boolean;
+  modifierPressed: boolean;
+  shortcutIndex?: number;
   status: SessionStatus;
   asking: boolean;
   /// The pull request this row is marked with, already narrowed to one where
@@ -1220,7 +1236,12 @@ function SessionRow({
                 `mr-[3px]` sits it on the orb's centre line: the glyph is 14px
                 against the orb's 20px box, and both are flush right, so without
                 it the mark shifts sideways row to row. */}
-            {marksLive && pr?.checksState === "RUNNING" ? (
+            {modifierPressed && shortcutIndex ? (
+              <KbdGroup className="gap-0.5">
+                <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+                <Kbd>{shortcutIndex}</Kbd>
+              </KbdGroup>
+            ) : marksLive && pr?.checksState === "RUNNING" ? (
               <CircleDashed
                 className="mr-[3px] size-3.5 animate-spin text-accent-command [animation-duration:3s]"
                 strokeWidth={1.5}

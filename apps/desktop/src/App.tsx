@@ -485,6 +485,13 @@ function App() {
     }
   };
 
+  const jumpSession = (index: number) => {
+    const item = ordered[index];
+    if (item && item.sessionId !== selectedSessionId) {
+      void handleSelectSessionIndexItem(item.sessionId);
+    }
+  };
+
   const toggleSidebar = () => setCollapsed((prev) => !prev);
   useHotkey("b", toggleSidebar);
   useHotkey("n", handleNewSession);
@@ -513,10 +520,18 @@ function App() {
   useHotkey("r", () => {
     if (panelOpen) panelRefresh?.onRefresh();
   });
-  // By position in the tab row, so a third view needs only a third line here.
-  // No-ops without a session, where there is no row to switch.
-  useHotkey("1", () => setViewTab("chat"));
-  useHotkey("2", () => setViewTab("changes"));
+  // By position in the sidebar, so the shortcut follows the same order the
+  // reader sees, including the current search and project grouping. The first
+  // nine rows are reachable without leaving the composer.
+  useHotkey("1", () => jumpSession(0));
+  useHotkey("2", () => jumpSession(1));
+  useHotkey("3", () => jumpSession(2));
+  useHotkey("4", () => jumpSession(3));
+  useHotkey("5", () => jumpSession(4));
+  useHotkey("6", () => jumpSession(5));
+  useHotkey("7", () => jumpSession(6));
+  useHotkey("8", () => jumpSession(7));
+  useHotkey("9", () => jumpSession(8));
   // ⌘, — every macOS app's preferences chord, and the only way into settings
   // while the sidebar is collapsed and its gear gone with it. Safe to take for
   // `useHotkey`'s usual pair of reasons: it claims the chord, and the app's

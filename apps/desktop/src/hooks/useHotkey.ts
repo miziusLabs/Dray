@@ -1,4 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { IS_MAC } from "@/lib/platform";
 
 type HotkeyOptions = {
   /// Cmd on macOS, Ctrl elsewhere — the platform's own accelerator.
@@ -19,6 +21,36 @@ type HotkeyOptions = {
   /// composer.
   enabled?: boolean;
 };
+
+/// Tracks whether the platform's primary modifier is currently held.
+///
+/// This is used for transient shortcut hints that replace a row's normal
+/// content while the corresponding accelerator is available.
+export function useModifierPressed() {
+  const [pressed, setPressed] = useState(false);
+
+  useEffect(() => {
+    const modifier = IS_MAC ? "Meta" : "Control";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === modifier) setPressed(true);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === modifier) setPressed(false);
+    };
+    const onBlur = () => setPressed(false);
+
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  return pressed;
+}
 
 /// Binds a document-level shortcut. The handler is held in a ref so passing a
 /// fresh closure each render doesn't re-register the listener.
