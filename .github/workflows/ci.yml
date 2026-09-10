@@ -155,12 +155,16 @@ jobs:
               )[0];
 
             const commits = previousRelease
-              ? await github.paginate(github.rest.repos.compareCommits, {
-                  ...context.repo,
-                  base: previousRelease.tag_name,
-                  head: context.sha,
-                  per_page: 100,
-                })
+              ? await github.paginate(
+                  github.rest.repos.compareCommits,
+                  {
+                    ...context.repo,
+                    base: previousRelease.tag_name,
+                    head: context.sha,
+                    per_page: 100,
+                  },
+                  ({ data }) => data.commits,
+                )
               : await github.paginate(github.rest.repos.listCommits, {
                   ...context.repo,
                   sha: context.sha,
