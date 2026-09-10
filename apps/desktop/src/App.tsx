@@ -7,6 +7,7 @@ import Chat from "@/components/Chat";
 import ChangesPanel from "@/components/ChangesPanel";
 import ChangesView from "@/components/changes/ChangesView";
 import ChatInput from "@/components/ChatInput";
+import DeveloperDialog from "@/components/DeveloperDialog";
 import DiffWorkerPool from "@/components/DiffWorkerPool";
 import NoticeStack from "@/components/NoticeStack";
 import QuitDialog from "@/components/QuitDialog";
@@ -32,7 +33,7 @@ import Sidebar, {
   sortSessions,
 } from "@/components/Sidebar";
 import SubagentPanel from "@/components/SubagentPanel";
-import UpdateNotice from "@/components/UpdateNotice";
+import { useUpdate } from "@/components/UpdateNotice";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
@@ -62,6 +63,7 @@ import { cn } from "@/lib/utils";
 
 function App() {
   const [titlePrefs, setTitlePrefs] = useTitlePrefs();
+  const update = useUpdate();
   const {
     selectedSessionId,
     selectedSession,
@@ -172,6 +174,7 @@ function App() {
   // reopening the app into them would be the app remembering the wrong half of
   // a session.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [developerOpen, setDeveloperOpen] = useState(false);
 
   const viewTab: ViewTab = selectedSessionId ? viewTabs[selectedSessionId] ?? "chat" : "chat";
   const setViewTab = (tab: ViewTab) => {
@@ -576,6 +579,7 @@ function App() {
           collapsed={collapsed}
           onToggleCollapsed={toggleSidebar}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenDeveloper={() => setDeveloperOpen(true)}
           onSelect={handleSelectSessionIndexItem}
           onNewSession={handleNewSession}
           onDetach={detachSession}
@@ -600,6 +604,7 @@ function App() {
           onFork={forkSession}
           onDelete={deleteSession}
           showArchived={showArchived}
+          update={update}
         />
       }
       header={
@@ -809,10 +814,16 @@ function App() {
         setPanelOpen(true);
       }}
     />
-    <UpdateNotice />
     <QuitDialog />
     {/* Mounted here rather than in the sidebar, which unmounts whole when it
         collapses and would take ⌘, with it. */}
+    {import.meta.env.DEV && (
+      <DeveloperDialog
+        open={developerOpen}
+        onOpenChange={setDeveloperOpen}
+        onFakeUpdateAvailable={update.fakeUpdateAvailable}
+      />
+    )}
     <SettingsDialog
       open={settingsOpen}
       onOpenChange={setSettingsOpen}

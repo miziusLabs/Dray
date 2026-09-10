@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   CircleDashed,
+  Hammer,
   GitBranchPlus,
   Unlink,
   // Pin,
@@ -15,6 +16,7 @@ import { ThinkingOrb } from "thinking-orbs";
 
 import PrStateIcon, { prStateLabel } from "@/components/PrStateIcon";
 import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
+import UpdateNotice, { type UpdateController } from "@/components/UpdateNotice";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -66,6 +68,7 @@ type SidebarProps = {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onOpenSettings: () => void;
+  onOpenDeveloper: () => void;
   onSelect: (sessionId: string) => Promise<void>;
   onNewSession: () => void;
   onSetFlags: (
@@ -77,6 +80,7 @@ type SidebarProps = {
   onDetach: (sessionId: string) => Promise<void>;
   showArchived: boolean;
   projects: Project[];
+  update: UpdateController;
 };
 
 /// One drawn row: the session, how deep it sits, and the flags its connector
@@ -347,6 +351,27 @@ export function SettingsButton({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+/// Opens development-only tools. The caller gates this control with DEV so it
+/// cannot appear in a production build.
+export function DeveloperButton({ onOpen }: { onOpen: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onOpen}
+          aria-label="Developer"
+          className="opacity-80 transition-opacity hover:opacity-100"
+        >
+          <Hammer className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="right">Developer</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /// Marks a dev build so it can't be mistaken for the installed app. Gated on
 /// `import.meta.env.DEV`, which Vite folds to a constant — the badge and this
 /// component are dropped from a production bundle entirely.
@@ -394,6 +419,8 @@ export default function Sidebar({
   projects,
   onDetach,
   onOpenSettings,
+  onOpenDeveloper,
+  update,
 }: SidebarProps) {
   const fullscreen = useFullscreen();
   const [searching, setSearching] = useState(false);
@@ -570,11 +597,13 @@ export default function Sidebar({
         {fullscreen ? (
           <>
             <SidebarToggle onToggle={onToggleCollapsed} />
+            {import.meta.env.DEV && <DeveloperButton onOpen={onOpenDeveloper} />}
             <SettingsButton onOpen={onOpenSettings} />
           </>
         ) : (
           <>
             <SettingsButton onOpen={onOpenSettings} />
+            {import.meta.env.DEV && <DeveloperButton onOpen={onOpenDeveloper} />}
             <SidebarToggle onToggle={onToggleCollapsed} />
           </>
         )}
@@ -687,6 +716,7 @@ export default function Sidebar({
 
       </div>
 
+      <UpdateNotice controller={update} />
     </aside>
   );
 }

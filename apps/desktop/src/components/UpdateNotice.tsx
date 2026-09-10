@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import packageJson from "../../package.json";
+import { Download } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 
-type UpdateState = {
+export type UpdateState = {
   version: string;
   phase: "downloading" | "ready" | "installing" | "error";
   downloaded: number;
@@ -24,7 +26,14 @@ function downloadLabel(state: UpdateState): string {
  * background. Installation stays behind an explicit restart action so an
  * update never interrupts work merely because it became available.
  */
-export default function UpdateNotice() {
+export type UpdateController = {
+  state: UpdateState | null;
+  install: () => Promise<void>;
+  retry: () => void;
+  fakeUpdateAvailable: () => void;
+};
+
+export function useUpdate(): UpdateController {
   const updateRef = useRef<Update | null>(null);
   const [state, setState] = useState<UpdateState | null>(null);
 
@@ -68,8 +77,22 @@ export default function UpdateNotice() {
     };
   }, []);
 
+  const fakeUpdateAvailable = () => {
+    if (!import.meta.env.DEV) return;
+    setState({
+      version: `${packageJson.version}-dev`,
+      phase: "ready",
+      downloaded: 0,
+      total: null,
+    });
+  };
+
   const install = async () => {
     const update = updateRef.current;
+    if (import.meta.env.DEV && !update && state?.phase === "ready") {
+      setState(null);
+      return;
+    }
     if (!update || state?.phase !== "ready") return;
 
     setState({ ...state, phase: "installing" });
@@ -86,44 +109,51 @@ export default function UpdateNotice() {
     }
   };
 
+  return {
+    state,
+    install,
+    retry: () => {
+      if (updateRef.current) void download(updateRef.current);
+    },
+    fakeUpdateAvailable,
+  };
+}
+
+export default function UpdateNotice({
+  controller,
+}: {
+  controller: UpdateController;
+}) {
+  const { state, install, retry } = controller;
   if (!state) return null;
 
-  const detail =
+  const label =
     state.phase === "ready"
-      ? "The update was downloaded and is ready to install."
+      ? "Install and restart"
       : state.phase === "error"
-        ? "The update could not be downloaded."
+        ? "Retry download"
         : state.phase === "installing"
-          ? "Installing the update…"
-          : "The update is downloading in the background.";
+          ? "Installing…"
+          : downloadLabel(state);
+  const disabled = state.phase === "downloading" || state.phase === "installing";
 
   return (
-    <Alert className="fixed right-3 bottom-3 z-50 w-80 border-0 shadow-lg animate-in fade-in slide-in-from-bottom-2">
-      <AlertTitle>Dray {state.version} is available</AlertTitle>
-      <AlertDescription className="mt-1 text-ui-sm text-muted-foreground">
-        {detail}
-      </AlertDescription>
-      <div className="mt-3 flex justify-end">
-        {state.phase === "ready" ? (
-          <Button size="xs" onClick={() => void install()}>
-            Install and restart
-          </Button>
-        ) : state.phase === "error" ? (
-          <Button
-            size="xs"
-            variant="secondary"
-            onClick={() => {
-              if (updateRef.current) void download(updateRef.current);
-            }}
-          >
-            Retry download
-          </Button>
-        ) : (
-          <Button size="xs" variant="secondary" disabled>
-            {state.phase === "installing" ? "Installing…" : downloadLabel(state)}
-          </Button>
-        )}
-      </div>
-    </Alert>
+    <div className="shrink-0 px-2 py-2">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="w-full justify-start px-1.5 text-ui"
+        disabled={disabled}
+        title={`Dray ${state.version}: ${label}`}
+        aria-label={`Dray ${state.version}: ${label}`}
+        onClick={() => {
+          if (state.phase === "ready") void install();
+          else if (state.phase === "error") retry();
+        }}
+      >
+        <Download />
+        {label}
+      </Button>
+    </div>
   );
 }
