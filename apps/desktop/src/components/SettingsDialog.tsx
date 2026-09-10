@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 import packageJson from "../../package.json";
 import {
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import type { Effort, Model, ModelId, PiModel } from "@/types/events";
+import type { UpdateCheckResult } from "@/components/UpdateNotice";
 
 /// The app's preferences, such as they are.
 ///
@@ -47,6 +48,8 @@ export default function SettingsDialog({
   titlePiModel,
   titleEffort,
   onTitleModelChange,
+  checkingForUpdates,
+  onCheckForUpdates,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
@@ -68,6 +71,8 @@ export default function SettingsDialog({
     effort: Effort | null,
     piModel: PiModel | null,
   ) => void;
+  checkingForUpdates: boolean;
+  onCheckForUpdates: () => Promise<UpdateCheckResult>;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -84,6 +89,10 @@ export default function SettingsDialog({
           <SettledSessionsRow
             checked={showArchived}
             onChange={onShowArchivedChange}
+          />
+          <UpdateCheckRow
+            checking={checkingForUpdates}
+            onCheck={onCheckForUpdates}
           />
           <ModelSelectionRow
             models={models}
@@ -117,6 +126,62 @@ export default function SettingsDialog({
         </footer>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function UpdateCheckRow({
+  checking,
+  onCheck,
+}: {
+  checking: boolean;
+  onCheck: () => Promise<UpdateCheckResult>;
+}) {
+  const id = useId();
+  const [message, setMessage] = useState<string | null>(null);
+
+  const checkForUpdates = async () => {
+    setMessage(null);
+    try {
+      const result = await onCheck();
+      setMessage(
+        result === "available"
+          ? "An update is available and is being downloaded."
+          : result === "none"
+            ? "You're up to date."
+            : "Update checks are unavailable in development builds.",
+      );
+    } catch {
+      setMessage("Could not check for updates. Try again later.");
+    }
+  };
+
+  return (
+    <SettingRow
+      id={id}
+      label="App updates"
+      description={
+        <>
+          <span>Check for a newer version of Dray. Automatic checks run every 15 minutes.</span>
+          {message && (
+            <span className="mt-1 block" role="status">
+              {message}
+            </span>
+          )}
+        </>
+      }
+    >
+      <Button
+        id={id}
+        type="button"
+        variant="outline"
+        size="sm"
+        className="text-ui"
+        disabled={checking}
+        onClick={() => void checkForUpdates()}
+      >
+        {checking ? "Checking…" : "Check for updates"}
+      </Button>
+    </SettingRow>
   );
 }
 
@@ -299,7 +364,7 @@ function SettingRow({
 }: {
   id: string;
   label: string;
-  description: string;
+  description: ReactNode;
   children: ReactNode;
 }) {
   return (

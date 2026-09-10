@@ -863,6 +863,8 @@ function App() {
       titlePiModel={titlePrefs.piModel}
       titleEffort={titlePrefs.effort}
       onTitleModelChange={handleTitleModelChange}
+      checkingForUpdates={update.checking}
+      onCheckForUpdates={update.checkForUpdates}
     />
     </DiffWorkerPool>
     </TooltipProvider>

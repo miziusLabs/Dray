@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { invoke } from "@tauri-apps/api/core";
 import { check, type Update } from "@tauri-apps/plugin-updater";
@@ -22,22 +22,32 @@ function downloadLabel(state: UpdateState): string {
 }
 
 /**
- * Checks GitHub Releases once at launch and downloads a signed update in the
- * background. Installation stays behind an explicit restart action so an
- * update never interrupts work merely because it became available.
+ * Checks GitHub Releases at launch and every 15 minutes, downloading a signed
+ * update in the background. Installation stays behind an explicit restart
+ * action so an update never interrupts work merely because it became available.
  */
+export type UpdateCheckResult = "available" | "none" | "unsupported";
+
 export type UpdateController = {
   state: UpdateState | null;
+  checking: boolean;
+  checkForUpdates: () => Promise<UpdateCheckResult>;
   install: () => Promise<void>;
   retry: () => void;
   fakeUpdateAvailable: () => void;
 };
 
+const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
+
 export function useUpdate(): UpdateController {
   const updateRef = useRef<Update | null>(null);
+  const checkRef = useRef<Promise<UpdateCheckResult> | null>(null);
+  const stateRef = useRef<UpdateState | null>(null);
   const [state, setState] = useState<UpdateState | null>(null);
+  const [checking, setChecking] = useState(false);
+  stateRef.current = state;
 
-  const download = async (update: Update) => {
+  const download = useCallback(async (update: Update) => {
     let downloaded = 0;
     let total: number | null = null;
     setState({ version: update.version, phase: "downloading", downloaded, total });
@@ -56,26 +66,54 @@ export function useUpdate(): UpdateController {
       console.error("Failed to download the app update", error);
       setState({ version: update.version, phase: "error", downloaded, total });
     }
-  };
+  }, []);
+
+  const checkForUpdates = useCallback((): Promise<UpdateCheckResult> => {
+    if (import.meta.env.DEV) return Promise.resolve("unsupported");
+
+    const currentState = stateRef.current;
+    if (
+      currentState?.phase === "downloading" ||
+      currentState?.phase === "installing" ||
+      currentState?.phase === "ready"
+    ) {
+      return Promise.resolve("available");
+    }
+    if (checkRef.current) return checkRef.current;
+
+    setChecking(true);
+    const request = (async () => {
+      try {
+        const update = await check({ timeout: 30_000 });
+        if (!update) return "none";
+        updateRef.current = update;
+        await download(update);
+        return "available";
+      } finally {
+        setChecking(false);
+        checkRef.current = null;
+      }
+    })();
+    checkRef.current = request;
+    return request;
+  }, [download]);
 
   useEffect(() => {
     // The development binary has no release bundle to replace and should not
     // contact the production update endpoint on every hot reload.
     if (import.meta.env.DEV) return;
 
-    let active = true;
-    void check({ timeout: 30_000 })
-      .then((update) => {
-        if (!active || !update) return;
-        updateRef.current = update;
-        return download(update);
-      })
-      .catch((error) => console.error("Failed to check for app updates", error));
+    void checkForUpdates().catch((error) =>
+      console.error("Failed to check for app updates", error),
+    );
+    const interval = window.setInterval(() => {
+      void checkForUpdates().catch((error) =>
+        console.error("Failed to check for app updates", error),
+      );
+    }, UPDATE_CHECK_INTERVAL_MS);
 
-    return () => {
-      active = false;
-    };
-  }, []);
+    return () => window.clearInterval(interval);
+  }, [checkForUpdates]);
 
   const fakeUpdateAvailable = () => {
     if (!import.meta.env.DEV) return;
@@ -115,6 +153,8 @@ export function useUpdate(): UpdateController {
     retry: () => {
       if (updateRef.current) void download(updateRef.current);
     },
+    checking,
+    checkForUpdates,
     fakeUpdateAvailable,
   };
 }
