@@ -777,9 +777,8 @@ function RowAction({
 }
 
 /// The fork submenu's rows, in the order they are drawn. The number key that
-/// picks one is its position here — same rule `VIEW_TABS` accelerators follow —
-/// so reordering moves the digits with it and there is no second table to fall
-/// out of step with the labels.
+/// picks one is its position here, so reordering moves the digits with it and
+/// there is no second table to fall out of step with the labels.
 const FORKS = [
   { label: "Fork here", cloud: false },
   { label: "Fork in new Cloud Session", cloud: true },

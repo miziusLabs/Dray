@@ -264,8 +264,6 @@ Use `DRAY_CLOUD_IMAGE` to override the Docker image tag. `GITHUB_TOKEN` or an au
 - `Cmd/Ctrl+E` — toggle right inspector.
 - `Cmd/Ctrl+Shift+[` / `]` — move through right-panel tabs.
 - `Cmd/Ctrl+R` — refresh the active right-panel tab when supported.
-- `Cmd/Ctrl+1` — Chat main view.
-- `Cmd/Ctrl+2` — Changes main view.
 - `Cmd/Ctrl+,` — Settings.
 - `Shift+Tab` — cycle effort/reasoning level for the current model.
 - `Cmd/Ctrl+M` — cycle the configured model subset.

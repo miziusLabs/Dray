@@ -56,8 +56,8 @@ export default function ChangesView({
 
   // ⌘⇧← / ⌘⇧→ step this row, the same shape ⌘⇧↑/↓ steps the session list — the
   // arrow points at the tab, so a third sub-tab needs no third binding. Not
-  // ⌘1/⌘2, which the view row above already spends, and not ⌘⇧[ /], which
-  // belongs to the right panel and would mean two different rows at once.
+  // ⌘1/⌘2, which are reserved for sidebar session switching, and not ⌘⇧[ /],
+  // which belongs to the right panel and would mean two different rows at once.
   //
   // Clamped rather than wrapped: with two entries wrapping makes both chords do
   // the same thing, so pressing ← twice would land on History.
@@ -153,8 +153,8 @@ export default function ChangesView({
                   )}
                 </button>
               </TooltipTrigger>
-              {/* Keycaps alone, like the view row above: the name is already on
-                  the button, and the arrow is which side of the row it sits on. */}
+              {/* Keycaps alone: the name is already on the button, and the arrow
+                  is which side of the row it sits on. */}
               <TooltipContent side="bottom" className="px-1.5">
                 <KbdGroup>
                   <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
