@@ -30,7 +30,7 @@ export default function AnalyticsDialog({
     try {
       setUsage(await invoke<CodexUsage>("get_codex_usage"));
     } catch (reason) {
-      setError(typeof reason === "string" ? reason : "Could not load Codex usage.");
+      setError(typeof reason === "string" ? reason : "Could not load usage.");
     } finally {
       setLoading(false);
     }
@@ -44,7 +44,7 @@ export default function AnalyticsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-120" aria-describedby={undefined}>
         <DialogHeader>
-          <DialogTitle>Codex usage</DialogTitle>
+          <DialogTitle>Usage</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-5">
