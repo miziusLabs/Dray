@@ -4,10 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - apps/desktop/package.json
-      - apps/desktop/src-tauri/Cargo.toml
-      - apps/desktop/src-tauri/tauri.conf.json
 
 permissions:
   contents: write
@@ -23,6 +19,8 @@ jobs:
     steps:
       - name: Check out the version bump
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Read and validate the version
         id: version
