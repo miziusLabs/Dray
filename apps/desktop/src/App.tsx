@@ -28,8 +28,6 @@ import RightPanel, {
   type PanelTab,
 } from "@/components/RightPanel";
 import Sidebar, {
-  DevBadge,
-  SidebarToggle,
   filterSessions,
   sortSessions,
 } from "@/components/Sidebar";
@@ -61,7 +59,6 @@ import { changeRange, turnChangedTree } from "@/lib/changes";
 import { prBadgeCount, sessionBranch } from "@/lib/pr";
 import { playCelebration } from "@/lib/sound";
 import { buildTranscript } from "@/lib/transcript";
-import { cn } from "@/lib/utils";
 
 function App() {
   const [titlePrefs, setTitlePrefs] = useTitlePrefs();
@@ -140,7 +137,6 @@ function App() {
     );
   };
 
-  const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
   // `null` means the user has not configured a subset, so newly discovered
   // models appear in the picker automatically. Once configured, the stored
   // stable keys preserve that explicit choice across catalog refreshes and
@@ -471,9 +467,8 @@ function App() {
         ? { onRefresh: pullRequests.refresh, loading: pullRequests.loading }
         : null;
 
-  // Same order the sidebar draws, so the walk matches the list even when the
-  // sidebar is collapsed and there is nothing on screen to follow — project
-  // list included, since that is what orders the groups it steps through.
+  // Same order the sidebar draws, so the walk matches the list — project list
+  // included, since that is what orders the groups it steps through.
   const ordered = useMemo(
     () => sortSessions(searchedSessions, projects),
     [searchedSessions, projects],
@@ -506,14 +501,11 @@ function App() {
     }
   };
 
-  const toggleSidebar = () => setCollapsed((prev) => !prev);
-  useHotkey("b", toggleSidebar);
   useHotkey("n", handleNewSession);
   // ⌘⇧ rather than plain ⌘: the composer is focused most of the time, where
   // ⌘↑/↓ is the webview's own jump-to-start/end of the input.
   useHotkey("ArrowUp", () => stepSession(-1), { shift: true });
   useHotkey("ArrowDown", () => stepSession(1), { shift: true });
-  // ⌘E for the right pane against ⌘B for the left.
   useHotkey("e", togglePanel);
   // ⌘⇧[ / ⌘⇧] — the browser and editor chord for stepping through tabs, so it
   // arrives already known. The shift layout reaches `key`, so the character is
@@ -546,8 +538,7 @@ function App() {
   useHotkey("7", () => jumpSession(6));
   useHotkey("8", () => jumpSession(7));
   useHotkey("9", () => jumpSession(8));
-  // ⌘, — every macOS app's preferences chord, and the only way into settings
-  // while the sidebar is collapsed and its gear gone with it. Safe to take for
+  // ⌘, — every macOS app's preferences chord. Safe to take for
   // `useHotkey`'s usual pair of reasons: it claims the chord, and the app's
   // custom menu carries no Settings item to swallow the key first.
   useHotkey(",", () => setSettingsOpen(true));
@@ -605,8 +596,6 @@ function App() {
           askingSessions={askingSessions}
           prFor={prMarks.prFor}
           selectedSessionId={selectedSessionId}
-          collapsed={collapsed}
-          onToggleCollapsed={toggleSidebar}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenAnalytics={() => setAnalyticsOpen(true)}
           onOpenDeveloper={() => setDeveloperOpen(true)}
@@ -646,23 +635,6 @@ function App() {
           // clickable element that carries no attribute of its own.
           data-tauri-drag-region="deep"
         >
-          {/* Only when collapsed — expanded, the sidebar owns the toggle. This
-              header reaches the window edge in that state, so it has to clear
-              the traffic lights, which fullscreen removes. */}
-          {collapsed && (
-            <div
-              className={cn(
-                "flex items-center",
-                // Fullscreen has no traffic lights, so the toggle pulls back past
-                // the header's own padding to sit flush at the window edge.
-                fullscreen ? "-ml-1" : "pl-(--traffic-lights-w)",
-              )}
-            >
-              <SidebarToggle onToggle={toggleSidebar} collapsed />
-              {import.meta.env.DEV && <DevBadge className="ml-1" />}
-            </div>
-          )}
-
           <SessionHeader
             session={selectedSession}
             branch={prBranch}
@@ -811,7 +783,7 @@ function App() {
         compacting={compacting}
         queuedMessages={queuedMessages}
         working={working}
-        crowded={!collapsed && panelOpen}
+        crowded={panelOpen}
         active={viewTab === "chat"}
       />
       </TabBody>

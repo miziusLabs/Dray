@@ -258,7 +258,6 @@ Use `DRAY_CLOUD_IMAGE` to override the Docker image tag. `GITHUB_TOKEN` or an au
 
 `useHotkey` maps the primary modifier to Command on macOS and Control elsewhere unless the binding explicitly opts out.
 
-- `Cmd/Ctrl+B` — toggle sidebar.
 - `Cmd/Ctrl+N` — new session.
 - `Cmd/Ctrl+Shift+Up/Down` — move through sessions.
 - `Cmd/Ctrl+E` — toggle right inspector.

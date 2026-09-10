@@ -1,14 +1,14 @@
 import { useId } from "react";
 
-/// A rounded rectangle with its left column filled — the sidebar toggle, drawn
-/// after VS Code's. Heroicons has no panel glyph and `ViewColumnsIcon`, its
-/// nearest, reads as a table. Stroke width and 24px box match the heroicons
-/// outline set so it sits beside them without looking heavier.
+/// A rounded rectangle with its left column filled — a panel glyph, drawn after
+/// VS Code's. Heroicons has no panel glyph and `ViewColumnsIcon`, its nearest,
+/// reads as a table. Stroke width and 24px box match the heroicons outline set
+/// so it sits beside them without looking heavier.
 export default function PanelLeftIcon({
   dim = false,
   ...props
 }: React.ComponentProps<"svg"> & {
-  /// Fades the filled column — the sidebar it stands for isn't showing.
+  /// Fades the filled column — the pane it stands for isn't showing.
   dim?: boolean;
 }) {
   // Per-instance so two icons on one page can't share a clip path id.

@@ -68,8 +68,8 @@ export function useHotkey(
       // `code` is only consulted for an Option chord, and only for a letter.
       // macOS applies the Option layout to `key` — ⌥O can arrive as "ø" — so a
       // binding that reads `key` alone silently never fires. The narrowness is
-      // the point: matching by physical position everywhere would fire ⌘B on
-      // Dvorak's N key, so the fallback stays where the layout has already
+      // the point: matching by physical position everywhere would fire ⌘N on
+      // Dvorak's B key, so the fallback stays where the layout has already
       // broken the character.
       const matches =
         e.key.toLowerCase() === key.toLowerCase() ||

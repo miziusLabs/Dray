@@ -242,12 +242,9 @@
     @apply font-sans;
     /* Traffic lights float over our own header under `titleBarStyle: Overlay`,
        so the header reserves this much lead space on macOS. Tall enough to clear
-       a 28px control with breathing room — at exactly 28px the toggle butts
+       a 28px control with breathing room — at exactly 28px the control butts
        against the window edge. */
     --titlebar-h: 40px;
-    /* Horizontal clearance for those same lights, needed only when a pane
-       reaches the window's left edge — i.e. with the sidebar collapsed. */
-    --traffic-lights-w: 78px;
   }
 
   body {

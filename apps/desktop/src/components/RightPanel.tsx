@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 /// The header button that opens and closes the pane. Lives here rather than in
 /// `App` so the toggle and the thing it toggles stay in one file, and outside
 /// [RightPanel] itself because the pane doesn't exist before a session does —
-/// the button has to outlive it. Mirrors `SidebarToggle` on the far side.
+/// the button has to outlive it. It is the inspector's counterpart to the
+/// sidebar titlebar controls.
 export function PanelToggle({
   onToggle,
   open,

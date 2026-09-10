@@ -16,7 +16,6 @@ import {
 import { ThinkingOrb } from "thinking-orbs";
 
 import PrStateIcon, { prStateLabel } from "@/components/PrStateIcon";
-import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import UpdateNotice, { type UpdateController } from "@/components/UpdateNotice";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,8 +66,6 @@ type SidebarProps = {
   /// pull requests are read per repo and the index knows nothing about them.
   prFor: (repoPath: string, branch: string | null) => PrMark | undefined;
   selectedSessionId: string | null;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
   onOpenSettings: () => void;
   onOpenAnalytics: () => void;
   onOpenDeveloper: () => void;
@@ -251,9 +248,8 @@ export function sessionGroups(
 /// The order alone, for callers that only step through it.
 ///
 /// Exported because the ⌘⇧↑/↓ shortcut walks the same sequence, and a second
-/// comparator would let the two disagree about which row is "next" — worse when
-/// the sidebar is collapsed and nothing on screen shows the order being walked.
-/// Grouped for the same reason: the shortcut has to step past a heading the way
+/// comparator would let the two disagree about which row is "next". Grouped for
+/// the same reason: the shortcut has to step past a heading the way
 /// the eye does, so it takes the same project list the headings are ordered by.
 export function sortSessions(
   items: SessionIndexItem[],
@@ -286,49 +282,7 @@ export function isNested(item: SessionIndexItem, items: SessionIndexItem[]): boo
   );
 }
 
-/// Sidebar toggle. Lives outside `Sidebar` because a collapsed sidebar renders
-/// nothing at all — the button has to survive its own pane disappearing, so the
-/// app header owns it and its y position never moves.
-export function SidebarToggle({
-  onToggle,
-  collapsed = false,
-}: {
-  onToggle: () => void;
-  collapsed?: boolean;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* Held back at rest — it's chrome, not content — and brought to full
-            strength under the cursor. */}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onToggle}
-          aria-label="Toggle sidebar"
-          className="opacity-80 transition-opacity hover:opacity-100"
-        >
-          <PanelLeftIcon className="size-4.5" dim={collapsed} />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="right">
-        Toggle Sidebar
-        <KbdGroup>
-          <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
-          <Kbd>B</Kbd>
-        </KbdGroup>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-/// Opens the settings dialog.
-///
-/// Shares the titlebar strip with the sidebar toggle rather than sitting in the
-/// session list below it: settings are app-wide, and the list is app-local.
-///
-/// Gone with a collapsed sidebar, since the sidebar is. ⌘, is the route that
-/// survives that, which is why the tooltip names it.
+/// Opens analytics from the sidebar titlebar strip.
 export function AnalyticsButton({ onOpen }: { onOpen: () => void }) {
   return (
     <Tooltip>
@@ -430,8 +384,6 @@ export default function Sidebar({
   askingSessions,
   prFor,
   selectedSessionId,
-  collapsed,
-  onToggleCollapsed,
   onSelect,
   onNewSession,
   onSetFlags,
@@ -530,10 +482,6 @@ export default function Sidebar({
       ? "Nothing settled yet."
       : "No tasks yet.";
 
-  // Collapsed is nothing at all, not a rail. The toggle moves to the app header
-  // in that state, which is the one row present either way.
-  if (collapsed) return null;
-
   return (
     <aside
       ref={asideRef}
@@ -623,12 +571,8 @@ export default function Sidebar({
         data-tauri-drag-region="deep"
       >
         {import.meta.env.DEV && <DevBadge className="mr-auto" />}
-        {/* The toggle holds the strip's outer edge in both layouts and settings
-            sit inboard of it, so the one control also drawn in the app header
-            never changes which end of the row it is at. */}
         {fullscreen ? (
           <>
-            <SidebarToggle onToggle={onToggleCollapsed} />
             {import.meta.env.DEV && <DeveloperButton onOpen={onOpenDeveloper} />}
             <AnalyticsButton onOpen={onOpenAnalytics} />
             <SettingsButton onOpen={onOpenSettings} />
@@ -638,13 +582,12 @@ export default function Sidebar({
             <AnalyticsButton onOpen={onOpenAnalytics} />
             <SettingsButton onOpen={onOpenSettings} />
             {import.meta.env.DEV && <DeveloperButton onOpen={onOpenDeveloper} />}
-            <SidebarToggle onToggle={onToggleCollapsed} />
           </>
         )}
       </div>
 
       {/* `px-1.5` on the buttons rather than `size="sm"`'s `px-2.5`, so their
-          icons land on the same 12px inset as the toggle above. */}
+          icons land on the same 12px inset as the titlebar controls. */}
       <div className="flex flex-col gap-px px-2">
         <Button
           variant="ghost"

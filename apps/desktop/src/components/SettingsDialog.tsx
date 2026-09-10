@@ -30,10 +30,8 @@ import type { UpdateCheckResult } from "@/components/UpdateNotice";
 
 /// The app's preferences, such as they are.
 ///
-/// Mounted in `App` rather than beside the gear that opens it: the sidebar
-/// unmounts when it collapses, and a dialog living there would take the ⌘,
-/// shortcut with it — which is the one route into this that survives a
-/// collapsed sidebar.
+/// Mounted in `App` rather than beside the gear that opens it so the dialog's
+/// lifecycle stays independent from the sidebar controls.
 export default function SettingsDialog({
   open,
   onOpenChange,
