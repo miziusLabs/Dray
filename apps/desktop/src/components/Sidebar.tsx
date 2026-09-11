@@ -1185,7 +1185,7 @@ function SessionRow({
           <span
             className={cn(
               "pointer-events-none absolute inset-y-0 flex w-6 items-center justify-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0",
-              modifierPressed && shortcutIndex ? "right-0.5" : "-right-1.5",
+              modifierPressed && shortcutIndex ? "-right-[3px]" : "-right-1.5",
             )}
           >
             {/* The slot shows one value at a time: ⌘ navigation first, then a
