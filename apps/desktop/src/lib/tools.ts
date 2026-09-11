@@ -258,7 +258,7 @@ export function formatToolInput(input: JsonValue, omit: string[]): string | null
 }
 
 /// The identifying argument of a call whose tool type isn't to hand — the
-/// permission card sees raw wire input and no `ToolType`. Same field precedence
+/// question card sees raw wire input and no `ToolType`. Same field precedence
 /// as `toolSummary`, minus the per-type branch it can't make.
 export function toolArgument(input: JsonValue): string | null {
   const path = field(input, "file_path") ?? field(input, "path") ?? field(input, "notebook_path");

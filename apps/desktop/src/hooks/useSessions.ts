@@ -17,7 +17,7 @@ import {
 import { isWindowFocused, onFocusChange } from "@/lib/focus";
 import { notifyOS } from "@/lib/notify";
 import { playNotification } from "@/lib/sound";
-import { AgentEvent, ApprovalPolicy, BranchList, Effort, Harness, Model, ModelId, PiModel, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
+import { AgentEvent, BranchList, Effort, Harness, Model, ModelId, PiModel, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
 // "unknown". Everything else seeds from the user's stored prefs.
@@ -75,7 +75,6 @@ export function useSessions(titlePrefs: TitlePrefs) {
     const [modelId, setModelId] = useState<ModelId>(() => prefs.modelId);
     const [piModel, setPiModel] = useState<PiModel | null>(() => prefs.piModel);
     const [effortByModel, setEffortByModel] = useState<EffortByModel>(() => prefs.effortByModel);
-    const [permissionMode, setPermissionModeState] = useState<ApprovalPolicy>(() => prefs.permissionMode);
     const [projects, setProjects] = useState<Project[]>([]);
     const [projectPath, setProjectPath] = useState<string | null>(null);
     // Derived from the selected project, not a preference — refetched on switch
@@ -113,12 +112,9 @@ export function useSessions(titlePrefs: TitlePrefs) {
     // draw them. Nothing is persisted on either side, so both die with the
     // process and neither can come back stale.
     const [queuedBySession, setQueuedBySession] = useState<Record<string, QueuedMessage[]>>({});
-    // sessionId → the request ids of the consent cards and questionnaires the
-    // agent is standing still behind. Ids rather than a count, so the
-    // `permission_decided` that retires one clears the right one when two are
-    // open. Frontend-only and unpersisted for the same reason the requests
-    // themselves are: no child survives a restart, so a request that outlived
-    // one could never be answered.
+    // sessionId → the request ids of questionnaires the agent is standing
+    // still behind. Frontend-only and unpersisted because no child survives a
+    // restart, so a request that outlived one could never be answered.
     const [asksBySession, setAsksBySession] = useState<Record<string, string[]>>({});
     const [error, setError] = useState<string | null>(null);
 
@@ -158,11 +154,6 @@ const handleModelChange = (
 
 // Wrapped rather than exported raw: picking a mode is a preference, and the
 // hotkey in App.tsx goes through here too.
-const setPermissionMode = (mode: ApprovalPolicy) => {
-  setPermissionModeState(mode);
-  setPrefs({ permissionMode: mode });
-};
-
 // Sticky, unlike before. Someone who works in clouds works in clouds; the
 // old reset-to-off made them re-toggle it for every single task.
 //
@@ -302,20 +293,19 @@ const mirrorSessionModel = (
   modelId: ModelId,
   piModel: PiModel | null,
   effort: Effort | null,
-  permissionMode: ApprovalPolicy,
 ) => {
   const modified = new Date().toISOString();
   setSessionIndexItems((prev) =>
     prev.map((i) =>
       i.sessionId === sessionId
-        ? { ...i, model: modelId, piModel, effort, permissionMode, modified }
+        ? { ...i, model: modelId, piModel, effort, modified }
         : i,
     ),
   );
   setSessions((prev) =>
     prev.map((s) =>
       s.sessionId === sessionId
-        ? { ...s, model: modelId, piModel, effort, permissionMode, modified }
+        ? { ...s, model: modelId, piModel, effort, modified }
         : s,
     ),
   );
@@ -376,7 +366,6 @@ const handleSendMsg = async (
       effort,
       titleModel: titlePrefs.piModel,
       titleEffort: titlePrefs.effort,
-      permissionMode,
       cwd,
       // Cloud only records branch context; it never checks out the selected
       // project.
@@ -397,7 +386,7 @@ const handleSendMsg = async (
         ...prev,
         [sessionId]: [...(prev[sessionId] ?? []), queued],
       }));
-      mirrorSessionModel(sessionId, modelId, piModel, effort, permissionMode);
+      mirrorSessionModel(sessionId, modelId, piModel, effort);
       return;
     }
 
@@ -419,7 +408,7 @@ const handleSendMsg = async (
     // index entry; mirror it so the sidebar doesn't need a refetch. Keep the
     // loaded snapshot in step too: a session opened from a filtered row may not
     // have an index item for the local update to replace.
-    mirrorSessionModel(sessionId, modelId, piModel, effort, permissionMode);
+    mirrorSessionModel(sessionId, modelId, piModel, effort);
   } catch (e) {
     // A rejected invoke means the turn never started, so nothing will arrive to
     // clear the status — release it here rather than leaving the composer stuck.
@@ -467,25 +456,6 @@ const handleInterrupt = async () => {
   }
 };
 
-// Answers a permission request the agent is blocked on. The decision comes back
-// as an event like any other, so nothing is written to local state here — the
-// card learns it was answered from the transcript, the same way a reload does.
-//
-// `optionId` is opaque on purpose: the standing rule behind it lives in the
-// backend, so the frontend can neither widen a grant nor invent one.
-const handleRespondPermission = async (requestId: string, optionId: string) => {
-  if (!selectedSessionId) return;
-  try {
-    await invoke("respond_permission", {
-      sessionId: selectedSessionId,
-      requestId,
-      optionId,
-    });
-  } catch (e) {
-    setError(String(e));
-  }
-};
-
 const handleAnswerQuestions = async (
   requestId: string,
   answers: Record<string, string>,
@@ -517,7 +487,6 @@ const handleNewSession = () => {
   setModelId(prefs.modelId);
   setPiModel(prefs.piModel);
   setEffortByModel(prefs.effortByModel);
-  setPermissionModeState(prefs.permissionMode);
   setUseCloudState(prefs.useCloud);
   setBranch(branches?.current ?? null);
 };
@@ -544,7 +513,6 @@ const restoreSessionControls = (item: SessionIndexItem) => {
   if (item.effort) {
     setEffortByModel((prev) => ({ ...prev, [restored]: item.effort! }));
   }
-  setPermissionModeState(item.permissionMode);
 };
 
 const handleSelectSessionIndexItem = async (sessionId: string) => {
@@ -958,30 +926,22 @@ useEffect(() => {
             }
 
             // The agent has stopped and is waiting on the reader. Announced like
-            // a completion because it is the same kind of news — the difference
-            // is that this one holds the turn until it is answered, which is why
-            // its notice does not time out.
-            if (
-              agentEvent.payload.type === "permission_requested" ||
-              agentEvent.payload.type === "questions_asked"
-            ) {
+            // a completion because it is the same kind of news — this one holds
+            // the turn until the questionnaire is answered, so its notice does
+            // not time out.
+            if (agentEvent.payload.type === "questions_asked") {
               const { requestId } = agentEvent.payload;
-              const asking =
-                agentEvent.payload.type === "questions_asked"
-                  ? "Needs an answer"
-                  : "Needs permission";
-
               setAsksBySession((prev) => {
                 const cur = prev[agentEvent.sessionId] ?? [];
                 if (cur.includes(requestId)) return prev;
                 return { ...prev, [agentEvent.sessionId]: [...cur, requestId] };
               });
-              announce(agentEvent.sessionId, "asking", asking);
+              announce(agentEvent.sessionId, "asking", "Needs an answer");
             }
 
-            // The card is answered, so both the rail mark and the notice
-            // pointing at it have nothing left to point at.
-            if (agentEvent.payload.type === "permission_decided") {
+            // The questionnaire is answered, so both the rail mark and the
+            // notice pointing at it have nothing left to point at.
+            if (agentEvent.payload.type === "question_answered") {
               const { requestId } = agentEvent.payload;
               setAsksBySession((prev) => {
                 const cur = prev[agentEvent.sessionId];
@@ -1385,6 +1345,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud: cloudEnabled, dockerAvailable: dockerAvailable === true, busy, working, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, projects, projectPath, branches, branch, useCloud: cloudEnabled, dockerAvailable: dockerAvailable === true, busy, working, compacting, contextUsage, error, setError, handleModelChange, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
 
 }

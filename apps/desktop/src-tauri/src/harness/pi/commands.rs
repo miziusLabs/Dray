@@ -78,7 +78,7 @@ async fn probe_models(cwd: Option<&str>) -> Result<Vec<Model>> {
     }
 
     let mut child = command
-        .args(["--mode", "rpc", "--no-session", "--offline", "--approve"])
+        .args(["--mode", "rpc", "--no-session", "--offline"])
         .env("PATH", crate::binpath::agent_path())
         .current_dir(cwd.unwrap_or("."))
         .stdin(Stdio::piped())
@@ -141,7 +141,7 @@ async fn probe(cwd: &str) -> Result<(Vec<SlashCommand>, Vec<String>)> {
     }
 
     let mut child = command
-        .args(["--mode", "rpc", "--no-session", "--offline", "--approve"])
+        .args(["--mode", "rpc", "--no-session", "--offline"])
         .env("PATH", crate::binpath::agent_path())
         .current_dir(cwd)
         .stdin(Stdio::piped())

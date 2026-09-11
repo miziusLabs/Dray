@@ -2,8 +2,8 @@ import { useSyncExternalStore } from "react";
 
 /// What the notice is about. It picks the action label and how long the card
 /// stays: `completed` is news that will keep, while `asking` is an agent
-/// standing still until the reader answers, so it is given twice as long to be
-/// noticed.
+/// standing still until the reader answers a question, so it is given twice as
+/// long to be noticed.
 ///
 /// `pr` is the only kind raised by something no session did. A turn ending, a
 /// question asked and a tree settled are all this app's own doing; a pull
@@ -33,13 +33,13 @@ export type Notice = {
   ///
   /// The session *alone* used to be the key, on the grounds that a session
   /// cannot both be blocked on a question and have finished its turn. That held
-  /// for three kinds and stopped holding for `pr`: CI reports on its own
+  /// for the session kinds and stopped holding for `pr`: CI reports on its own
   /// schedule, so a pull request can turn ready while the agent that opened it
-  /// is standing still waiting for permission, and one replacing the other
+  /// is standing still waiting for a question, and one replacing the other
   /// dropped a signal the reader had no other card for.
   sessionId: string;
   kind: NoticeKind;
-  /// The whole of the card's text: "Needs permission", "Task finished". It
+  /// The whole of the card's text: "Needs an answer", "Task finished". It
   /// deliberately does not name the session or the project — the reader has one
   /// window and the sidebar rail is already marking the row, so repeating the
   /// title here spends the card's width saying what the next glance says anyway.

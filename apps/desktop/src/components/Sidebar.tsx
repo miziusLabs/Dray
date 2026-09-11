@@ -56,10 +56,10 @@ type SidebarProps = {
   // The live status of every session the app has heard about this run. Wins over
   // the item's own field, which is only as fresh as the last list fetch.
   statusBySession: Record<string, SessionStatus>;
-  // Sessions standing still behind a permission request or a question. Kept
-  // apart from `statusBySession` rather than folded into it: the backend's
-  // status machine still reads these as `in_progress`, and it is right to —
-  // the turn is open, it is only the agent that has stopped.
+  // Sessions standing still behind a question. Kept apart from
+  // `statusBySession` rather than folded into it: the backend's status machine
+  // still reads these as `in_progress`, and it is right to — the turn is open,
+  // it is only the agent that has stopped.
   askingSessions: Set<string>;
   /// The pull request this session's branch is marked with — open, draft or
   /// merged — or nothing. A lookup rather than a field on the item, because

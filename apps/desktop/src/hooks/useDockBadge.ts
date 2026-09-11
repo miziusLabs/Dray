@@ -8,7 +8,7 @@ import type { SessionIndexItem, SessionStatus } from "@/types/events";
 /// Mirror the attention count onto the dock icon's badge.
 ///
 /// Nothing here has to clear it: both marks retire themselves — viewing a row
-/// reads its completion, answering a request retires the ask — so the count
+/// reads its completion, answering a question retires the ask — so the count
 /// falls to zero through the same path the rail empties by. Zero is passed as
 /// `undefined`, which is what removes the badge rather than drawing a `0`.
 ///

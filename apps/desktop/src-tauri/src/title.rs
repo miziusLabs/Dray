@@ -129,7 +129,6 @@ pub async fn generate_title(
         "--no-extensions",
         "--no-skills",
         "--no-context-files",
-        "--approve",
     ];
 
     let mut command = crate::binpath::pi_command().await;

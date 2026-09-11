@@ -55,7 +55,6 @@ pub async fn init(
     session_id: &str,
     model: &Model,
     effort: Option<Effort>,
-    _permission_mode: crate::events::ApprovalPolicy,
     cwd: &str,
     session_cwd: &str,
     cloud_name: Option<&str>,
@@ -80,10 +79,6 @@ pub async fn init(
         "rpc".to_string(),
         "--session-dir".to_string(),
         session_dir,
-        // A desktop session is already an explicit user action. This lets Pi
-        // load project-local extensions and context files without an invisible
-        // trust prompt in its headless RPC mode.
-        "--approve".to_string(),
     ];
     if let Some(pi_model) = &model.pi_model {
         args.push("--provider".to_string());
@@ -209,7 +204,6 @@ pub async fn init(
         model: model.id,
         pi_model: model.pi_model.clone(),
         effort,
-        permission_mode: _permission_mode,
         events,
         seq,
         status,

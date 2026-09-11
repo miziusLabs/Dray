@@ -4,16 +4,13 @@ import BranchSelector from "@/components/composer/BranchSelector";
 import BranchSwitchDialog from "@/components/composer/BranchSwitchDialog";
 import ContextMeter from "@/components/composer/ContextMeter";
 import ModelSelector from "@/components/composer/ModelSelector";
-import PermissionSelector from "@/components/composer/PermissionSelector";
 import ProjectSelector from "@/components/composer/ProjectSelector";
 import CloudToggle from "@/components/composer/CloudToggle";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type {
-  ApprovalPolicy,
   BranchList,
-  Harness,
   Effort,
   Model,
   ModelId,
@@ -22,15 +19,11 @@ import type {
 } from "@/types/events";
 
 export type ComposerToolbarProps = {
-  harness: Harness;
   models: Model[];
   modelId: ModelId;
   piModel: PiModel | null;
   effort: Effort | null;
   onModelChange: (modelId: ModelId, effort: Effort | null, piModel: PiModel | null) => void;
-
-  permissionMode: ApprovalPolicy;
-  onPermissionModeChange: (mode: ApprovalPolicy) => void;
 
   projects: Project[];
   projectPath: string | null;
@@ -67,20 +60,17 @@ export type ComposerToolbarProps = {
   isNewSession: boolean;
 };
 
-/// The composer's control row. Model and permission change a running session in
-/// place; project, branch, and cloud decide where it starts and disappear
-/// once it has — a control that can never be used is noise, and the session
-/// header already shows the project and branch. Its own spacing from the card is
-/// the caller's, since only the caller knows which side of it the row sits on.
+/// The composer's control row. Project, branch, and cloud decide where a session
+/// starts and disappear once it has — a control that can never be used is noise,
+/// and the session header already shows the project and branch. Its own spacing
+/// from the card is the caller's, since only the caller knows which side of it
+/// the row sits on.
 export default function ComposerToolbar({
-  harness,
   models,
   modelId,
   piModel,
   effort,
   onModelChange,
-  permissionMode,
-  onPermissionModeChange,
   projects,
   projectPath,
   onSelectProject,
@@ -181,13 +171,6 @@ export default function ComposerToolbar({
           )}
         </>
       )}
-
-      {/* Last of the pickers: it is the one control here most sessions set once
-          and never touch, so it sits furthest from where the eye lands. */}
-      {harness !== "pi" && (
-        <PermissionSelector value={permissionMode} onChange={onPermissionModeChange} />
-      )}
-
       {/* `ml-auto` rather than a spacer, so a long branch name still gets the
           whole middle of the row and this stays pinned to the right edge. */}
       {contextUsage && (

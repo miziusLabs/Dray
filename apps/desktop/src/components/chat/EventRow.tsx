@@ -1,4 +1,4 @@
-import { Archive, CircleAlert, CircleDollarSign, ShieldX, TriangleAlert } from "lucide-react";
+import { Archive, CircleAlert, CircleDollarSign, TriangleAlert } from "lucide-react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import Reasoning from "@/components/chat/Reasoning";
@@ -159,13 +159,6 @@ export default function EventRow({
       );
     }
 
-    case "permission_denied":
-      return (
-        <Notice icon={ShieldX} tone="destructive" wrap>
-          {payload.message}
-        </Notice>
-      );
-
     // Shaped like a settled tool call — label then detail — because that is what
     // it is: work the harness did on the conversation, reported after the fact.
     // No caret; there is nothing underneath to open.
@@ -202,14 +195,11 @@ export default function EventRow({
     // Drives the live indicator, not a row — the compaction it opens draws its
     // own line when it closes.
     case "context_compaction_started":
-    // Every held request lives outside the turn stack: `Chat` renders the open
-    // ones below the transcript, where a request can't be buried in a turn that
-    // collapses. A settled one draws nothing anywhere — for a question because
-    // the `AskUserQuestion`
-    // row underneath reports what was answered.
-    case "permission_requested":
+    // Every held question lives outside the turn stack: `Chat` renders open
+    // ones below the transcript, where a request cannot be buried in a
+    // collapsing turn. The settled question's tool row reports the answer.
     case "questions_asked":
-    case "permission_decided":
+    case "question_answered":
       return null;
 
     default:

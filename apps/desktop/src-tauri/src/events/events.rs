@@ -51,9 +51,6 @@ pub struct AgentEvent {
 }
 
 /// What happened.
-///
-/// Permission request/resolve is deliberately absent: no captured fixture shows
-/// their shape, so the variants would be a guess. Add once captured.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(
@@ -210,85 +207,22 @@ pub enum AgentEventPayload {
         /// Why overage isn't available — `org_level_disabled` observed.
         overage_disabled_reason: Option<String>,
     },
-    // ---------- permissions ----------
-    /// A tool call the agent cannot make without an answer. Unlike every other
-    /// payload this one is a *question*: the harness is blocked until the app
-    /// replies, so a consumer that renders it and offers no way to answer stalls
-    /// the session rather than merely under-reporting it.
-    ///
-    /// [`options`](Self::PermissionRequested::options) is the whole answer
-    /// surface. The harness composes it — "allow once" and "deny" always,
-    /// plus whatever standing rules *this* call could establish — because what a
-    /// rule may say is wire knowledge, not UI knowledge.
-    PermissionRequested {
-        /// Correlates the reply. Also what
-        /// [`PermissionDecided`](Self::PermissionDecided) joins on, which is how
-        /// a reloaded transcript knows an answered request from a live one.
-        request_id: String,
-        /// The call being held. The matching
-        /// [`ToolCallStarted`](Self::ToolCallStarted) is already in the
-        /// transcript, so a renderer can show the request against the call
-        /// rather than repeating its arguments.
-        tool_use_id: String,
-        tool_name: String,
-        /// Preferred over `tool_name` for display when present.
-        display_name: Option<String>,
-        title: Option<String>,
-        description: Option<String>,
-        input: Value,
-        /// The path that caused a working-directory escalation.
-        blocked_path: Option<String>,
-        /// Why this escalated, in prose. May carry ANSI escapes — sanitize
-        /// before rendering.
-        decision_reason: Option<String>,
-        /// Machine-readable counterpart to `decision_reason`: `safetyCheck`,
-        /// `rule`, `mode`, `workingDir` and others. Lets a consumer treat a
-        /// safety escalation differently without parsing prose.
-        decision_reason_type: Option<String>,
-        options: Vec<PermissionOption>,
-    },
-    /// The agent asking the user something in its own words. Blocks the harness
-    /// exactly like a [`PermissionRequested`](Self::PermissionRequested), shares
-    /// its `request_id` space, and is retired by the same
-    /// [`PermissionDecided`](Self::PermissionDecided) — it arrives on the same
-    /// wire channel, and only what the user is shown differs.
-    ///
-    /// What differs is that there is no allow/deny in it. The call may always
-    /// run; the answer *is* the reply. So this payload carries no `options`, and
-    /// a consumer that renders it must offer a form rather than buttons —
-    /// approving it with nothing filled in tells the agent it was ignored.
+    /// The agent asking the user something in its own words. The harness is
+    /// blocked until the app replies, so a consumer that renders it must offer
+    /// a form rather than treating it as informational.
     QuestionsAsked {
         request_id: String,
-        /// The `AskUserQuestion` call being held. Its own row is already in the
-        /// transcript and will show the answers once it completes.
+        /// The call being held. Its own row is already in the transcript and
+        /// will show the answers once it completes.
         tool_use_id: String,
         /// One to four, per the tool's own schema.
         questions: Vec<Question>,
     },
-    /// How a [`PermissionRequested`](Self::PermissionRequested) was answered.
-    /// Minted by the app when it replies, not by the harness — the CLI's own ack
-    /// carries nothing worth keeping — so the transcript survives a reload with
-    /// the outcome intact.
-    PermissionDecided {
+    /// Minted by the app after answering a question so the transient question
+    /// card is retired in the live transcript.
+    QuestionAnswered {
         request_id: String,
         tool_use_id: String,
-        behavior: PermissionBehavior,
-        /// The chosen option's label, so the transcript reads back as what the
-        /// user actually picked rather than a bare allow/deny.
-        label: String,
-        /// True when the app answered on its own — an unsupported request
-        /// subtype, or a shutdown clearing what it could not ask about.
-        #[serde(default)]
-        automatic: bool,
-    },
-    /// A call refused with no question asked, because none could be. The
-    /// working-directory sandbox is the durable cause; a permission mode with no
-    /// answer channel is the other, and that one disappears once the harness can
-    /// ask.
-    PermissionDenied {
-        tool_name: String,
-        tool_use_id: String,
-        message: String,
     },
 
     Hook {
@@ -359,54 +293,6 @@ impl AgentEventPayload {
             _ => &mut [],
         }
     }
-}
-
-/// One answer the user can give to a [permission
-/// request](AgentEventPayload::PermissionRequested).
-///
-/// Deliberately carries no wire payload. The standing rule an option would
-/// apply is the harness's to compose and the harness's to send, so the app
-/// replies with [`id`](Self::id) alone and the harness resolves it — which keeps
-/// a rule that grants more than it appears to from ever being assembled on the
-/// UI side.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "events.ts")]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionOption {
-    /// Unique within its request, and the whole of what the app sends back.
-    pub id: String,
-    pub label: String,
-    pub kind: PermissionOptionKind,
-    /// Whether picking this lets the call run. Both `Deny` kinds carry
-    /// [`Deny`](PermissionBehavior::Deny); everything else allows.
-    pub behavior: PermissionBehavior,
-}
-
-/// What an option *does*, for a renderer that wants to group or order them.
-/// The set is closed on purpose: an unmappable suggestion is dropped rather
-/// than shown as a button whose effect can't be described.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "events.ts")]
-#[serde(rename_all = "snake_case")]
-pub enum PermissionOptionKind {
-    /// Allow this call and nothing else. Always offered, always first.
-    Once,
-    /// Allow this and everything matching a standing rule.
-    AlwaysRule,
-    /// Allow this and everything under a directory.
-    AlwaysDirectory,
-    /// Allow this and switch the session's stance so the next one doesn't ask.
-    SwitchMode,
-    /// Refuse. Always offered, always last.
-    Deny,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "events.ts")]
-#[serde(rename_all = "snake_case")]
-pub enum PermissionBehavior {
-    Allow,
-    Deny,
 }
 
 /// One question from a [`QuestionsAsked`](AgentEventPayload::QuestionsAsked).
@@ -658,68 +544,10 @@ pub struct McpServer {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub model: Option<String>,
-    /// How much the agent may do without asking. Modeled on Pi's
-    /// `permissionMode`, which is a closed set; Pi's `approval_policy` maps
-    /// onto these, gaining variants if it turns out to need them.
-    pub approval_policy: Option<PermissionMode>,
     pub sandbox: Option<String>,
     pub writable_roots: Vec<String>,
     pub network_access: Option<bool>,
     pub fast_mode: Option<String>,
-}
-
-/// Permission stance a session *runs under*, in roughly increasing order of
-/// autonomy. Every variant is settable, so this is what the app stores and
-/// sends — see [`PermissionMode`] for the wider set the CLI reports.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "events.ts")]
-#[serde(rename_all = "camelCase")]
-pub enum ApprovalPolicy {
-    /// Read-only: research and propose, change nothing.
-    Plan,
-    /// Prompt per action.
-    Manual,
-    /// Edits apply without prompting; other tools still ask.
-    AcceptEdits,
-    #[default]
-    Auto,
-    DontAsk,
-    /// Every permission check bypassed.
-    BypassPermissions,
-}
-
-impl ApprovalPolicy {
-    /// The `--permission-mode` flag value. Total, unlike the inbound direction:
-    /// the frontend always sends a real mode, so there is nothing to omit.
-    pub fn as_arg(self) -> &'static str {
-        match self {
-            ApprovalPolicy::Plan => "plan",
-            ApprovalPolicy::Manual => "manual",
-            ApprovalPolicy::AcceptEdits => "acceptEdits",
-            ApprovalPolicy::Auto => "auto",
-            ApprovalPolicy::DontAsk => "dontAsk",
-            ApprovalPolicy::BypassPermissions => "bypassPermissions",
-        }
-    }
-}
-
-/// What the CLI *reports* in `system/init`, which is a wider set than it
-/// accepts: `default` names the harness's own prompting stance, and
-/// `--permission-mode` rejects that name while offering `manual` for the same
-/// thing. Kept separate from [`ApprovalPolicy`] rather than remapped, so a
-/// round trip can't quietly turn one into the other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "events.ts")]
-#[serde(rename_all = "camelCase")]
-pub enum PermissionMode {
-    #[default]
-    Default,
-    Plan,
-    Manual,
-    AcceptEdits,
-    Auto,
-    DontAsk,
-    BypassPermissions,
 }
 
 /// Hand-rolled to avoid a date dependency for one display-only field; `seq`, not
@@ -834,46 +662,5 @@ mod tests {
         assert!(s.contains(r#""type":"delta""#) && s.contains(r#""delta":"text_delta""#));
         let back: AgentEventPayload = serde_json::from_str(&s).unwrap();
         assert_eq!(s, serde_json::to_string(&back).unwrap());
-    }
-
-    /// Every settable mode's wire name is also its flag value, so persisting a
-    /// mode and passing it to `--permission-mode` can't drift apart.
-    #[test]
-    fn every_settable_policy_matches_its_cli_arg() {
-        for p in [
-            ApprovalPolicy::Plan,
-            ApprovalPolicy::Manual,
-            ApprovalPolicy::AcceptEdits,
-            ApprovalPolicy::Auto,
-            ApprovalPolicy::DontAsk,
-            ApprovalPolicy::BypassPermissions,
-        ] {
-            let json = serde_json::to_string(&p).unwrap();
-            assert_eq!(json, format!("\"{}\"", p.as_arg()));
-        }
-    }
-
-    /// The CLI reports `default` in `system/init` even though its flag won't
-    /// take it. `PermissionMode` exists to hold that variant; `ApprovalPolicy`
-    /// must not gain it back, or an unsettable mode reaches the flag.
-    ///
-    /// Verified against v2.1.224: `plan`, `acceptEdits`, `bypassPermissions`
-    /// and `dontAsk` each report themselves, while both `auto` and `manual`
-    /// report `default` — so it names a real stance rather than an omitted
-    /// flag, and the init event can't say which of the two is in effect.
-    #[test]
-    fn reported_default_parses_as_permission_mode_only() {
-        let m: PermissionMode = serde_json::from_str(r#""default""#).unwrap();
-        assert_eq!(m, PermissionMode::Default);
-
-        assert!(serde_json::from_str::<ApprovalPolicy>(r#""default""#).is_err());
-    }
-
-    /// An index entry written before `permissionMode` existed reads as `auto`,
-    /// which is also the composer's default — so old sessions resume under the
-    /// mode the picker would show for them.
-    #[test]
-    fn default_policy_is_auto() {
-        assert_eq!(ApprovalPolicy::default(), ApprovalPolicy::Auto);
     }
 }

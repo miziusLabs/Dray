@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 
 import { useLocalStorage } from "@/hooks/useLocalStorage";
-import type { ApprovalPolicy, Effort, Harness, ModelId, PiModel } from "@/types/events";
+import type { Effort, Harness, ModelId, PiModel } from "@/types/events";
 
 /// Seeds for a first run with nothing stored. Once the user picks anything, their
 /// pick is the default — these are never read again.
@@ -10,7 +10,6 @@ const SEED: ComposerPrefs = {
   modelId: "pi",
   piModel: null,
   effortByModel: {},
-  permissionMode: "auto",
   useCloud: false,
 };
 
@@ -27,7 +26,6 @@ export type ComposerPrefs = {
   modelId: ModelId;
   piModel: PiModel | null;
   effortByModel: EffortByModel;
-  permissionMode: ApprovalPolicy;
   useCloud: boolean;
 };
 

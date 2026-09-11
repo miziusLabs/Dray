@@ -22,9 +22,6 @@ raw: JsonValue | null, };
 
 /**
  * What happened.
- *
- * Permission request/resolve is deliberately absent: no captured fixture shows
- * their shape, so the variants would be a guess. Add once captured.
  */
 export type AgentEventPayload = { "type": "turn_started" } & SessionInfo | { "type": "turn_completed", status: TurnStatus, stopReason: string | null, finalText: string | null, usage: Usage | null, durationMs: number | null, 
 /**
@@ -121,69 +118,20 @@ usingOverage: boolean,
 /**
  * Why overage isn't available — `org_level_disabled` observed.
  */
-overageDisabledReason: string | null, } | { "type": "permission_requested", 
+overageDisabledReason: string | null, } | { "type": "questions_asked", requestId: string, 
 /**
- * Correlates the reply. Also what
- * [`PermissionDecided`](Self::PermissionDecided) joins on, which is how
- * a reloaded transcript knows an answered request from a live one.
- */
-requestId: string, 
-/**
- * The call being held. The matching
- * [`ToolCallStarted`](Self::ToolCallStarted) is already in the
- * transcript, so a renderer can show the request against the call
- * rather than repeating its arguments.
- */
-toolUseId: string, toolName: string, 
-/**
- * Preferred over `tool_name` for display when present.
- */
-displayName: string | null, title: string | null, description: string | null, input: JsonValue, 
-/**
- * The path that caused a working-directory escalation.
- */
-blockedPath: string | null, 
-/**
- * Why this escalated, in prose. May carry ANSI escapes — sanitize
- * before rendering.
- */
-decisionReason: string | null, 
-/**
- * Machine-readable counterpart to `decision_reason`: `safetyCheck`,
- * `rule`, `mode`, `workingDir` and others. Lets a consumer treat a
- * safety escalation differently without parsing prose.
- */
-decisionReasonType: string | null, options: Array<PermissionOption>, } | { "type": "questions_asked", requestId: string, 
-/**
- * The `AskUserQuestion` call being held. Its own row is already in the
- * transcript and will show the answers once it completes.
+ * The call being held. Its own row is already in the transcript and
+ * will show the answers once it completes.
  */
 toolUseId: string, 
 /**
  * One to four, per the tool's own schema.
  */
-questions: Array<Question>, } | { "type": "permission_decided", requestId: string, toolUseId: string, behavior: PermissionBehavior, 
-/**
- * The chosen option's label, so the transcript reads back as what the
- * user actually picked rather than a bare allow/deny.
- */
-label: string, 
-/**
- * True when the app answered on its own — an unsupported request
- * subtype, or a shutdown clearing what it could not ask about.
- */
-automatic: boolean, } | { "type": "permission_denied", toolName: string, toolUseId: string, message: string, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "extension_notification", message: string, level: string, } | { "type": "model_request_started" } | { "type": "context_compaction_started" } | { "type": "context_compacted", 
+questions: Array<Question>, } | { "type": "question_answered", requestId: string, toolUseId: string, } | { "type": "hook", name: string, event: string, phase: HookPhase, exitCode: number | null, outcome: string | null, } | { "type": "extension_notification", message: string, level: string, } | { "type": "model_request_started" } | { "type": "context_compaction_started" } | { "type": "context_compacted", 
 /**
  * `manual` or `auto`.
  */
 trigger: string | null, preTokens: number | null, postTokens: number | null, durationMs: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
-
-/**
- * Permission stance a session *runs under*, in roughly increasing order of
- * autonomy. Every variant is settable, so this is what the app stores and
- * sends — see [`PermissionMode`] for the wider set the CLI reports.
- */
-export type ApprovalPolicy = "plan" | "manual" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions";
 
 /**
  * One thing the user attached, as the composer needs to draw it.
@@ -450,45 +398,6 @@ model: string, inputTokens: number | null, outputTokens: number | null, cachedIn
  */
 contextWindow: number | null, maxOutputTokens: number | null, };
 
-export type PermissionBehavior = "allow" | "deny";
-
-/**
- * What the CLI *reports* in `system/init`, which is a wider set than it
- * accepts: `default` names the harness's own prompting stance, and
- * `--permission-mode` rejects that name while offering `manual` for the same
- * thing. Kept separate from [`ApprovalPolicy`] rather than remapped, so a
- * round trip can't quietly turn one into the other.
- */
-export type PermissionMode = "default" | "plan" | "manual" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions";
-
-/**
- * One answer the user can give to a [permission
- * request](AgentEventPayload::PermissionRequested).
- *
- * Deliberately carries no wire payload. The standing rule an option would
- * apply is the harness's to compose and the harness's to send, so the app
- * replies with [`id`](Self::id) alone and the harness resolves it — which keeps
- * a rule that grants more than it appears to from ever being assembled on the
- * UI side.
- */
-export type PermissionOption = { 
-/**
- * Unique within its request, and the whole of what the app sends back.
- */
-id: string, label: string, kind: PermissionOptionKind, 
-/**
- * Whether picking this lets the call run. Both `Deny` kinds carry
- * [`Deny`](PermissionBehavior::Deny); everything else allows.
- */
-behavior: PermissionBehavior, };
-
-/**
- * What an option *does*, for a renderer that wants to group or order them.
- * The set is closed on purpose: an unmappable suggestion is dropped rather
- * than shown as a button whose effect can't be described.
- */
-export type PermissionOptionKind = "once" | "always_rule" | "always_directory" | "switch_mode" | "deny";
-
 export type PiModel = { provider: string, id: string, };
 
 export type PrCheck = { name: string, state: CheckState, 
@@ -600,8 +509,8 @@ export type Project = {
  */
 path: string, 
 /**
- * Folder name as of attaching. Cached so a project whose directory was
- * since renamed or removed still has a label.
+ * User-facing label. Starts as the folder name and can be edited without
+ * changing the directory a session runs in.
  */
 name: string, 
 /**
@@ -757,11 +666,6 @@ piModel: PiModel | null,
  */
 effort: Effort | null, 
 /**
- * Defaulted so entries written before this field read as the CLI's own
- * default rather than failing the whole index.
- */
-permissionMode: ApprovalPolicy, 
-/**
  * Defaulted so index entries written before this field parse as `Idle`.
  */
 status: SessionStatus, 
@@ -823,11 +727,6 @@ piModel: PiModel | null,
  */
 effort: Effort | null, 
 /**
- * Defaulted so entries written before this field read as the CLI's own
- * default rather than failing the whole index.
- */
-permissionMode: ApprovalPolicy, 
-/**
  * Defaulted so index entries written before this field parse as `Idle`.
  */
 status: SessionStatus, 
@@ -880,19 +779,17 @@ export type SessionTitleEvent = { sessionId: string, title: string, };
  * Settings that can change mid-session, so they arrive as events rather than
  * living only on [`SessionInfo`].
  */
-export type Settings = { model: string | null, 
-/**
- * How much the agent may do without asking. Modeled on Pi's
- * `permissionMode`, which is a closed set; Pi's `approval_policy` maps
- * onto these, gaining variants if it turns out to need them.
- */
-approvalPolicy: PermissionMode | null, sandbox: string | null, writableRoots: Array<string>, networkAccess: boolean | null, fastMode: string | null, };
+export type Settings = { model: string | null, sandbox: string | null, writableRoots: Array<string>, networkAccess: boolean | null, fastMode: string | null, };
 
 /**
- * One command or skill the user may type. `name` carries no leading prefix —
- * the picker adds `/` for commands or `$` for skills.
+ * One command the user may type. `name` carries no leading slash — the picker
+ * adds it — and may be namespaced by an extension.
  */
-export type SlashCommand = { name: string, description: string, argumentHint: string, aliases: Array<string>, isSkill: boolean, };
+export type SlashCommand = { name: string, description: string, argumentHint: string, aliases: Array<string>, 
+/**
+ * Skills are displayed with `$` while Pi still receives `/skill:`.
+ */
+isSkill: boolean, };
 
 /**
  * Where the current branch stands against its upstream — everything the push

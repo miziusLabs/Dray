@@ -19,10 +19,8 @@ import type { Question } from "@/types/events";
 
 /// The agent asking the reader something, rather than asking to run something.
 ///
-/// Sits where the permission card sits and answers the same way — the harness is
-/// blocked on it either way — but it carries no allow or deny. The call is never
-/// in question; the filled-in form *is* the answer, and submitting an empty one
-/// tells the agent it was ignored.
+/// The harness is blocked until the user answers. The filled-in form is the
+/// answer, and submitting an empty one tells the agent it was ignored.
 export default function QuestionRequest({
   questions,
   onAnswer,
@@ -33,7 +31,7 @@ export default function QuestionRequest({
   /// empty.
   onAnswer: (answers: Record<string, string>) => void;
 }) {
-  // One-shot, like the permission card: the reply can only be consumed once, so
+  // One-shot: the reply can only be consumed once, so
   // a second submit during the round trip has nothing to answer.
   const [sent, setSent] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);

@@ -75,7 +75,6 @@ function App() {
     modelId,
     piModel,
     effort,
-    permissionMode,
     projects,
     projectPath,
     branches,
@@ -89,7 +88,6 @@ function App() {
     error,
     setError,
     handleModelChange,
-    setPermissionMode,
     handleAttachProject,
     handleSelectProject,
     handleRenameProject,
@@ -103,7 +101,6 @@ function App() {
     handleInterrupt,
     queuedMessages,
     handleCancelQueued,
-    handleRespondPermission,
     handleAnswerQuestions,
     handleSelectSessionIndexItem,
     handleNewSession,
@@ -514,9 +511,7 @@ function App() {
   // `useHotkey`'s usual pair of reasons: it claims the chord, and the app's
   // custom menu carries no Settings item to swallow the key first.
   useHotkey(",", () => setSettingsOpen(true));
-  // No accelerator: Shift+Tab on its own. The CLI spends this chord on
-  // permission mode, which in practice gets set once and left; effort is the
-  // dial actually reached for mid-work, so it takes the cheapest key here.
+  // No accelerator: Shift+Tab cycles the effort setting for the current model.
   useHotkey(
     "Tab",
     () => {
@@ -692,14 +687,11 @@ function App() {
           }
           toolbar={
             <ComposerToolbar
-              harness={harness}
               models={visibleModels}
               modelId={modelId}
               piModel={piModel}
               effort={effort}
               onModelChange={handleModelChange}
-              permissionMode={permissionMode}
-              onPermissionModeChange={setPermissionMode}
               projects={projects}
               projectPath={projectPath}
               onSelectProject={handleSelectProject}
@@ -736,7 +728,6 @@ function App() {
           selectedSessionId ? streamingContentBlock[selectedSessionId] ?? null : null
         }
         onOpenSession={(id) => void handleSelectSessionIndexItem(id)}
-        onRespondPermission={handleRespondPermission}
         onAnswerQuestions={handleAnswerQuestions}
         busy={busy}
         compacting={compacting}

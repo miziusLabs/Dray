@@ -1,8 +1,7 @@
 use crate::{
     attachments,
     events::{
-        now_rfc3339, AgentEvent, AgentEventPayload, ApprovalPolicy, ImageRef, MessageSender,
-        PermissionBehavior,
+        now_rfc3339, AgentEvent, AgentEventPayload, ImageRef, MessageSender,
     },
     git,
     harness::{pi, Harness::Pi},
@@ -300,7 +299,6 @@ impl SessionManager {
         effort: Option<Effort>,
         title_model: Option<PiModel>,
         title_effort: Option<Effort>,
-        permission_mode: ApprovalPolicy,
         cwd: &str,
         // Recorded, not acted on for Cloud sessions. The branch picker supplies
         // metadata and never changes the host checkout when Cloud is enabled.
@@ -382,7 +380,6 @@ impl SessionManager {
                 prompt,
                 model,
                 effort,
-                permission_mode,
                 parent_session_id,
             );
             item.pi_model = pi_model.clone();
@@ -416,7 +413,6 @@ impl SessionManager {
                 harness,
                 &model_spec,
                 effort,
-                permission_mode,
                 launch_cwd,
                 &session_cwd,
                 cloud_name.as_deref(),
@@ -516,16 +512,10 @@ impl SessionManager {
                 model,
                 model_spec.pi_model.as_ref(),
                 effort,
-                permission_mode,
             )
             .await?;
 
-            // A model call is open, so this prompt is held rather than sent, and
-            // none of the live controls below fire with it. `set_model` and
-            // `set_permission_mode` were verified switching an *idle* child;
-            // what they do to a turn mid-flight is unknown, and a queued prompt
-            // is not worth finding out on. The index above has the user's pick
-            // either way, so the next idle send applies it.
+            // A model call is open, so this prompt is held rather than sent.
             //
             // Gated on the turn, not on `busy`: a session holding a background
             // task reads busy with its main thread idle, and queueing there left
@@ -558,9 +548,6 @@ impl SessionManager {
             if s.model != model || s.pi_model != model_spec.pi_model {
                 s.set_model(&model_spec).await?;
             }
-            if s.permission_mode != permission_mode {
-                s.set_permission_mode(permission_mode).await?;
-            }
 
             // Last thing before the prompt goes down the pipe: the child is idle
             // but alive, so the narrower the gap the less of the user's own
@@ -576,7 +563,6 @@ impl SessionManager {
             model,
             model_spec.pi_model.as_ref(),
             effort,
-            permission_mode,
         )
         .await?;
 
@@ -611,7 +597,6 @@ impl SessionManager {
             session_harness,
             &model_spec,
             effort,
-            permission_mode,
             launch_cwd,
             &session_cwd,
             cloud_name.as_deref(),
@@ -743,25 +728,7 @@ impl SessionManager {
         session.cancel_queued().await
     }
 
-    /// Answers a permission request. Errors when the session has no live child:
-    /// the request died with the process, and the CLI will re-ask on resume.
-    pub async fn respond_permission(
-        &self,
-        session_id: &str,
-        request_id: &str,
-        option_id: &str,
-        app: &AppHandle,
-    ) -> Result<()> {
-        let mut sessions_guard = self.sessions.lock().await;
-        let Some(session) = sessions_guard.get_mut(session_id) else {
-            bail!("no running session {session_id}");
-        };
-        session.respond_permission(request_id, option_id, app).await
-    }
-
-    /// Answers an `AskUserQuestion`. Fails for a dead child like
-    /// [`respond_permission`](Self::respond_permission) does, and for the same
-    /// reason: only the process that asked can be told.
+    /// Answers an `AskUserQuestion`. Only the process that asked can be told.
     pub async fn answer_questions(
         &self,
         session_id: &str,
@@ -895,9 +862,8 @@ impl Drop for ProcessJob {
 pub struct Session {
     pub id: String,
     pub child: Child,
-    /// Shared with the stdout task, which has to write back on its own: an
-    /// unanswerable `control_request` must be refused from where it is read,
-    /// since the CLI blocks its turn until something replies.
+    /// Shared with the stdout task, which writes extension UI responses on
+    /// behalf of the frontend.
     pub stdin: Arc<Mutex<ChildStdin>>,
     pub harness: Harness,
     /// Whether the child is a Pi process inside a Docker Cloud sandbox.
@@ -908,7 +874,6 @@ pub struct Session {
     pub model: ModelId,
     pub pi_model: Option<PiModel>,
     pub effort: Option<Effort>,
-    pub permission_mode: ApprovalPolicy,
     pub events: Arc<Mutex<Vec<AgentEvent>>>,
     pub seq: Arc<AtomicU64>,
     /// Shared with the stdout task: sends and mapped lifecycle events update it.
@@ -934,7 +899,6 @@ impl Session {
         harness: Harness,
         model: &Model,
         effort: Option<Effort>,
-        permission_mode: ApprovalPolicy,
         cwd: &str,
         // The host-side marker used for local UI snapshots. A Cloud's real
         // workspace is `/home/agent/workspace` inside Docker.
@@ -949,7 +913,6 @@ impl Session {
             session_id,
             model,
             effort,
-            permission_mode,
             cwd,
             session_cwd,
             cloud_name,
@@ -1094,41 +1057,10 @@ impl Session {
         Ok(())
     }
 
-    /// Switches the permission stance of a running child. Unlike effort, the CLI
-    /// does have a `set_permission_mode` subtype, so this needs no respawn.
-    pub async fn set_permission_mode(&mut self, mode: ApprovalPolicy) -> Result<()> {
-        // Pi permissions are configured by its global/project settings and
-        // extensions; it has no runtime permission-mode RPC command.
-        self.permission_mode = mode;
-        Ok(())
-    }
-
-    /// Answers a pending permission request and records the decision.
-    ///
-    /// The reply goes out before the event is minted: the CLI's turn is blocked
-    /// on it, and a failure to persist the transcript row is not worth holding
-    /// an agent still for. Taking the entry out of the map is what makes this
-    /// single-shot — a second click on a card the frontend hasn't repainted yet
-    /// finds nothing and errors rather than double-answering.
-    pub async fn respond_permission(
-        &mut self,
-        request_id: &str,
-        option_id: &str,
-        app: &AppHandle,
-    ) -> Result<()> {
-        let _ = (request_id, option_id, app);
-        bail!("Pi does not expose permission requests")
-    }
-
     /// Sends the user's answers back and retires the card.
     ///
-    /// Single-shot and reply-first for the same reasons as
-    /// [`respond_permission`](Self::respond_permission), and it mints the same
-    /// `PermissionDecided` — the frontend has one way to clear a pending card,
-    /// and giving questions a second one would mean two things to keep in step.
-    /// The verdict is always an allow; the label is what actually happened,
-    /// since no option was picked.
-    ///
+    /// Single-shot and reply-first: the request is removed before the response
+    /// is written, so a second answer cannot be sent for the same dialog.
     /// An empty map is a skip, not an error: the harness turns it into "the user
     /// did not answer", which is the truthful thing to tell the agent.
     pub async fn answer_questions(
@@ -1143,29 +1075,22 @@ impl Session {
             .expect("Pi UI request mutex poisoned")
             .remove(request_id)
             .with_context(|| format!("no pending Pi UI request {request_id}"))?;
-        let label = answers
-            .get(&pending.question)
-            .cloned()
-            .unwrap_or_else(|| "Skipped".into());
         write_line(&self.stdin, &pending.response(&answers)).await?;
 
-        let decision = AgentEvent {
+        let answered = AgentEvent {
             id: Uuid::now_v7().to_string(),
             session_id: self.id.clone(),
             harness: self.harness,
             seq: self.seq.fetch_add(1, Relaxed),
             ts: now_rfc3339(),
             turn_id: None,
-            payload: AgentEventPayload::PermissionDecided {
+            payload: AgentEventPayload::QuestionAnswered {
                 request_id: request_id.to_string(),
                 tool_use_id: format!("pi-ui-{request_id}"),
-                behavior: PermissionBehavior::Allow,
-                label,
-                automatic: false,
             },
             raw: None,
         };
-        app.emit("agent_event", &decision)?;
+        app.emit("agent_event", &answered)?;
 
         Ok(())
     }

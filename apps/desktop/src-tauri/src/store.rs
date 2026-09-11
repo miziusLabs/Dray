@@ -11,7 +11,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
-    events::{now_rfc3339, AgentEvent, ApprovalPolicy},
+    events::{now_rfc3339, AgentEvent},
     models::{Effort, ModelId, PiModel},
     session::Harness,
 };
@@ -62,10 +62,6 @@ pub struct SessionIndexItem {
     /// `None` for models that take no effort flag.
     #[serde(default)]
     pub effort: Option<Effort>,
-    /// Defaulted so entries written before this field read as the CLI's own
-    /// default rather than failing the whole index.
-    #[serde(default)]
-    pub permission_mode: ApprovalPolicy,
     /// Defaulted so index entries written before this field parse as `Idle`.
     #[serde(default)]
     pub status: SessionStatus,
@@ -239,7 +235,6 @@ impl SessionIndexItem {
         first_prompt: &str,
         model: ModelId,
         effort: Option<Effort>,
-        permission_mode: ApprovalPolicy,
         parent_session_id: Option<&str>,
     ) -> Self {
         let now = now_rfc3339();
@@ -257,7 +252,6 @@ impl SessionIndexItem {
             model,
             pi_model: None,
             effort,
-            permission_mode,
             status: SessionStatus::default(),
             fork_from: None,
             parent_session_id: parent_session_id.map(str::to_string),
@@ -294,7 +288,6 @@ impl SessionIndexItem {
             model: self.model,
             pi_model: self.pi_model.clone(),
             effort: self.effort,
-            permission_mode: self.permission_mode,
             status: SessionStatus::default(),
             fork_from: Some(self.session_id.clone()),
             // Inherited, so the copy sits exactly where the original does: the
@@ -418,7 +411,6 @@ pub async fn touch_session_index_item(
     model: ModelId,
     pi_model: Option<&PiModel>,
     effort: Option<Effort>,
-    permission_mode: ApprovalPolicy,
 ) -> Result<()> {
     let _guard = INDEX_LOCK.lock().await;
 
@@ -431,7 +423,6 @@ pub async fn touch_session_index_item(
     item.model = model;
     item.pi_model = pi_model.cloned();
     item.effort = effort;
-    item.permission_mode = permission_mode;
 
     write_session_index(&sessions).await
 }
@@ -883,9 +874,6 @@ mod tests {
         // Reads back as a model no build lists, so it can never reach a spawn.
         assert_eq!(item.model, ModelId::Unknown);
         assert!(crate::models::find_model(item.model, item.pi_model.as_ref()).is_none());
-        // Absent reads as the composer's own default, so an old session resumes
-        // under the mode its picker would show.
-        assert_eq!(item.permission_mode, ApprovalPolicy::Auto);
     }
 
     #[test]
@@ -917,7 +905,6 @@ mod tests {
             "add the PR panel",
             ModelId::Pi,
             Some(Effort::High),
-            ApprovalPolicy::AcceptEdits,
             None,
         );
         parent.archived = true;
@@ -934,7 +921,6 @@ mod tests {
         // How the agent runs is inherited; this session's own history is not.
         assert_eq!(fork.model, parent.model);
         assert_eq!(fork.effort, parent.effort);
-        assert_eq!(fork.permission_mode, parent.permission_mode);
         assert_eq!(fork.status, SessionStatus::Idle);
         assert!(!fork.archived, "a fork is new work, not settled work");
         assert!(!fork.pinned);
@@ -954,7 +940,6 @@ mod tests {
             "hi",
             ModelId::Pi,
             None,
-            ApprovalPolicy::Auto,
             None,
         );
         // Cloud branch metadata is recorded directly rather than rebuilt from
@@ -977,7 +962,6 @@ mod tests {
             "hi",
             ModelId::Pi,
             None,
-            ApprovalPolicy::Auto,
             None,
         );
         assert_eq!(session_branch(&plain, None).as_deref(), Some("feature"));
@@ -1000,7 +984,6 @@ mod tests {
             "work the issue",
             ModelId::Pi,
             None,
-            ApprovalPolicy::Auto,
             Some("orchestrator"),
         );
         assert_eq!(spawned.parent_session_id.as_deref(), Some("orchestrator"));
@@ -1029,7 +1012,6 @@ mod tests {
             "add the PR panel",
             ModelId::Pi,
             None,
-            ApprovalPolicy::Auto,
             None,
         );
 
@@ -1151,7 +1133,6 @@ mod tests {
                 "hi",
                 ModelId::Pi,
                 None,
-                ApprovalPolicy::Auto,
                 None,
             );
             i.archived = archived;
@@ -1192,7 +1173,6 @@ mod tests {
             "hi",
             ModelId::Pi,
             None,
-            ApprovalPolicy::Auto,
             None,
         );
 
@@ -1211,7 +1191,6 @@ mod tests {
             "hi",
             ModelId::Pi,
             Some(Effort::High),
-            ApprovalPolicy::AcceptEdits,
             None,
         );
         let json = serde_json::to_value(SessionSnapshot {

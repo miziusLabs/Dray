@@ -26,8 +26,7 @@ This file is the implementation map for agents working in this repository. Keep 
 - Project picker with attach, rename, delete-from-picker, recent-project ordering, and remembered selection.
 - Git branch discovery and switching, including dirty-worktree handling before checkout.
 - Dynamic Pi model catalog with model selection, reasoning/effort selection, configurable model cycling, and separate model/effort preferences for generated session titles.
-- Permission modes: Auto, Plan, Accept edits, Ask every time, and Bypass permissions.
-- Rich transcript rendering for assistant text, user text, reasoning, tool calls, grouped tool calls, file edits, diffs, images, checkpoints, compaction, permission requests, and structured question requests.
+- Rich transcript rendering for assistant text, user text, reasoning, tool calls, grouped tool calls, file edits, diffs, images, checkpoints, compaction, and structured question requests.
 - Streaming assistant/tool output and live work indicators.
 - Prompt queuing while a turn is already running, with cancellation/restoration of a queued prompt when still retractable.
 - File attachments via picker or drag/drop, image previews, persistent archived result images, transcript thumbnails, and a keyboard-navigable image lightbox.
@@ -78,13 +77,12 @@ Top-level components in `src/components/`:
 
 Files in `src/components/composer/`:
 
-- `ComposerToolbar.tsx` — attachment, project, cloud/local, branch, model, effort, permission, and context controls.
+- `ComposerToolbar.tsx` — attachment, project, cloud/local, branch, model, effort, and context controls.
 - `ProjectSelector.tsx` — attach/select/rename/remove projects.
 - `BranchSelector.tsx` — branch picker and dirty-worktree warning context.
 - `BranchSwitchDialog.tsx` — branch-switch resolution when local changes need handling.
 - `CloudToggle.tsx` — toggles Docker-backed Cloud Session mode.
 - `ModelSelector.tsx` — model and effort picker plus model-label/key helpers.
-- `PermissionSelector.tsx` — approval/permission policy picker.
 - `ContextMeter.tsx` — visual model-context usage meter.
 - `AttachmentTray.tsx` — pending attachment previews/removal.
 - `FileMentionMenu.tsx` — `@file` search results.
@@ -112,7 +110,6 @@ Files in `src/components/chat/`:
 - `LinkDialog.tsx` — confirmation/details for links that need explicit handling.
 - `ImageRow.tsx` — sent/returned image rows and overflow behavior.
 - `ImageLightbox.tsx` — full-size image viewer with multi-image keyboard navigation.
-- `PermissionRequest.tsx` — inline agent permission decision UI.
 - `QuestionRequest.tsx` — structured question/answer UI from the agent.
 - `QueuedMessages.tsx` — queued follow-up prompts and cancellation.
 - `CheckpointRail.tsx` — turn/checkpoint navigation rail.
@@ -145,7 +142,7 @@ Files in `src/components/changes/`:
 
 Files in `src/hooks/`:
 
-- `useSessions.ts` — central frontend session state: session index/snapshots, model/permission/project/branch/cloud controls, send/queue/interrupt/stop/respond/fork/detach/delete operations, backend event subscriptions, status/unread state, notices, and context/background-task derivation.
+- `useSessions.ts` — central frontend session state: session index/snapshots, model/project/branch/cloud controls, send/queue/interrupt/stop/respond/fork/detach/delete operations, backend event subscriptions, status/unread state, notices, and context/background-task derivation.
 - `useChanges.ts` — fetches and caches turn/revision change sets and individual file versions.
 - `useRepo.ts` — HEAD tree, commit history, and sync status for the repository Changes view.
 - `useWorkStatus.ts` — working tree, branch, upstream, default branch, and ahead/dirty state for handoff actions.
@@ -156,7 +153,7 @@ Files in `src/hooks/`:
 - `useFileSearch.ts` — warms and queries the Rust fuzzy file index.
 - `useSlashCommands.ts` — loads/caches Pi commands and skills per working directory.
 - `useRecentCommands.ts` — persists recent command/skill usage.
-- `useComposerPrefs.ts` — persisted composer model/effort/permission/cloud preferences.
+- `useComposerPrefs.ts` — persisted composer model/effort/cloud preferences.
 - `useTitlePrefs.ts` — persisted title-generation model and effort.
 - `useDraft.ts` — per-session unsent composer drafts.
 - `useNotices.ts` — in-app notice state.
@@ -207,7 +204,7 @@ Files in `src-tauri/src/`:
 
 - `main.rs` — native executable entry point.
 - `lib.rs` — Tauri builder, window lifecycle, command registration, and frontend-facing command wrappers.
-- `session.rs` — core process/session manager: spawn/resume Pi, local/cloud execution, stdin protocol, event streaming, prompt queuing, model/permission changes, background-task control, forks, interrupt/kill, deletion, and status publication.
+- `session.rs` — core process/session manager: spawn/resume Pi, local/cloud execution, stdin protocol, event streaming, prompt queuing, model changes, background-task control, forks, interrupt/kill, deletion, and status publication.
 - `store.rs` — persistent session logs/index/snapshots, status flags, nesting metadata, and archive/pin state.
 - `projects.rs` — persistent attached-project list, names, and recent selection ordering.
 - `git.rs` — branch operations, tree snapshots, turn/revision diffs, file-version reads, commit log, work/sync status, commit, and push operations.
@@ -247,7 +244,6 @@ Use `DRAY_CLOUD_IMAGE` to override the Docker image tag. `GITHUB_TOKEN` or an au
 - Session status distinguishes active work, waiting-for-user requests, completed-but-unread work, and idle/read work. Sidebar indicators and OS notices depend on that distinction.
 - Parent/child session nesting represents forks/subsessions. Detach changes hierarchy; delete removes the session and its persisted data/resources.
 - Cloud containers and volumes are named from session/cloud IDs. Treat cleanup logic as user-data-sensitive.
-- Permission answers must only use options supplied by the underlying Pi request; do not widen a permission in the frontend.
 - Generated TypeScript event types mirror Rust. Change the Rust model first and regenerate.
 - Local links in Markdown use a proxy/unwrap path because normal browser link handling cannot safely expose arbitrary local paths directly.
 

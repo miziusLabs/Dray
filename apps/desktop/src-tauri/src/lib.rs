@@ -1,6 +1,5 @@
 use crate::{
     attachments::Attachment,
-    events::ApprovalPolicy,
     files::FileMatch,
     git::BranchList,
     harness::pi::commands::SlashCommand,
@@ -53,7 +52,6 @@ async fn send_msg(
     effort: Option<Effort>,
     title_model: Option<PiModel>,
     title_effort: Option<Effort>,
-    permission_mode: ApprovalPolicy,
     cwd: &str,
     branch: Option<&str>,
     use_cloud: bool,
@@ -78,7 +76,6 @@ async fn send_msg(
             effort,
             title_model,
             title_effort,
-            permission_mode,
             cwd,
             branch,
             use_cloud,
@@ -417,24 +414,6 @@ async fn cancel_queued(
     Ok(manager.cancel_queued(session_id).await)
 }
 
-/// Answers a permission request the agent is blocked on. `option_id` names one
-/// of the options carried on the `permission_requested` event — the standing
-/// rule it may apply never leaves the backend, so the frontend cannot widen a
-/// grant beyond what the CLI proposed.
-#[tauri::command]
-async fn respond_permission(
-    session_id: &str,
-    request_id: &str,
-    option_id: &str,
-    manager: State<'_, SessionManager>,
-    app: AppHandle,
-) -> Result<(), String> {
-    manager
-        .respond_permission(session_id, request_id, option_id, &app)
-        .await
-        .map_err(|e| e.to_string())
-}
-
 /// Answers the questions on a `questions_asked` event. `answers` is keyed by
 /// each question's verbatim text — the CLI matches on the string — and a
 /// question left out of it is one the user skipped, which is a real answer
@@ -546,7 +525,6 @@ pub fn run() {
             mark_session_idle,
             interrupt_session,
             cancel_queued,
-            respond_permission,
             answer_questions,
             notifications::notify_session,
             github::prs_for_branch,

@@ -13,23 +13,13 @@ export type ToolGroup = {
 /// Either a lone event or a collapsed run of tool calls.
 export type WorkItem = AgentEvent | ToolGroup;
 
-/// The `permission_requested` payload, narrowed out of the union once here so
-/// the renderer doesn't re-check a type the builder already established.
-export type PermissionRequestPayload = Extract<
-  AgentEvent["payload"],
-  { type: "permission_requested" }
->;
-
 export type QuestionsAskedPayload = Extract<
   AgentEvent["payload"],
   { type: "questions_asked" }
 >;
 
-/// Something the agent is blocked on until the user answers. Two shapes, one
-/// list: they arrive on the same channel, share a `requestId` space, and are
-/// retired by the same `permission_decided`, so splitting them would mean two
-/// pending sets that have to stay ordered against each other.
-export type PendingAsk = PermissionRequestPayload | QuestionsAskedPayload;
+/// A questionnaire the agent is blocked on until the user answers.
+export type PendingAsk = QuestionsAskedPayload;
 
 export function isToolGroup(item: WorkItem): item is ToolGroup {
   return "kind" in item && item.kind === "tool_group";
@@ -69,7 +59,6 @@ const RENDERS = new Set([
   "extension_notification",
   "context_compacted",
   "rate_limited",
-  "permission_denied",
 ]);
 
 /// Whether an item draws a row. A group always does — it is built from tool
@@ -247,11 +236,8 @@ export function buildTranscript(
   /// The events, cut into user-prompt-to-turn-completed spans.
   turns: Turn[];
   resultByCallId: Map<string, ToolResult>;
-  /// Consent requests and questions still waiting on the user, oldest first.
-  ///
-  /// Lifted out of the turns on purpose. A main-thread request would sit buried
-  /// in a turn that collapses once it closes. One place, below the transcript,
-  /// keeps it visible while it waits for the user.
+  /// Questions still waiting on the user, oldest first. Lifted out of the turns
+  /// so a request cannot be buried in a turn that collapses while it waits.
   pendingAsks: PendingAsk[];
 } {
   const events = [...source].sort(bySeq);
@@ -287,13 +273,10 @@ export function buildTranscript(
       for (const callId of open) abandoned.add(callId);
       open.clear();
     }
-    if (
-      event.payload.type === "permission_requested" ||
-      event.payload.type === "questions_asked"
-    ) {
+    if (event.payload.type === "questions_asked") {
       asks.push(event.payload);
     }
-    if (event.payload.type === "permission_decided") {
+    if (event.payload.type === "question_answered") {
       answered.add(event.payload.requestId);
     }
   }
