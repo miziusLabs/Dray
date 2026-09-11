@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isImagePath, pastedImagePath } from "@/lib/paste";
+import { isImagePath, pastedFilePath, pastedImagePath } from "@/lib/paste";
 
 describe("pasted image paths", () => {
   it("recognizes supported image extensions case-insensitively", () => {
@@ -17,5 +17,12 @@ describe("pasted image paths", () => {
   it("falls back to a plain path and ignores non-file text", () => {
     expect(pastedImagePath("", '"/tmp/photo.webp"')).toBe("/tmp/photo.webp");
     expect(pastedImagePath("", "Here is /tmp/photo.webp")).toBe(null);
+  });
+
+  it("recognizes pasted paths for non-image files", () => {
+    expect(pastedFilePath("file:///Users/me/notes.txt", "")).toBe(
+      "/Users/me/notes.txt",
+    );
+    expect(pastedFilePath("", "~/Documents/report.pdf")).toBe("~/Documents/report.pdf");
   });
 });

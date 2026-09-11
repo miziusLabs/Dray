@@ -114,6 +114,15 @@ async fn save_pasted_image(bytes: Vec<u8>, mime_type: String) -> Result<Attachme
         .map_err(|e| e.to_string())
 }
 
+/// Saves non-image bytes from a clipboard paste when the webview did not expose
+/// the original filesystem path.
+#[tauri::command]
+async fn save_pasted_file(bytes: Vec<u8>, name: String) -> Result<Attachment, String> {
+    attachments::save_pasted_file(bytes, name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn list_models(harness: Option<&str>, cwd: Option<&str>) -> Result<Vec<Model>, String> {
     match harness {
@@ -523,6 +532,7 @@ pub fn run() {
             send_msg,
             read_attachments,
             save_pasted_image,
+            save_pasted_file,
             list_models,
             list_slash_commands,
             warm_file_index,

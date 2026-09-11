@@ -16,7 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   addAttachmentPaths,
-  addImagePath,
+  addPastedFile,
   addPastedImage,
   clearAttachments,
   pickAttachments,
@@ -39,7 +39,7 @@ import {
   slashPrefix,
   slashQuery,
 } from "@/lib/slash";
-import { isImagePath, pastedImagePath } from "@/lib/paste";
+import { pastedFilePath } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 import type {
   Effort,
@@ -805,16 +805,19 @@ export default function ChatInput({
                 }}
                 onPaste={(e) => {
                   const clipboard = e.clipboardData;
-                  const fileWithPath = Array.from(clipboard.files).find((file) => {
-                    const path = (file as File & { path?: string }).path;
-                    return path && isImagePath(path);
-                  });
+                  // Tauri exposes the source path for files copied from a file
+                  // manager on some platforms. Do not restrict this to images:
+                  // the backend already knows how to send every other file as a
+                  // path mention.
+                  const fileWithPath = Array.from(clipboard.files).find(
+                    (file) => Boolean((file as File & { path?: string }).path),
+                  );
                   const filePath = fileWithPath
                     ? (fileWithPath as File & { path?: string }).path
                     : undefined;
                   const path =
                     filePath ??
-                    pastedImagePath(
+                    pastedFilePath(
                       clipboard.getData("text/uri-list"),
                       clipboard.getData("text/plain"),
                     );
@@ -822,31 +825,39 @@ export default function ChatInput({
                   if (path) {
                     e.preventDefault();
                     const fallback = clipboard.getData("text/plain") || path;
-                    void addImagePath(sessionId, path)
+                    void addAttachmentPaths(sessionId, [path])
                       .then((attached) => {
                         if (!attached) insertPastedText(fallback);
                       })
                       .catch(() => {
-                        // A stale or unreadable image path is still ordinary
+                        // A stale or unreadable file path is still ordinary
                         // clipboard text, so restore it instead of losing it.
                         insertPastedText(fallback);
                       });
                     return;
                   }
 
-                  const imageItem = Array.from(clipboard.items).find(
-                    (item) => item.kind === "file" && item.type.startsWith("image/"),
+                  // Some webviews provide clipboard bytes without the original
+                  // path. Preserve the image path's existing behavior and save
+                  // other file types to a temporary path for the same tray/send
+                  // pipeline.
+                  const fileItem = Array.from(clipboard.items).find(
+                    (item) => item.kind === "file",
                   );
-                  const imageFile = imageItem?.getAsFile();
-                  if (!imageFile) return;
+                  const file = fileItem?.getAsFile();
+                  if (!file) return;
 
                   e.preventDefault();
-                  void imageFile
+                  void file
                     .arrayBuffer()
-                    .then((buffer) =>
-                      addPastedImage(sessionId, new Uint8Array(buffer), imageFile.type),
-                    )
-                    .catch((error) => console.error("[paste image]", error));
+                    .then((buffer) => {
+                      const bytes = new Uint8Array(buffer);
+                      if (file.type.startsWith("image/")) {
+                        return addPastedImage(sessionId, bytes, file.type);
+                      }
+                      return addPastedFile(sessionId, bytes, file.name);
+                    })
+                    .catch((error) => console.error("[paste file]", error));
                 }}
                 // Fires for arrow keys, clicks, and drags alike, so the picker
                 // follows the caret however it moved rather than only on typing.

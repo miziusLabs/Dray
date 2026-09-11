@@ -170,6 +170,36 @@ pub async fn save_pasted_image(bytes: Vec<u8>, mime_type: String) -> Result<Atta
     }
 }
 
+/// Persists arbitrary file bytes pasted from the system clipboard when the
+/// webview does not provide the source path. The original basename is retained
+/// for the tray, while the UUID keeps the temporary path collision-free.
+pub async fn save_pasted_file(bytes: Vec<u8>, name: String) -> Result<Attachment> {
+    if bytes.is_empty() {
+        anyhow::bail!("pasted file is empty");
+    }
+
+    let name = Path::new(&name)
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "pasted-file".to_string());
+    let path = std::env::temp_dir().join(format!("dray-pasted-{}-{name}", Uuid::now_v7()));
+    fs::write(&path, bytes)
+        .await
+        .context("could not save pasted file")?;
+
+    match describe(&path.to_string_lossy()).await {
+        Ok(mut attachment) => {
+            attachment.name = name;
+            Ok(attachment)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&path).await;
+            Err(error)
+        }
+    }
+}
+
 /// `~/.dray/attachments/<session-id>`, creating it if needed.
 async fn attachments_dir(session_id: &str) -> Result<PathBuf> {
     let path = get_home_app_dir()

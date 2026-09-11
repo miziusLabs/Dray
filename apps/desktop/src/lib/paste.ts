@@ -32,22 +32,28 @@ function isAbsolutePath(path: string): boolean {
   );
 }
 
-/// Finds an image path copied from Finder/Explorer or a terminal. URI lists are
+/// Finds a file path copied from Finder/Explorer or a terminal. URI lists are
 /// preferred because they preserve paths containing spaces; plain text covers a
-/// path copied directly from a shell or file info panel.
-export function pastedImagePath(uriList: string, plainText: string): string | null {
+/// path copied directly from a shell or file info panel. The caller validates
+/// the result before attaching it, so a path-looking piece of ordinary text is
+/// still inserted when it does not point to a readable file.
+export function pastedFilePath(uriList: string, plainText: string): string | null {
   const uri = uriList
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith("#") && line.startsWith("file:"));
   const uriPath = uri ? fileUriPath(uri) : null;
-  if (uriPath && isImagePath(uriPath)) return uriPath;
+  if (uriPath) return uriPath;
 
   const text = unquote(plainText.trim());
-  if (text.startsWith("file:")) {
-    const path = fileUriPath(text);
-    return path && isImagePath(path) ? path : null;
-  }
+  if (text.startsWith("file:")) return fileUriPath(text);
 
-  return isAbsolutePath(text) && isImagePath(text) ? text : null;
+  return isAbsolutePath(text) ? text : null;
+}
+
+/// Finds an image path from the generic pasted-file path while retaining the
+/// image-only helper for callers that need to classify a path without reading it.
+export function pastedImagePath(uriList: string, plainText: string): string | null {
+  const path = pastedFilePath(uriList, plainText);
+  return path && isImagePath(path) ? path : null;
 }
