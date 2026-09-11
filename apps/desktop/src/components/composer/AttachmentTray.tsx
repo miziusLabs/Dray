@@ -67,10 +67,10 @@ export default function AttachmentTray({
                 <img
                   src={attachment.preview}
                   alt={attachment.name}
-                  className="size-14 rounded-lg border border-[oklch(1_0_0/8%)] bg-card object-cover"
+                  className="size-14 rounded-lg bg-card object-cover"
                 />
               ) : (
-                <div className="flex h-14 max-w-56 items-center gap-2 rounded-lg border border-[oklch(1_0_0/8%)] bg-card px-2.5">
+                <div className="flex h-14 max-w-56 items-center gap-2 rounded-lg bg-card px-2.5">
                   <FileIcon path={attachment.path} className="size-5" />
 
                   {/* `min-w-0` so the name truncates instead of setting the tile's
