@@ -105,6 +105,15 @@ async fn read_attachments(paths: Vec<String>) -> Vec<Attachment> {
     attachments::read_attachments(paths).await
 }
 
+/// Saves image bytes from a clipboard paste and returns the same tray shape as a
+/// picked or dropped image.
+#[tauri::command]
+async fn save_pasted_image(bytes: Vec<u8>, mime_type: String) -> Result<Attachment, String> {
+    attachments::save_pasted_image(bytes, mime_type)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn list_models(harness: Option<&str>, cwd: Option<&str>) -> Result<Vec<Model>, String> {
     match harness {
@@ -513,6 +522,7 @@ pub fn run() {
             get_codex_usage,
             send_msg,
             read_attachments,
+            save_pasted_image,
             list_models,
             list_slash_commands,
             warm_file_index,

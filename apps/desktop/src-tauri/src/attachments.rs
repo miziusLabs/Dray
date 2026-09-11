@@ -83,6 +83,14 @@ fn image_mime(path: &Path) -> Option<&'static str> {
         .map(|(_, mime)| *mime)
 }
 
+fn image_extension(mime_type: &str) -> Option<&'static str> {
+    let mime_type = mime_type.to_ascii_lowercase();
+    IMAGE_TYPES
+        .iter()
+        .find(|(_, mime)| *mime == mime_type)
+        .map(|(ext, _)| *ext)
+}
+
 /// Reads one path into the shape the composer draws. Errors for a directory or
 /// an unreadable path, which the command below drops rather than propagating —
 /// dragging a folder in alongside two files should attach the two files.
@@ -136,6 +144,30 @@ pub async fn read_attachments(paths: Vec<String>) -> Vec<Attachment> {
         }
     }
     out
+}
+
+/// Persists image bytes pasted from the system clipboard long enough for the
+/// normal path-based attachment flow to read and send them. A temp path keeps a
+/// new-task paste possible before a session id exists; `prepare` copies it into
+/// the session's archive when the prompt is sent.
+pub async fn save_pasted_image(bytes: Vec<u8>, mime_type: String) -> Result<Attachment> {
+    if bytes.is_empty() {
+        anyhow::bail!("pasted image is empty");
+    }
+    let extension = image_extension(&mime_type)
+        .with_context(|| format!("unsupported pasted image type: {mime_type}"))?;
+    let path = std::env::temp_dir().join(format!("dray-pasted-{}.{}", Uuid::now_v7(), extension));
+    fs::write(&path, bytes)
+        .await
+        .context("could not save pasted image")?;
+
+    match describe(&path.to_string_lossy()).await {
+        Ok(attachment) => Ok(attachment),
+        Err(error) => {
+            let _ = fs::remove_file(&path).await;
+            Err(error)
+        }
+    }
 }
 
 /// `~/.dray/attachments/<session-id>`, creating it if needed.

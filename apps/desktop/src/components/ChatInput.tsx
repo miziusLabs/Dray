@@ -16,6 +16,8 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   addAttachmentPaths,
+  addImagePath,
+  addPastedImage,
   clearAttachments,
   pickAttachments,
   removeAttachment,
@@ -37,6 +39,7 @@ import {
   slashPrefix,
   slashQuery,
 } from "@/lib/slash";
+import { isImagePath, pastedImagePath } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 import type {
   Effort,
@@ -415,6 +418,18 @@ export default function ChatInput({
   // ⌥ as well as ⌘, so the chord can't collide with the webview's own ⌘O.
   useHotkey("o", () => void pickAttachments(sessionId), { alt: true });
 
+  const insertPastedText = (text: string) => {
+    const textarea = textareaRef.current;
+    const value = textarea?.value ?? message;
+    const start = textarea?.selectionStart ?? value.length;
+    const end = textarea?.selectionEnd ?? start;
+    const next = value.slice(0, start) + text + value.slice(end);
+    const nextCaret = start + text.length;
+    pendingCaretRef.current = nextCaret;
+    setMessage(next);
+    setCaret(nextCaret);
+  };
+
   // What Esc does, wherever focus is. Held in a ref so the listener below can
   // register once and still read current state. Returns whether it consumed the
   // key, which is what decides if the webview ever sees it.
@@ -787,6 +802,51 @@ export default function ChatInput({
                 onChange={(e) => {
                   setMessage(e.currentTarget.value);
                   setCaret(e.currentTarget.selectionStart);
+                }}
+                onPaste={(e) => {
+                  const clipboard = e.clipboardData;
+                  const fileWithPath = Array.from(clipboard.files).find((file) => {
+                    const path = (file as File & { path?: string }).path;
+                    return path && isImagePath(path);
+                  });
+                  const filePath = fileWithPath
+                    ? (fileWithPath as File & { path?: string }).path
+                    : undefined;
+                  const path =
+                    filePath ??
+                    pastedImagePath(
+                      clipboard.getData("text/uri-list"),
+                      clipboard.getData("text/plain"),
+                    );
+
+                  if (path) {
+                    e.preventDefault();
+                    const fallback = clipboard.getData("text/plain") || path;
+                    void addImagePath(sessionId, path)
+                      .then((attached) => {
+                        if (!attached) insertPastedText(fallback);
+                      })
+                      .catch(() => {
+                        // A stale or unreadable image path is still ordinary
+                        // clipboard text, so restore it instead of losing it.
+                        insertPastedText(fallback);
+                      });
+                    return;
+                  }
+
+                  const imageItem = Array.from(clipboard.items).find(
+                    (item) => item.kind === "file" && item.type.startsWith("image/"),
+                  );
+                  const imageFile = imageItem?.getAsFile();
+                  if (!imageFile) return;
+
+                  e.preventDefault();
+                  void imageFile
+                    .arrayBuffer()
+                    .then((buffer) =>
+                      addPastedImage(sessionId, new Uint8Array(buffer), imageFile.type),
+                    )
+                    .catch((error) => console.error("[paste image]", error));
                 }}
                 // Fires for arrow keys, clicks, and drags alike, so the picker
                 // follows the caret however it moved rather than only on typing.

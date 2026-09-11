@@ -40,6 +40,16 @@ function write(sessionId: string | null, next: Attachment[]) {
   emit();
 }
 
+function mergeAttachments(sessionId: string | null, added: Attachment[]) {
+  if (!added.length) return;
+
+  // Re-read rather than closing over an earlier snapshot: the picker, paste, and
+  // drop reads are all awaited, and another attachment landing in between must
+  // not be dropped.
+  const now = bySession.get(sessionId) ?? EMPTY;
+  write(sessionId, [...now, ...added.filter((a) => !now.some((b) => b.path === a.path))]);
+}
+
 /// Describes each path in the backend and pins the ones that can be attached.
 /// Deduped on path, so dropping the same screenshot twice pins one — the path is
 /// the identity, and a second copy of one file says nothing the first didn't.
@@ -49,12 +59,37 @@ export async function addAttachmentPaths(sessionId: string | null, paths: string
   if (!fresh.length) return;
 
   const added = await invoke<Attachment[]>("read_attachments", { paths: fresh });
-  if (!added.length) return;
+  mergeAttachments(sessionId, added);
+}
 
-  // Re-read rather than closing over `current`: the dialog and the reads above
-  // are both awaited, and a drop landing in between must not be dropped.
-  const now = bySession.get(sessionId) ?? EMPTY;
-  write(sessionId, [...now, ...added.filter((a) => !now.some((b) => b.path === a.path))]);
+/// Validates a pasted path as an image before pinning it. Text that merely looks
+/// like an image path must remain pasteable when the path no longer exists.
+export async function addImagePath(sessionId: string | null, path: string): Promise<boolean> {
+  const current = bySession.get(sessionId) ?? EMPTY;
+  if (current.some((attachment) => attachment.path === path)) return true;
+
+  const added = await invoke<Attachment[]>("read_attachments", { paths: [path] });
+  // Oversized supported images are still attachments; the send path degrades
+  // them to a file mention instead of sending pixels over the API limit.
+  const image = added.find((attachment) => attachment.mimeType !== null);
+  if (!image) return false;
+
+  mergeAttachments(sessionId, [image]);
+  return true;
+}
+
+/// Saves clipboard pixels through Rust so they enter the same path-based
+/// attachment pipeline as picker and drag/drop files.
+export async function addPastedImage(
+  sessionId: string | null,
+  bytes: Uint8Array,
+  mimeType: string,
+) {
+  const attachment = await invoke<Attachment>("save_pasted_image", {
+    bytes: Array.from(bytes),
+    mimeType,
+  });
+  mergeAttachments(sessionId, [attachment]);
 }
 
 /// Opens the system file picker and pins whatever comes back. Resolves to
