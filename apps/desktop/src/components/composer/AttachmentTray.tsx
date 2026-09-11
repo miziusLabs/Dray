@@ -71,7 +71,7 @@ export default function AttachmentTray({
                 />
               ) : (
                 <div className="flex h-7 max-w-56 items-center gap-2 rounded-lg bg-card px-2.5">
-                  <FileIcon path={attachment.path} className="size-5" />
+                  <FileIcon path={attachment.path} className="size-5 rounded" />
 
                   {/* `min-w-0` so the name truncates instead of setting the tile's
                       floor and pushing the rest out of the box. */}
