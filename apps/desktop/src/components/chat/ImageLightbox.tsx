@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, X } from "lucide-reac
 
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export type LightboxImage = { src: string; name: string };
@@ -41,6 +42,10 @@ export default function ImageLightbox({
   // out and `index` is already `null` by then — without this the picture swaps
   // to the first one on the way out, which is the frame the eye follows.
   const [lastAt, setLastAt] = useState(0);
+  // Radix opens tooltips on focus as well as hover. The dialog focuses the close
+  // button when it opens, but the shortcut should not appear until the pointer
+  // is actually over that button.
+  const [closeHovered, setCloseHovered] = useState(false);
   // Clamped rather than trusted: the caller opens on a thumbnail's position, and
   // an out-of-range index would render an empty frame with no way to tell it
   // from a failed load.
@@ -182,18 +187,30 @@ export default function ImageLightbox({
             </>
           )}
 
-          {/* The key is stated rather than left to be guessed: this dialog
-              covers the window, so the way out is the one thing it owes the
-              reader. The cap is a label beside the button, not a second
-              control. */}
-          <div className="fixed top-4 right-4 flex items-center gap-2">
-            <Kbd>Esc</Kbd>
-
-            <Dialog.Close asChild>
-              <Button type="button" variant="secondary" size="icon-sm" aria-label="Close">
-                <X />
-              </Button>
-            </Dialog.Close>
+          {/* The close action is labelled on hover like the other icon buttons
+              in the app. The shortcut stays available without competing with
+              the image as a permanent cap in the corner. */}
+          <div className="fixed top-4 right-4">
+            <Tooltip open={closeHovered}>
+              <TooltipTrigger asChild>
+                <Dialog.Close asChild>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon-sm"
+                    aria-label="Close"
+                    onPointerEnter={() => setCloseHovered(true)}
+                    onPointerLeave={() => setCloseHovered(false)}
+                  >
+                    <X />
+                  </Button>
+                </Dialog.Close>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                Close
+                <Kbd>Esc</Kbd>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
