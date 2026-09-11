@@ -366,12 +366,19 @@ export default function ChatInput({
     // Freeze the card while measuring: reading scrollHeight forces a layout with
     // the textarea at 0px, and if that phantom layout reaches the flex column the
     // chat pane momentarily grows and the browser clamps its scrollTop — the
-    // transcript ratchets up a few pixels on every value change.
+    // transcript ratchets up a few pixels on every value change. The textarea's
+    // own scroll position is clamped too, so keep it across the measurement or
+    // the caret disappears as soon as the text reaches the row cap.
+    const scrollTop = el.scrollTop;
+    const scrollLeft = el.scrollLeft;
     card.style.height = `${card.offsetHeight}px`;
     el.style.height = "0px";
     // scrollHeight includes padding, so the row cap has to as well.
     const rows = isNewTask ? NEW_TASK_MAX_ROWS : MAX_ROWS;
     el.style.height = `${Math.min(el.scrollHeight, lineHeight * rows + chrome)}px`;
+    el.scrollTop = scrollTop;
+    el.scrollLeft = scrollLeft;
+    if (mirrorRef.current) mirrorRef.current.scrollTop = el.scrollTop;
     card.style.height = "";
   }, [message, resizeTick, isNewTask]);
 
