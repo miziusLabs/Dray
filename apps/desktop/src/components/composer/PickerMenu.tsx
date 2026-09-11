@@ -142,12 +142,9 @@ export default function PickerMenu<T>({
         !below && (bare ? "bottom-full -mb-1.5" : "bottom-full mb-1.5"),
       )}
     >
-      {/* The frame and the scroller are separate elements on purpose. With the
-          radius on the scrolling box itself, the scrollbar is laid out in that
-          box's own corner and spills past the curve — visibly clipped by it at
-          the top and bottom ends. Rounding an `overflow-hidden` parent instead
-          clips the scrollbar to the curve, so it stops short of the corners the
-          way the rows do.
+      {/* The frame and the scroller are separate elements on purpose. Rounding
+          an `overflow-hidden` parent clips the rows to the curve, while the
+          scrolling behavior stays on the inner element.
 
           `bare` drops the fill along with the radius and the shadow, and they do
           go together: it is only ever the empty state, where the composer stands
@@ -184,7 +181,7 @@ export default function PickerMenu<T>({
           // border there is nothing for the rows to be held away from, and the
           // gap only reads as the list sitting oddly short of its own edge.
           className={cn(
-            "overflow-x-hidden overflow-y-auto overscroll-contain",
+            "picker-menu-scrollbar-hidden overflow-x-hidden overflow-y-auto overscroll-contain",
             bare ? "max-h-[14rem]" : "max-h-[15rem] px-1 py-2",
           )}
         >

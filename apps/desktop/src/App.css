@@ -391,6 +391,16 @@
     }
   }
 
+  /* Completion menus still scroll when their list is longer than the card,
+     but the browser's scrollbar is visual noise over the compact surface. */
+  .picker-menu-scrollbar-hidden {
+    scrollbar-width: none;
+  }
+
+  .picker-menu-scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
+
   /* Thin scrollbar that appears while the list is hovered. The gutter is
      reserved permanently, so the thumb showing never reflows the rows — the
      gutter is the container's right padding.
