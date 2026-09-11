@@ -6,8 +6,9 @@
 
 use crate::{
     events::{
-        now_rfc3339, AgentEvent, AgentEventPayload, BlockRef, BlockType, DeltaEvent, ErrorSource,
-        Question, QuestionOption, SessionInfo, ToolResult, ToolType, TurnStatus, Usage,
+        now_rfc3339, AgentEvent, AgentEventPayload, BlockRef, BlockType, ContextWindow, DeltaEvent,
+        ErrorSource, Question, QuestionOption, SessionInfo, ToolResult, ToolType, TurnStatus,
+        Usage,
     },
     harness::{
         pi::parser::{AssistantMessageEvent, PiEvent, PiUsage},
@@ -190,6 +191,15 @@ impl Mapper {
                 out
             }
             PiEvent::TurnStart => vec![AgentEventPayload::ModelRequestStarted],
+            PiEvent::Response {
+                command,
+                success,
+                data,
+                ..
+            } if success && command == "get_session_stats" => map_session_stats(data.as_ref())
+                .map(AgentEventPayload::UsageUpdate)
+                .into_iter()
+                .collect(),
             PiEvent::MessageEnd { message } => self.map_message_end(message),
             PiEvent::ToolExecutionStart {
                 tool_call_id,
@@ -579,6 +589,24 @@ fn map_usage(wire: &PiUsage, model: Option<&str>) -> Usage {
     }
 }
 
+/// Maps Pi's `get_session_stats` response to the current conversation context.
+/// This is separate from provider usage: `message_end.usage.totalTokens` is
+/// cumulative model billing, while `contextUsage.tokens` includes the actual
+/// messages currently retained in the context after tools and compaction.
+fn map_session_stats(data: Option<&Value>) -> Option<Usage> {
+    let context = data?.get("contextUsage")?;
+    let used_tokens = context.get("tokens")?.as_u64()?;
+    let max_tokens = context.get("contextWindow")?.as_u64()?;
+
+    Some(Usage {
+        context_window: Some(ContextWindow {
+            used_tokens,
+            max_tokens,
+        }),
+        ..Usage::default()
+    })
+}
+
 fn content_text(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(text)) => text.clone(),
@@ -720,6 +748,32 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn maps_session_stats_to_context_usage() {
+        let events = map_lines(&[
+            r#"{"id":"stats","type":"response","command":"get_session_stats","success":true,"data":{"contextUsage":{"tokens":12345,"contextWindow":272000,"percent":4.5}}}"#,
+        ]);
+
+        assert!(matches!(
+            events.first().map(|event| &event.payload),
+            Some(AgentEventPayload::UsageUpdate(usage))
+                if usage.context_window == Some(ContextWindow {
+                    used_tokens: 12345,
+                    max_tokens: 272000,
+                })
+        ));
+    }
+
+    #[test]
+    fn ignores_unsuccessful_session_stats_responses() {
+        let events = map_lines(&[
+            r#"{"id":"stats","type":"response","command":"get_session_stats","success":false}"#,
+            r#"{"id":"other","type":"response","command":"get_state","success":true,"data":{}}"#,
+        ]);
+
+        assert!(events.is_empty());
     }
 
     #[test]

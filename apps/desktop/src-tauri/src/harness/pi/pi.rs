@@ -7,7 +7,9 @@
 use crate::events::{AgentEvent, AgentEventPayload};
 use crate::harness::Harness::Pi;
 use crate::models::{Effort, Model};
-use crate::session::{flush_queued, publish_status, QueuedMessages, Session, StatusTracker};
+use crate::session::{
+    flush_queued, publish_status, write_line, QueuedMessages, Session, StatusTracker,
+};
 use crate::store::{self, append_session_event, next_seq_by_session_id};
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -24,6 +26,8 @@ pub mod commands;
 pub mod mapper;
 pub mod parser;
 pub use parser::PiEvent;
+
+const CONTEXT_STATS_REQUEST_ID: &str = "dray-context-stats";
 
 /// Removes the Pi context transcript owned by a deleted Dray session.
 ///
@@ -165,6 +169,13 @@ pub async fn init(
     let session_id_owned = session_id.to_string();
     let session_cwd_owned = session_cwd.to_string();
     let app_for_stdout = app.clone();
+
+    // Pi exposes the actual post-compaction context estimate only through this
+    // RPC response, not on message usage. Ask once on startup so resumed
+    // sessions can restore their existing reading before the next turn.
+    if let Err(error) = request_context_stats(&stdin).await {
+        eprintln!("[pi context stats request err] {error}");
+    }
 
     tokio::spawn(async move {
         if let Err(error) = read_stdout(
@@ -310,19 +321,27 @@ async fn read_stdout(
                 return Ok(());
             }
 
-            // Deltas and usage are previews/live counters. Their committed
-            // counterparts are the assistant message and settled event, so they
-            // do not belong in Dray's append-only transcript.
-            if matches!(
-                agent_event.payload,
+            // Deltas and ordinary usage are previews/live counters. Their
+            // committed counterparts are the assistant message and settled
+            // event, so they do not belong in Dray's append-only transcript.
+            // Context-window stats are different: they are the only persisted
+            // source for the composer's reading and have no transcript row.
+            let transient = match &agent_event.payload {
                 AgentEventPayload::Delta(_)
-                    | AgentEventPayload::UsageUpdate(_)
-                    | AgentEventPayload::ModelRequestStarted
-                    | AgentEventPayload::QuestionsAsked { .. }
-                    | AgentEventPayload::ExtensionNotification { .. }
-            ) {
+                | AgentEventPayload::ModelRequestStarted
+                | AgentEventPayload::QuestionsAsked { .. }
+                | AgentEventPayload::ExtensionNotification { .. } => true,
+                AgentEventPayload::UsageUpdate(usage) => usage.context_window.is_none(),
+                _ => false,
+            };
+            if transient {
                 continue;
             }
+
+            let turn_completed = matches!(
+                &agent_event.payload,
+                AgentEventPayload::TurnCompleted { .. }
+            );
 
             events.lock().await.push(agent_event.clone());
             if let Err(error) = append_session_event(session_id, agent_event).await {
@@ -346,10 +365,29 @@ async fn read_stdout(
                 )
                 .await;
             }
+
+            if turn_completed {
+                if let Err(error) = request_context_stats(&flush_stdin).await {
+                    eprintln!("[pi context stats request err] {error}");
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+/// Requests Pi's current context estimate. The response is handled by the
+/// same stdout mapper as every other RPC record.
+async fn request_context_stats(stdin: &Arc<Mutex<ChildStdin>>) -> Result<()> {
+    write_line(
+        stdin,
+        &serde_json::json!({
+            "id": CONTEXT_STATS_REQUEST_ID,
+            "type": "get_session_stats",
+        }),
+    )
+    .await
 }
 
 /// Logs a malformed or unsupported Pi record without stopping the read loop.

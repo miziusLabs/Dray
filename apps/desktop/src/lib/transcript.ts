@@ -169,6 +169,11 @@ function groupTurns(events: AgentEvent[]): Turn[] {
   });
 
   for (const event of events) {
+    // Usage updates drive indicators rather than transcript rows. In
+    // particular, the context-stats response arrives after `turn_completed`;
+    // letting it open a synthetic head turn would duplicate the Worked-for row.
+    if (event.payload.type === "usage_update") continue;
+
     // A queued prompt does not open a turn: it was typed into one already
     // running, and the CLI answers both inside it and emits a single
     // `turn_completed` for the pair. Cutting here would leave the first turn

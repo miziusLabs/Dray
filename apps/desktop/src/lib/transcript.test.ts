@@ -59,6 +59,23 @@ function text(seq: number, body: string): AgentEvent {
   } as AgentEventPayload);
 }
 
+function contextUsage(seq: number): AgentEvent {
+  return event(seq, {
+    type: "usage_update",
+    inputTokens: null,
+    outputTokens: null,
+    cachedInputTokens: null,
+    cacheWriteTokens: null,
+    reasoningTokens: null,
+    totalTokens: null,
+    costUsd: null,
+    contextWindow: { usedTokens: 12_345, maxTokens: 272_000 },
+    rateLimit: null,
+    model: null,
+    perModel: [],
+  } as AgentEventPayload);
+}
+
 /// The text `buildTranscript` files into `resultByCallId` for a call nothing can
 /// finish. Matched on rather than imported because it is deliberately private.
 const ABANDONED = /session ended/;
@@ -140,6 +157,18 @@ describe("a queued prompt", () => {
 
     expect(turns).toHaveLength(1);
     expect(turns[0].prompt?.payload.type).toBe("user_message");
+  });
+});
+
+describe("context usage events", () => {
+  it("does not create a second Worked-for turn after completion", () => {
+    const { turns } = buildTranscript(
+      [prompt(0, "go", false), text(1, "done"), completed(2, "done"), contextUsage(3)],
+      false,
+    );
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0].finalText).toBe("done");
   });
 });
 

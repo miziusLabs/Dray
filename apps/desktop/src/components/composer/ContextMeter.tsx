@@ -70,8 +70,8 @@ export default function ContextMeter({ used, max }: { used: number; max: number 
         </span>
       </TooltipTrigger>
 
-      <TooltipContent>
-        {compactTokens(used)} / {compactTokens(max)} · {percent}% used
+      <TooltipContent side="top" className="h-8 max-w-none whitespace-nowrap">
+        {percent}% used · {compactTokens(used)} / {compactTokens(max)} tokens
       </TooltipContent>
     </Tooltip>
   );

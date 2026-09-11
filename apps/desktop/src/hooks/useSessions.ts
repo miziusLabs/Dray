@@ -1324,7 +1324,16 @@ const contextUsage: { used: number; max: number } | null = (() => {
   for (let i = events.length - 1; i >= 0 && !(usedSettled && max !== null); i--) {
     const p = events[i].payload;
 
-    if (p.type === "context_compacted") {
+    if (p.type === "usage_update" && p.contextWindow) {
+      // `get_session_stats` is emitted as a context-only usage update. It is
+      // authoritative for both values and is persisted by the Pi reader, so a
+      // resumed session can restore the meter without waiting for a new turn.
+      if (!usedSettled) {
+        used = p.contextWindow.usedTokens;
+        usedSettled = true;
+      }
+      max ??= p.contextWindow.maxTokens;
+    } else if (p.type === "context_compacted") {
       // Settles `used` whether or not it carried a count. Everything before it
       // left the window, so an earlier turn's figure isn't a fallback here —
       // it's the wrong answer, and a high one.
