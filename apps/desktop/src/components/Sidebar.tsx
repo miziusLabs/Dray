@@ -638,7 +638,7 @@ export default function Sidebar({
       </div>
 
       {/* Keep the session cards clear of the scrollbar edge. */}
-      <div className="scrollbar-overlay mt-4 flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 pl-2 pr-1">
+      <div className="scrollbar-overlay mt-4 flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 pl-2 pr-2">
         {rowCount === 0 ? (
           <p className="px-2 py-6 text-ui text-muted-foreground">{emptyText}</p>
         ) : (
@@ -1202,7 +1202,7 @@ function SessionRow({
                 aria-label="Working"
               />
             ) : (
-              relativeTime(item.modified)
+              <span className="mr-[3px]">{relativeTime(item.modified)}</span>
             )}
           </span>
 
