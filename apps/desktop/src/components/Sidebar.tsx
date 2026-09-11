@@ -1167,21 +1167,24 @@ function SessionRow({
             long title truncates before either one and nothing reflows on hover.
             The two children stack via `absolute` on the date and crossfade on
             `opacity` over the same duration, so they never both read at once;
-            the shortcut state's platform-sized minimum reserves room for its
-            card without adding unnecessary space beside it. */}
+            its platform-sized minimum keeps the title's trailing space stable
+            whether the shortcut hint is visible or not. */}
         <div
           className={cn(
-            "relative ml-1 flex shrink-0 items-center justify-end self-stretch pl-0",
-            modifierPressed &&
-              shortcutIndex &&
-              (IS_MAC ? "min-w-8" : "min-w-10"),
+            "relative flex shrink-0 items-center justify-end self-stretch pl-0",
+            IS_MAC ? "min-w-8" : "min-w-10",
           )}
         >
           {/* `pointer-events-none` unconditionally: it's never a target, and a
               faded-but-present element still hit-tests — stacked on `right-0` it
               would otherwise swallow the cursor over the last button, which reads
               as that one button being dead while its neighbour works. */}
-          <span className="pointer-events-none absolute right-0 flex items-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0">
+          <span
+            className={cn(
+              "pointer-events-none absolute right-0 flex items-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0",
+              !(modifierPressed && shortcutIndex) && "px-1",
+            )}
+          >
             {/* The orb takes the timestamp's place rather than a slot of its
                 own: a row that's working right now is the one row whose "last
                 activity" reads as stale, and one indicator per row is what keeps
