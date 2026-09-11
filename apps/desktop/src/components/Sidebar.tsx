@@ -1182,10 +1182,16 @@ function SessionRow({
           {/* The indicator is centered in the exact box occupied by Settle.
               Keeping this box fixed gives the title one predictable ellipsis
               boundary, regardless of timestamp, orb, or shortcut. */}
-          <span className="pointer-events-none absolute inset-y-0 -right-1.5 flex w-6 items-center justify-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0">
+          <span
+            className={cn(
+              "pointer-events-none absolute inset-y-0 flex w-6 items-center justify-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0",
+              modifierPressed && shortcutIndex ? "right-0.5" : "-right-1.5",
+            )}
+          >
             {/* The slot shows one value at a time: ⌘ navigation first, then a
                 running check, then the working orb, and finally the timestamp.
-                Centering each value keeps replacements aligned with Settle. */}
+                Centering each value keeps replacements aligned with Settle;
+                the shortcut moves into the row's trailing padding with it. */}
             {modifierPressed && shortcutIndex ? (
               <Kbd className="mr-[3px] shrink-0 whitespace-nowrap">{`${IS_MAC ? "⌘" : "Ctrl"} ${shortcutIndex}`}</Kbd>
             ) : marksLive && pr?.checksState === "RUNNING" ? (
