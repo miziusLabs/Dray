@@ -95,53 +95,63 @@ export default function TurnBlock({
   const trailingItem = [...turn.work].reverse().find(rendersWorkItem);
   const streamingGroup =
     streamingTool && trailingItem && isToolGroup(trailingItem) ? trailingItem : null;
+  const hasDetails =
+    turn.work.some(
+      (item) =>
+        rendersWorkItem(item) ||
+        (!isToolGroup(item) && item.payload.type === "reasoning"),
+    ) ||
+    streamingTool !== null ||
+    footer != null;
 
   return (
     <div className="flex flex-col gap-3">
       {turn.prompt && <UserMessage {...userProps(turn)} cwd={cwd} onOpenSession={onOpenSession} />}
 
-      <Collapsible
-        open={open}
-        onOpenChange={(next) => {
-          if (!running) setDetailsOpen(next);
-        }}
-        className="flex flex-col gap-3"
-      >
-        <div className="flex flex-col gap-1.5">
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className={cn(
-                "group/worked flex w-fit items-center gap-2 text-left text-chat text-muted-foreground",
-                running ? "cursor-default" : "cursor-pointer",
-              )}
-            >
-              <span>Worked for {formatDuration(duration)}</span>
-              <ChevronRight
-                className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")}
-              />
-            </button>
-          </CollapsibleTrigger>
+      {hasDetails && (
+        <Collapsible
+          open={open}
+          onOpenChange={(next) => {
+            if (!running) setDetailsOpen(next);
+          }}
+          className="flex flex-col gap-3"
+        >
+          <div className="flex flex-col gap-1.5">
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "group/worked flex w-fit items-center gap-2 text-left text-chat text-muted-foreground",
+                  running ? "cursor-default" : "cursor-pointer",
+                )}
+              >
+                <span>Worked for {formatDuration(duration)}</span>
+                <ChevronRight
+                  className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")}
+                />
+              </button>
+            </CollapsibleTrigger>
 
-          <div className="border-t border-border" />
-        </div>
-
-        <CollapsibleContent className="collapsible-smooth">
-          <div className="flex flex-col gap-3">
-            {turn.work.map((item) =>
-              renderItem(
-                item,
-                resultByCallId,
-                onOpenSession,
-                cwd,
-                item === streamingGroup ? streamingTool : null,
-              ),
-            )}
-            {streamingTool && !streamingGroup && <StreamingToolCall {...streamingTool} />}
-            {footer}
+            <div className="border-t border-border" />
           </div>
-        </CollapsibleContent>
-      </Collapsible>
+
+          <CollapsibleContent className="collapsible-smooth">
+            <div className="flex flex-col gap-3">
+              {turn.work.map((item) =>
+                renderItem(
+                  item,
+                  resultByCallId,
+                  onOpenSession,
+                  cwd,
+                  item === streamingGroup ? streamingTool : null,
+                ),
+              )}
+              {streamingTool && !streamingGroup && <StreamingToolCall {...streamingTool} />}
+              {footer}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {turn.finalText && <AssistantMessage text={turn.finalText} cwd={cwd} />}
 
