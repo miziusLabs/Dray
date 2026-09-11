@@ -127,22 +127,14 @@ pub struct SendOutcome {
 /// Drives [`SessionStatus`] from the mapped event stream plus the user's own
 /// sends.
 ///
-/// A `result` alone does not end the work: a background subagent keeps running
-/// past it, and the CLI later opens a fresh turn — an `init` with no prompt —
-/// to deliver what the subagent found. So completion takes two facts at once,
-/// no model call open and no background tasks outstanding, and whichever event
-/// clears the second fact is the one that reports it.
+/// A completed turn ends the active work once no model call is open.
 #[derive(Debug, Default)]
 pub struct StatusTracker {
     status: SessionStatus,
     /// An `init` opened a model call that no `result` has closed yet.
     model_call_open: bool,
-    /// Ids of the outstanding background tasks, not just how many. The count is
-    /// all the status machine needs, but a cooperative Pi abort does not touch
-    /// them.
-    background_tasks: Vec<String>,
-    /// Main-thread tool calls started and not yet finished. Not a status input —
-    /// it decides whether an arriving prompt is written now or held.
+    /// Tool calls started and not yet finished. Not a status input — it decides
+    /// whether an arriving prompt is written now or held.
     open_tool_calls: usize,
 }
 
@@ -157,35 +149,20 @@ impl StatusTracker {
     /// caller persists and emits only then.
     pub fn on_event(&mut self, payload: &AgentEventPayload) -> Option<SessionStatus> {
         match payload {
-            // Fires per model call, not per prompt — including the call the
-            // agent opens for itself to report a finished background task. That
-            // one arrives with no send in front of it, so a completed session
-            // must be able to go straight back to in-progress here.
+            // Fires per model call, not per prompt.
             AgentEventPayload::TurnStarted(_) => {
                 self.model_call_open = true;
                 self.set(SessionStatus::InProgress)
             }
             AgentEventPayload::TurnCompleted { .. } => {
                 self.model_call_open = false;
-                (self.background_tasks.is_empty())
-                    .then(|| self.set(SessionStatus::Completed))
-                    .flatten()
-            }
-            AgentEventPayload::BackgroundTasksChanged { tasks } => {
-                self.background_tasks = tasks.iter().map(|t| t.task_id.clone()).collect();
-                (tasks.is_empty() && !self.model_call_open)
-                    .then(|| self.set(SessionStatus::Completed))
-                    .flatten()
+                self.set(SessionStatus::Completed)
             }
             _ => None,
         }
     }
 
-    /// Whether anything at all is still working, background tasks included.
-    ///
-    /// The safe-to-replace-the-child question, and nothing else: a session whose
-    /// turn ended while a background task runs is still `InProgress` here, and
-    /// killing that child would take the task with it.
+    /// Whether the session is still working.
     pub fn is_busy(&self) -> bool {
         self.status == SessionStatus::InProgress
     }
@@ -193,31 +170,12 @@ impl StatusTracker {
     /// Whether a model call is open right now, which is what decides that an
     /// arriving prompt is queued rather than sent. Read *before* `on_send`,
     /// which opens one unconditionally and would answer for itself.
-    ///
-    /// Deliberately narrower than [`is_busy`](Self::is_busy). A background task
-    /// holds the session in-progress long after its turn ended, but the CLI's
-    /// main thread is idle and answers a prompt straight away — verified
-    /// against v2.1.232, where a prompt written with a background `sleep 300`
-    /// outstanding was answered in 1.8s. Queueing on status instead held that
-    /// prompt until the task drained, and since a `local_bash` task emits none
-    /// of the boundaries `read_stdout` flushes at, "until it drained" was the
-    /// whole wait.
     pub fn turn_in_flight(&self) -> bool {
         self.model_call_open
     }
 
-    /// The outstanding background tasks.
-    ///
-    /// The set is republished whole on every change, so this is simply the
-    /// latest reading rather than anything accumulated.
-    pub fn background_task_ids(&self) -> Vec<String> {
-        self.background_tasks.clone()
-    }
-
-    /// Counts main-thread tool calls in and out. Fed separately from
-    /// [`Self::on_event`] because only the caller holds the event envelope, and
-    /// a *subagent's* tool call must not count: it runs on its own thread and
-    /// its result is not a point where the CLI injects a queued prompt.
+    /// Counts tool calls in and out. Fed separately from [`Self::on_event`]
+    /// because only the caller holds the event envelope.
     pub fn note_tool_call(&mut self, payload: &AgentEventPayload) {
         match payload {
             AgentEventPayload::ToolCallStarted { .. } => self.open_tool_calls += 1,
@@ -753,11 +711,8 @@ impl SessionManager {
 
     /// Stops everything the session is doing immediately.
     ///
-    /// Pi's `abort` request is cooperative and can open a follow-up turn while
-    /// background tasks continue running. Stop is an explicit user request to
-    /// end *all* work, so remove the child from the live map and terminate its
-    /// process tree. The next prompt resumes the persisted Pi session in a new
-    /// child.
+    /// Remove the child from the live map and terminate its process tree. The
+    /// next prompt resumes the persisted Pi session in a new child.
     pub async fn interrupt(&self, session_id: &str, app: &AppHandle) -> Result<()> {
         // Keep the manager lock until the idle status is published. Otherwise a
         // prompt sent in the small window after removal could respawn the
@@ -774,16 +729,6 @@ impl SessionManager {
         publish_status(session_id, SessionStatus::Idle, app).await;
         drop(sessions_guard);
         Ok(())
-    }
-
-    /// Stops one of a session's background tasks. Errors for a dead child like
-    /// the rest of these: the task ran inside that process and died with it.
-    pub async fn stop_task(&self, session_id: &str, task_id: &str) -> Result<()> {
-        let mut sessions_guard = self.sessions.lock().await;
-        let Some(session) = sessions_guard.get_mut(session_id) else {
-            bail!("no running session {session_id}");
-        };
-        session.stop_task(task_id).await
     }
 
     /// Takes back the newest prompt still waiting on a boundary, returning it
@@ -966,8 +911,7 @@ pub struct Session {
     pub permission_mode: ApprovalPolicy,
     pub events: Arc<Mutex<Vec<AgentEvent>>>,
     pub seq: Arc<AtomicU64>,
-    /// Shared with the stdout task: sends flip it here, `result` and
-    /// `background_tasks_changed` flip it there.
+    /// Shared with the stdout task: sends and mapped lifecycle events update it.
     pub status: Arc<Mutex<StatusTracker>>,
     /// Set before a stop kills the child, so buffered stdout cannot publish
     /// stale events after the session has been stopped and removed from the map.
@@ -1150,28 +1094,6 @@ impl Session {
         Ok(())
     }
 
-    /// Stops one background task by id.
-    ///
-    /// Separate from the session-level Stop because the CLI keeps them
-    /// separate: a cooperative abort with no turn in flight acks and leaves
-    /// every running task alone, while Stop intentionally terminates them all.
-    ///
-    /// Nothing is emitted here. The CLI republishes the task set and files a
-    /// `task_notification` with `status: "stopped"` on its own, which is what
-    /// settles the panel row and drives the status machine to completion — so
-    /// minting anything would be a second source for what already arrives.
-    ///
-    /// The model is not told, and that is Pi's own behaviour rather
-    /// than a gap left here. It notifies on a task *completing* — a
-    /// `<task-notification>` user line naming the task and its exit — and says
-    /// of stops in its own orphan-scan text that those made "via the UI, Monitor
-    /// timeout, or agent teardown … leave no transcript marker". Synthesizing
-    /// one would mean waking the model for a turn to announce something the
-    /// harness deliberately keeps quiet.
-    pub async fn stop_task(&mut self, task_id: &str) -> Result<()> {
-        bail!("Pi does not expose background task controls for {task_id}")
-    }
-
     /// Switches the permission stance of a running child. Unlike effort, the CLI
     /// does have a `set_permission_mode` subtype, so this needs no respawn.
     pub async fn set_permission_mode(&mut self, mode: ApprovalPolicy) -> Result<()> {
@@ -1234,7 +1156,6 @@ impl Session {
             seq: self.seq.fetch_add(1, Relaxed),
             ts: now_rfc3339(),
             turn_id: None,
-            subagent: None,
             payload: AgentEventPayload::PermissionDecided {
                 request_id: request_id.to_string(),
                 tool_use_id: format!("pi-ui-{request_id}"),
@@ -1384,7 +1305,6 @@ async fn deliver_prompt(
         ts: now_rfc3339(),
         // Nothing tracks turns yet; Pi opens one per `init`.
         turn_id: None,
-        subagent: None,
         payload,
         raw: None,
     };
@@ -1527,49 +1447,6 @@ mod tests {
             duration_ms: None,
             head: None,
         }
-    }
-
-    /// The reason the two readings exist separately. A background task holds the
-    /// session in-progress after its turn ended, and deciding to queue on *that*
-    /// left the prompt waiting on a boundary a `local_bash` task never produces
-    /// — so it sat there until the task drained, which the CLI itself never
-    /// asked for: verified against v2.1.232, a prompt written in this state is
-    /// answered in under two seconds.
-    #[test]
-    fn a_background_task_holds_the_session_busy_but_not_the_turn() {
-        let mut tracker = StatusTracker::default();
-        tracker.on_send();
-
-        tracker.on_event(&AgentEventPayload::BackgroundTasksChanged {
-            tasks: vec![crate::events::BackgroundTask {
-                task_id: "b0n57ez9b".to_string(),
-                task_type: "local_bash".to_string(),
-                description: "sleep 300".to_string(),
-            }],
-        });
-        assert!(tracker.turn_in_flight(), "the turn that spawned it is open");
-        assert_eq!(
-            tracker.background_task_ids(),
-            vec!["b0n57ez9b".to_string()],
-            "Stop has to name it — the CLI's interrupt leaves it running"
-        );
-
-        assert_eq!(
-            tracker.on_event(&turn_completed()),
-            None,
-            "the task keeps the session from completing"
-        );
-        assert!(tracker.is_busy(), "so the child must not be replaced");
-        assert!(
-            !tracker.turn_in_flight(),
-            "but the main thread is idle, so a prompt goes straight out"
-        );
-
-        // Stopping it drains the set, which is what the CLI republishes.
-        assert_eq!(
-            tracker.on_event(&AgentEventPayload::BackgroundTasksChanged { tasks: vec![] }),
-            Some(SessionStatus::Completed)
-        );
     }
 
     /// Only a finished-and-unread session clears on read; selecting a running

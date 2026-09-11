@@ -54,8 +54,7 @@ export default function EventRow({
   /// Results keyed by call id, so a started call renders its own outcome without
   /// searching the event list itself.
   resultByCallId: Map<string, ToolResult>;
-  /// Draws a tool call already expanded. Only the subagent panel sets it, for
-  /// the call the reader opened the run to see.
+  /// Draws a tool call already expanded when a caller wants to highlight it.
   openTool?: boolean;
   /// Opens the session that relayed a prompt. Only a `user_message` reads it,
   /// and only one that carries a sender.
@@ -190,17 +189,12 @@ export default function EventRow({
 
     // Deliberately unrendered. Hooks, settings changes, and unrecognized event
     // kinds are harness plumbing the reader never acts on; session setup, token
-    // counts, subagent lifecycle, and stream previews drive UI elsewhere (the
-    // header, the subagent panel, the live block).
+    // counts, and stream previews drive UI elsewhere (the header and live block).
     case "hook":
     case "settings_changed":
     case "unknown":
     case "turn_started":
     case "usage_update":
-    case "subagent_started":
-    case "subagent_progress":
-    case "subagent_completed":
-    case "background_tasks_changed":
     case "delta":
     // Drives the working indicator, not a row. It marks the start of a wait, and
     // a wait is exactly the thing with nothing to show.
@@ -209,9 +203,9 @@ export default function EventRow({
     // own line when it closes.
     case "context_compaction_started":
     // Every held request lives outside the turn stack: `Chat` renders the open
-    // ones below the transcript, where a subagent's request has somewhere to go
-    // and a main-thread one can't be buried in a turn that collapses. A settled
-    // one draws nothing anywhere — for a question because the `AskUserQuestion`
+    // ones below the transcript, where a request can't be buried in a turn that
+    // collapses. A settled one draws nothing anywhere — for a question because
+    // the `AskUserQuestion`
     // row underneath reports what was answered.
     case "permission_requested":
     case "questions_asked":

@@ -1,6 +1,5 @@
 import {
   BookOpen,
-  Bot,
   Braces,
   Globe2,
   PenLine,
@@ -41,8 +40,6 @@ export default function ToolCallIcon({
       return <Search {...props} />;
     case "web":
       return <Globe2 {...props} />;
-    case "subagent":
-      return <Bot {...props} />;
     case "other":
       return toolType === "mcp" ? <Braces {...props} /> : <Wrench {...props} />;
   }

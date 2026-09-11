@@ -99,9 +99,8 @@ export default function PrPanel({ branch, prs, error, loading, acting, act }: Pr
     );
   }
 
-  // No header line of its own. The count rides the tab's own badge — the same
-  // place the subagent count already sits — and the refresh button belongs to
-  // the frame, so a strip repeating the word "pull request" above a list of
+  // No header line of its own. The count rides the tab's own badge, and the
+  // refresh button belongs to the frame, so a strip repeating the word "pull request" above a list of
   // pull requests was the only thing left on it.
   return (
     <>

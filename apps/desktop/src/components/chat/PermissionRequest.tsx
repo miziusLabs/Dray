@@ -18,10 +18,8 @@ const KIND_ORDER: Record<PermissionOptionKind, number> = {
 /// A tool call waiting on the user. The agent is blocked while this renders, so
 /// it is the one row in the transcript that must never be purely informational.
 ///
-/// Rendered below the transcript rather than inside a turn, which is what lets
-/// one component serve both threads: a subagent's tool call is filed into the
-/// panel and a main-thread one sits in a turn that collapses when it closes, so
-/// neither can be relied on to be next to the question.
+/// Rendered below the transcript rather than inside a turn, so it cannot be
+/// buried in a turn that collapses when it closes.
 ///
 /// That is also why it carries the command itself. Nothing above it is
 /// guaranteed to be on screen, and "Create a marker file" with no command under

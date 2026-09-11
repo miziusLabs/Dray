@@ -31,7 +31,6 @@ import Sidebar, {
   filterSessions,
   sortSessions,
 } from "@/components/Sidebar";
-import SubagentPanel from "@/components/SubagentPanel";
 import { useUpdate } from "@/components/UpdateNotice";
 import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import AppShell from "@/components/layout/AppShell";
@@ -58,7 +57,6 @@ import { useSlashCommands } from "@/hooks/useSlashCommands";
 import { changeRange, turnChangedTree } from "@/lib/changes";
 import { prBadgeCount, sessionBranch } from "@/lib/pr";
 import { playCelebration } from "@/lib/sound";
-import { buildTranscript } from "@/lib/transcript";
 
 function App() {
   const [titlePrefs, setTitlePrefs] = useTitlePrefs();
@@ -85,7 +83,6 @@ function App() {
     useCloud,
     dockerAvailable,
     busy,
-    backgroundTasks,
     compacting,
     working,
     contextUsage,
@@ -104,7 +101,6 @@ function App() {
     setUseCloud,
     handleSendMsg,
     handleInterrupt,
-    handleStopTask,
     queuedMessages,
     handleCancelQueued,
     handleRespondPermission,
@@ -167,8 +163,6 @@ function App() {
   // indistinguishable from a reader who had chosen Changes, so an open PR could
   // never lead — see `activeTab`.
   const [panelTab, setPanelTab] = useLocalStorage<PanelTab | null>("ade.panelTab", null);
-  const [selectedSubagentId, setSelectedSubagentId] = useState<string | null>(null);
-
   // Per session, and deliberately not persisted the way `panelTab` is: which
   // view you were last on is working context for one session rather than a
   // standing preference, and reopening the app onto a repo view for every
@@ -195,15 +189,6 @@ function App() {
   // once here instead of on the first diff the user happens to open.
   const { pair: codeThemePair } = useCodeTheme();
   useEffect(() => warmHighlighter(codeThemePair), [codeThemePair]);
-
-  // The chat derives this too, but the panel and the header count need it here
-  // and the memo makes the second pass free.
-  const { subagents, resultByCallId } = useMemo(
-    // Same `busy` the chat passes. Left off, a subagent's in-flight call would
-    // show in the panel as one that never finished.
-    () => buildTranscript(selectedSession?.events ?? [], busy),
-    [selectedSession?.events, busy],
-  );
 
   // What the composer's handoff row draws itself from, and — one line down —
   // which branch the pull requests are looked up by. Read on the same falling
@@ -339,18 +324,6 @@ function App() {
     setPanelTab(tabs[(from + delta + tabs.length) % tabs.length]);
   };
 
-  // Opens the tab without touching the selection, so a run the reader already
-  // had expanded is still expanded when they come back to it.
-  const openSubagentPanel = () => {
-    setPanelTab("subagents");
-    setPanelOpen(true);
-  };
-
-  const openSubagent = (id: string) => {
-    setSelectedSubagentId(id);
-    openSubagentPanel();
-  };
-
   // An open session's own directory, since project- and local-scoped commands
   // differ per repo and a session can be running somewhere the picker isn't
   // pointed — a cloud, or a project switched away from since. The `@` picker
@@ -429,9 +402,9 @@ function App() {
   // be right.
   const lastTurnChanged = turnChangedTree({ baseline, head });
 
-  // The click lands on whatever the glyph was drawing — a git icon that opened
-  // the subagents tab would be a lie. That is all this does now: which tab the
-  // pane *defaults* to is `activeTab`'s rule and needs no help here, and ⌘E
+  // The click lands on whatever the glyph was drawing. That is all this does:
+  // which tab the pane *defaults* to is `activeTab`'s rule and needs no help
+  // here, and ⌘E
   // stays a plain toggle because it draws nothing and so promises nothing.
   const handleTogglePanel = () => {
     if (!panelOpen) {
@@ -458,8 +431,7 @@ function App() {
     panelOpen && activeTab === "changes",
   );
 
-  // One button, so the tab decides what it re-reads. Subagents has nothing to
-  // fetch, so it gets none rather than a button that does nothing.
+  // One button, so the tab decides what it re-reads.
   const panelRefresh =
     activeTab === "changes"
       ? { onRefresh: changesData.refresh, loading: changesData.loading }
@@ -515,7 +487,7 @@ function App() {
   useHotkey("}", () => stepTab(1), { shift: true, code: "BracketRight" });
   // ⌘R re-reads whatever the panel is showing — the same one button in the tab
   // row, so the chord means "refresh this" and never "refresh a specific
-  // thing". `panelRefresh` is null on Subagents, which has nothing to fetch,
+  // thing".
   // and the pane being closed is a no-op: refreshing something invisible is
   // work with no way to see it land, and both panel hooks pause their reads
   // there anyway.
@@ -664,22 +636,12 @@ function App() {
             open={panelOpen}
             tab={activeTab}
             onTabChange={setPanelTab}
-            counts={{ subagents: subagents.length, pr: prBadgeCount(pullRequests.prs) }}
+            counts={{ pr: prBadgeCount(pullRequests.prs) }}
             pr={hasPrTab}
             refresh={panelRefresh}
           >
             <TabBody active={activeTab === "changes"}>
               <ChangesPanel cwd={selectedSession.cwd} baseline={baseline} {...changesData} />
-            </TabBody>
-            <TabBody active={activeTab === "subagents"}>
-              <SubagentPanel
-                runs={subagents}
-                selectedId={selectedSubagentId}
-                resultByCallId={resultByCallId}
-                live={busy}
-                onSelect={setSelectedSubagentId}
-                onStopTask={handleStopTask}
-              />
             </TabBody>
             <TabBody active={hasPrTab && activeTab === "pr"}>
               <PrPanel branch={prBranch} {...pullRequests} />
@@ -773,13 +735,10 @@ function App() {
         streamingBlock={
           selectedSessionId ? streamingContentBlock[selectedSessionId] ?? null : null
         }
-        onOpenSubagent={openSubagent}
         onOpenSession={(id) => void handleSelectSessionIndexItem(id)}
-        onOpenSubagentPanel={openSubagentPanel}
         onRespondPermission={handleRespondPermission}
         onAnswerQuestions={handleAnswerQuestions}
         busy={busy}
-        backgroundTaskCount={backgroundTasks.length}
         compacting={compacting}
         queuedMessages={queuedMessages}
         working={working}

@@ -304,7 +304,6 @@ impl Mapper {
             seq: self.seq.fetch_add(1, Relaxed),
             ts: now_rfc3339(),
             turn_id: None,
-            subagent: None,
             payload,
             raw: None,
         }

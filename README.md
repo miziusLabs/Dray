@@ -30,7 +30,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 - Local Sessions inside attached projects, with project and Git branch switching.
 - Isolated Cloud Sessions that run Pi in Docker with their own persistent workspace volume.
 - Model and reasoning/effort controls, configurable permission modes, context usage, queued follow-ups, and generated session titles.
-- Rich chat transcripts with Markdown, syntax highlighting, reasoning, tool calls, file edits, diffs, subagents, background tasks, images, permission requests, and structured questions.
+- Rich chat transcripts with Markdown, syntax highlighting, reasoning, tool calls, file edits, diffs, images, permission requests, and structured questions.
 - File/image attachments, drag and drop, `@file` fuzzy search, `/commands`, and `$skills` discovered from Pi.
 - Repository Changes view for uncommitted work, commit history, file lists, and highlighted diffs.
 - Turn-scoped change tracking backed by Git snapshots, so completed-turn diffs stay stable after later edits.

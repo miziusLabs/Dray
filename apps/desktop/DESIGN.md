@@ -41,7 +41,7 @@ Then value: bare `data-tauri-drag-region` = **self only**, drag start only where
 
 **Settled `AskUserQuestion` row show only answer.** Its arguments = questions and options reader just answered on card, so `ToolCall` drop input body for it entirely. Its result keep no code box and lose mono font other results carry — it one tool result harness write as sentence not program output.
 
-**Right pane = one frame with tabs, not one panel per view.** [RightPanel](src/components/RightPanel.tsx) own `<aside>`, border, tab row; `ChangesPanel` and `SubagentPanel` = bodies rendering inside it, carry no chrome. `AppShell` have single `panel` slot, so two self-framing panels could only ever be mutually exclusive with two booleans deciding it. Tab row `h-(--titlebar-h)` and carry drag region itself. No close button: `PanelToggle` and ⌘E both close it. Toggle exported from `RightPanel` but rendered by `App`, because pane not exist before session do and button have to outlive it.
+**Right pane = one frame with tabs, not one panel per view.** [RightPanel](src/components/RightPanel.tsx) own `<aside>`, border, tab row; `ChangesPanel` and `PrPanel` = bodies rendering inside it, carry no chrome. `AppShell` have single `panel` slot, so two self-framing panels could only ever be mutually exclusive with two booleans deciding it. Tab row `h-(--titlebar-h)` and carry drag region itself. No close button: `PanelToggle` and ⌘E both close it. Toggle exported from `RightPanel` but rendered by `App`, because pane not exist before session do and button have to outlive it.
 
 **Changes glyph = plain foreground, not command yellow.** Yellow = app's "this is for you", colour of session standing still behind question. Turn having touched file neither warning nor thing to answer. PR glyph keep its emerald: that one say state of work.
 
@@ -57,13 +57,13 @@ Last turn changing tree **don't** enter into it. Changes describe one turn and s
 
 **⌘⇧[ / ⌘⇧] step tab, and legend drawn not hidden.** Step over `tabs` (what `tabOrder` return) not `PANEL_TABS`, so session with no PR tab cycle two and never land on undrawn one. Keycaps sit **right after tabs**, no label, and refresh button take `ml-auto`. Three cap not four — `[ ]` = one key with two end. Deliberate exception to app's tooltip rule: chord for row of two or three tab = one nobody go looking for.
 
-**Panel own no header strip.** PR count ride tab's own badge — same place subagent count sit — and refresh button belong to frame.
+**Panel own no header strip.** PR count rides the tab's own badge, and the refresh button belongs to the frame.
 
 **Badge count leave merged PR out** (`prBadgeCount`). Every other state have something reader can still do — open one merge, draft go ready, **closed one reopen** — and merged one have nothing, so counting it inflate badge that exist to say how much still live. It stay in list either way: list = record, badge = workload.
 
 **Single PR not collapsible, and draw no chevron.** Disclosure arrow that can only ever point down = affordance for nothing. Header become plain label rather than button, and lose hover fill with it.
 
-**One refresh button, in tab row, owned by frame.** It mean same thing on every tab, so it sit in same place rather than once per panel; active tab decide what it re-read. Subagents get none — nothing to fetch, and button that do nothing worse than no button. Both panel bodies therefore presentational and **their hooks live in `App`**: `useChanges` moved up beside `usePullRequest` for exactly this.
+**One refresh button, in tab row, owned by frame.** It means the same thing on every tab, so it sits in the same place rather than once per panel; the active tab decides what it re-reads. Both panel bodies are presentational and **their hooks live in `App`**: `useChanges` moved up beside `usePullRequest` for exactly this.
 
 **Panel = list of collapsible row, same shape as changes panel.** Row zero open by default, and backend's sort what make that free: it already the open one. Each row carry `+A −D` from PR's own `additions`/`deletions`, same figures and colours changes panel use. Selector-chip version tried first and dropped: it made single-PR case carry control that couldn't be used, and hid every other PR's size behind a click.
 

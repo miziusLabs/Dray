@@ -17,7 +17,7 @@ import {
 import { isWindowFocused, onFocusChange } from "@/lib/focus";
 import { notifyOS } from "@/lib/notify";
 import { playNotification } from "@/lib/sound";
-import { AgentEvent, ApprovalPolicy, BackgroundTask, BranchList, Effort, Harness, Model, ModelId, PiModel, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
+import { AgentEvent, ApprovalPolicy, BranchList, Effort, Harness, Model, ModelId, PiModel, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
 // "unknown". Everything else seeds from the user's stored prefs.
@@ -462,22 +462,6 @@ const handleInterrupt = async () => {
   if (!selectedSessionId) return;
   try {
     await invoke("interrupt_session", { sessionId: selectedSessionId });
-  } catch (e) {
-    setError(String(e));
-  }
-};
-
-// Stops one background task. Nothing is written to local state: the CLI
-// republishes the task set and files a `task_notification` of its own, which is
-// what settles the panel row and lets the status machine finish the session.
-//
-// Not covered by `handleInterrupt` — an interrupt with no turn in flight is
-// acked and changes nothing, which is precisely the state a background task
-// leaves a session in.
-const handleStopTask = async (taskId: string) => {
-  if (!selectedSessionId) return;
-  try {
-    await invoke("stop_task", { sessionId: selectedSessionId, taskId });
   } catch (e) {
     setError(String(e));
   }
@@ -1010,10 +994,8 @@ useEffect(() => {
               dismissNotice(agentEvent.sessionId, "asking");
             }
 
-            // Busy is no longer inferred from `turn_completed` here: a result
-            // can land while a background subagent is still running, so the
-            // backend's status machine owns the call and reports it on the
-            // `session_status` channel instead.
+            // Busy is owned by the backend's status machine and reported on the
+            // `session_status` channel.
             if (agentEvent.payload.type === "error") {
               setError(agentEvent.payload.message);
             }
@@ -1344,28 +1326,13 @@ useDockBadge(statusBySession, asksBySession, sessionIndexItems);
 // and the flush that empties it is the thing that clears these.
 const queuedMessages = selectedSessionId ? queuedBySession[selectedSessionId] ?? [] : [];
 
-// Gated on `busy` for the same reason the background-task set is: this is live
-// state, and a session that ended while it was unmounted has no event left to
-// arrive and clear it.
 const working: Working | null = busy && selectedSessionId
   ? workingBySession[selectedSessionId] ?? null
   : null;
 
-// The set is republished whole on every change, so the last one in the log *is*
-// the current set — but only while the session is live. A stale non-empty set
-// survives in the log across a restart, which is why this gates on `busy`.
-const backgroundTasks: BackgroundTask[] = (() => {
-  if (!busy || !selectedSession) return [];
-  for (let i = selectedSession.events.length - 1; i >= 0; i--) {
-    const p = selectedSession.events[i].payload;
-    if (p.type === "background_tasks_changed") return p.tasks;
-  }
-  return [];
-})();
-
 // Two events with nothing between them, so whichever came last says whether a
-// compaction is still running. Gated on `busy` for the same reason as the task
-// set above: a `started` with no `completed` after it is the shape a killed
+// compaction is still running. Gated on `busy` for the same reason as the live
+// state above: a `started` with no `completed` after it is the shape a killed
 // session leaves in the log forever.
 const compacting: boolean = (() => {
   if (!busy || !selectedSession) return false;
@@ -1418,6 +1385,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud: cloudEnabled, dockerAvailable: dockerAvailable === true, busy, working, backgroundTasks, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, handleStopTask, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, permissionMode, projects, projectPath, branches, branch, useCloud: cloudEnabled, dockerAvailable: dockerAvailable === true, busy, working, compacting, contextUsage, error, setError, handleModelChange, setPermissionMode, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleRespondPermission, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
 
 }

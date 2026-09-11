@@ -1,39 +1,11 @@
-import type { AgentEvent, ToolResult, Usage } from "@/types/events";
-
-export type SubagentRun = {
-  /// The spawning tool call's id — what the envelope correlates on, and the key
-  /// the panel selects by.
-  id: string;
-  /// The harness's own handle on the run, which is what `stop_task` names.
-  ///
-  /// Not the same id as `id` above, and the difference is silent if confused:
-  /// the CLI answers success for a task it does not hold, so stopping by the
-  /// spawning call's id looks like a stop that did nothing. Null until a
-  /// lifecycle event carries it, which is also the honest reading — a run with
-  /// no `agentId` yet is one the harness has not registered as stoppable.
-  taskId: string | null;
-  label: string | null;
-  description: string | null;
-  /// Latest `subagent_progress.description`, rewritten per event by the harness.
-  status: string | null;
-  lastTool: string | null;
-  done: boolean;
-  usage: Usage | null;
-  /// The subagent's own work, excluding its lifecycle events.
-  events: AgentEvent[];
-  /// The main-thread `tool_call_started` that spawned this run. It is the only
-  /// place a `local_bash` task's command and output live — such a task reports
-  /// no events of its own, so a run built from the envelope alone is empty —
-  /// and for an agent run it carries the prompt and the final report.
-  spawn: AgentEvent | null;
-};
+import type { AgentEvent, ToolResult } from "@/types/events";
 
 /// Consecutive tool calls, possibly of different types, collapsed behind one
 /// summary row. Assistant output ends a group; invisible lifecycle/result
 /// events do not.
 export type ToolGroup = {
   kind: "tool_group";
-  /// The spawning events, in `seq` order. Never fewer than two.
+  /// The tool-call events, in `seq` order. Never fewer than two.
   calls: AgentEvent[];
   key: string;
 };
@@ -68,7 +40,7 @@ export type Turn = {
   /// starts mid-conversation.
   prompt: AgentEvent | null;
   /// Everything the agent did between the prompt and completion — tool calls,
-  /// subagent spawns, reasoning, and its intermediate messages. Consecutive
+  /// reasoning, and its intermediate messages. Consecutive
   /// tool calls arrive pre-collapsed into a `ToolGroup`.
   work: WorkItem[];
   /// The closing `turn_completed`, absent while the turn is still running.
@@ -118,19 +90,14 @@ type OpenTurn = Omit<Turn, "work"> & {
   work: AgentEvent[];
 };
 
-function groupableTool(event: AgentEvent, subagentIds: Set<string>): boolean {
-  const { payload } = event;
-  return (
-    payload.type === "tool_call_started" &&
-    payload.toolType !== "subagent_spawn" &&
-    !subagentIds.has(payload.callId)
-  );
+function groupableTool(event: AgentEvent): boolean {
+  return event.payload.type === "tool_call_started";
 }
 
 /// Groups every uninterrupted run of two or more calls, regardless of type.
 /// Assistant text and other visible rows end a run; result/lifecycle events are
 /// transparent, so the normal started/completed/started sequence stays whole.
-function groupTools(work: AgentEvent[], subagentIds: Set<string>): WorkItem[] {
+function groupTools(work: AgentEvent[]): WorkItem[] {
   const items: WorkItem[] = [];
   let run: AgentEvent[] = [];
   let held: AgentEvent[] = [];
@@ -147,7 +114,7 @@ function groupTools(work: AgentEvent[], subagentIds: Set<string>): WorkItem[] {
   };
 
   for (const event of work) {
-    if (groupableTool(event, subagentIds)) {
+    if (groupableTool(event)) {
       run.push(event);
       continue;
     }
@@ -167,7 +134,7 @@ function groupTools(work: AgentEvent[], subagentIds: Set<string>): WorkItem[] {
 /// Cuts the main thread into turns: each runs from a user prompt to the
 /// `turn_completed` that closes it. The renderer places all intermediate work
 /// in one disclosure and keeps the final answer outside it.
-function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
+function groupTurns(events: AgentEvent[]): Turn[] {
   const turns: Turn[] = [];
   let current: OpenTurn | null = null;
 
@@ -188,7 +155,7 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
     // The completion payload copies the final assistant message. Keep that
     // message permanently outside the disclosure—even after it is expanded—so
     // “everything except the final output” remains an honest boundary.
-    const detailWork = groupTools(turn.work, subagentIds);
+    const detailWork = groupTools(turn.work);
     if (finalText !== null && turn.completed !== null) {
       for (let i = detailWork.length - 1; i >= 0; i--) {
         const item = detailWork[i];
@@ -251,12 +218,6 @@ function groupTurns(events: AgentEvent[], subagentIds: Set<string>): Turn[] {
   return turns;
 }
 
-/// Splits the event log into the main thread and the subagent runs the panel
-/// lists.
-///
-/// Correlation is `envelope.subagent.id === the spawning call's callId`, not the
-/// `agentId` on the subagent payloads — that is the harness's own handle and
-/// matches nothing else.
 /// Stands in for the result a call will now never get.
 ///
 /// Not an error: nothing went wrong with the call, the process it belonged to
@@ -281,20 +242,16 @@ export function buildTranscript(
   /// it is true of any tool call caught mid-flight.
   live = false,
 ): {
-  /// Main-thread events only, in `seq` order. Subagent work is excluded; the
-  /// spawning tool call stays so the chat can show a row linking to the panel.
+  /// Events in `seq` order.
   events: AgentEvent[];
-  /// The same main-thread events, cut into user-prompt-to-turn-completed spans.
+  /// The events, cut into user-prompt-to-turn-completed spans.
   turns: Turn[];
-  subagents: SubagentRun[];
-  subagentById: Map<string, SubagentRun>;
   resultByCallId: Map<string, ToolResult>;
   /// Consent requests and questions still waiting on the user, oldest first.
   ///
-  /// Lifted out of the turns on purpose. A subagent's request would otherwise
-  /// have nowhere to render — its events are filed into the panel, not the
-  /// chat — and a main-thread one would sit buried in a turn that collapses
-  /// once it closes. One place, below the transcript, works for both.
+  /// Lifted out of the turns on purpose. A main-thread request would sit buried
+  /// in a turn that collapses once it closes. One place, below the transcript,
+  /// keeps it visible while it waits for the user.
   pendingAsks: PendingAsk[];
 } {
   const events = [...source].sort(bySeq);
@@ -308,11 +265,9 @@ export function buildTranscript(
   const abandoned = new Set<string>();
   const asks: PendingAsk[] = [];
   const answered = new Set<string>();
-  const callById = new Map<string, AgentEvent>();
   for (const event of events) {
     if (event.payload.type === "tool_call_started") {
       open.add(event.payload.callId);
-      callById.set(event.payload.callId, event);
     }
     if (event.payload.type === "tool_call_completed") {
       open.delete(event.payload.callId);
@@ -349,83 +304,14 @@ export function buildTranscript(
   // could still produce a result. With no child running, nothing can.
   if (!live) for (const callId of open) abandoned.add(callId);
 
-  // Applied last, and only where no real result exists. A background subagent
-  // can report back after the turn that spawned it, so a call marked here early
-  // in the walk must still lose to the result that eventually arrives.
+  // Applied last, and only where no real result exists.
   for (const callId of abandoned) {
     if (!resultByCallId.has(callId)) resultByCallId.set(callId, ABANDONED);
   }
 
-  const subagentById = new Map<string, SubagentRun>();
-  for (const event of events) {
-    const ref = event.subagent;
-    if (!ref) continue;
-
-    let run = subagentById.get(ref.id);
-    if (!run) {
-      run = {
-        id: ref.id,
-        taskId: null,
-        label: ref.label,
-        description: null,
-        status: null,
-        lastTool: null,
-        done: false,
-        usage: null,
-        events: [],
-        spawn: null,
-      };
-      subagentById.set(ref.id, run);
-    }
-
-    // The envelope label is null on some events (the completion, notably), so
-    // keep the first non-null rather than letting a later one erase it.
-    run.label ??= ref.label;
-
-    switch (event.payload.type) {
-      case "subagent_started":
-        run.taskId = event.payload.agentId;
-        run.label ??= event.payload.label;
-        run.description = event.payload.description;
-        break;
-      case "subagent_progress":
-        run.taskId = event.payload.agentId;
-        run.status = event.payload.description;
-        run.lastTool = event.payload.lastTool;
-        break;
-      case "subagent_completed":
-        run.taskId = event.payload.agentId;
-        run.done = true;
-        run.usage = event.payload.usage;
-        break;
-      default:
-        // Only real work goes in the body; the lifecycle events above drive the
-        // header and the live status line instead.
-        run.events.push(event);
-    }
-  }
-
-  // A second pass, because the spawning call is logged before the `task_started`
-  // that creates the run — the tool_use block lands in the assistant message
-  // first.
-  for (const run of subagentById.values()) {
-    run.spawn = callById.get(run.id) ?? null;
-  }
-
-  const mainThread = events.filter((event) => !event.subagent);
-
   return {
-    events: mainThread,
-    // `subagentById` is keyed by the spawning call's id, so its key set is
-    // exactly the calls that render as a `SubagentRow` and must not group.
-    turns: groupTurns(mainThread, new Set(subagentById.keys())),
-    // Newest first. The map is keyed in spawn order, which put the run the
-    // reader is waiting on at the bottom of a list that only ever grows — and
-    // the panel keeps its scroll position, so a long session opened the tab on
-    // whatever was running an hour ago. `subagentById` keeps insertion order for
-    // everything that looks a run up by id.
-    subagents: [...subagentById.values()].reverse(),
-    subagentById,
+    events,
+    turns: groupTurns(events),
     resultByCallId,
     pendingAsks,
   };

@@ -4,7 +4,6 @@ import { ChevronRight } from "lucide-react";
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import EventRow from "@/components/chat/EventRow";
 import StreamingToolCall from "@/components/chat/StreamingToolCall";
-import SubagentRow from "@/components/chat/SubagentRow";
 import ToolGroupRow from "@/components/chat/ToolGroupRow";
 import UserMessage from "@/components/chat/UserMessage";
 import {
@@ -15,7 +14,6 @@ import {
 import {
   isToolGroup,
   rendersWorkItem,
-  type SubagentRun,
   type Turn,
   type WorkItem,
 } from "@/lib/transcript";
@@ -30,9 +28,7 @@ type StreamingTool = {
 
 type TurnBlockProps = {
   turn: Turn;
-  subagentById: Map<string, SubagentRun>;
   resultByCallId: Map<string, ToolResult>;
-  onOpenSubagent: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
   cwd?: string | null;
   footer?: ReactNode;
@@ -84,9 +80,7 @@ function useTurnDuration(turn: Turn, running: boolean): number {
 /// open; the same section closes automatically as soon as the turn completes.
 export default function TurnBlock({
   turn,
-  subagentById,
   resultByCallId,
-  onOpenSubagent,
   onOpenSession,
   cwd = null,
   footer,
@@ -137,9 +131,7 @@ export default function TurnBlock({
             {turn.work.map((item) =>
               renderItem(
                 item,
-                subagentById,
                 resultByCallId,
-                onOpenSubagent,
                 onOpenSession,
                 cwd,
                 item === streamingGroup ? streamingTool : null,
@@ -162,9 +154,7 @@ export default function TurnBlock({
 
 function renderItem(
   item: WorkItem,
-  subagentById: Map<string, SubagentRun>,
   resultByCallId: Map<string, ToolResult>,
-  onOpenSubagent: (id: string) => void,
   onOpenSession: (sessionId: string) => void,
   cwd: string | null,
   streamingTool: StreamingTool | null,
@@ -180,14 +170,7 @@ function renderItem(
     );
   }
 
-  const run =
-    item.payload.type === "tool_call_started"
-      ? subagentById.get(item.payload.callId)
-      : undefined;
-
-  return run ? (
-    <SubagentRow key={item.id} run={run} onOpen={onOpenSubagent} />
-  ) : (
+  return (
     <EventRow
       key={item.id}
       event={item}

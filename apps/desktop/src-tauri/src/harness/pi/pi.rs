@@ -302,9 +302,7 @@ async fn read_stdout(
 
             let next_status = {
                 let mut tracker = status.lock().await;
-                if agent_event.subagent.is_none() {
-                    tracker.note_tool_call(&agent_event.payload);
-                }
+                tracker.note_tool_call(&agent_event.payload);
                 tracker.on_event(&agent_event.payload)
             };
             if let Some(next) = next_status {

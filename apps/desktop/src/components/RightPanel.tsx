@@ -116,13 +116,12 @@ export function PanelToggle({
 
 /// Which body the right panel is showing. This is the set, not the order —
 /// see `tabOrder`.
-export const PANEL_TABS = ["changes", "subagents", "pr"] as const;
+export const PANEL_TABS = ["changes", "pr"] as const;
 
 export type PanelTab = (typeof PANEL_TABS)[number];
 
 const LABELS: Record<PanelTab, string> = {
   changes: "Changes",
-  subagents: "Subagents",
   // Not "Pull Request": the short form is what anyone working on one calls it,
   // and the long one is the widest label in a row of three.
   pr: "PR",
@@ -145,8 +144,8 @@ const LABELS: Record<PanelTab, string> = {
 /// `prTabVisible`. A tab whose only content is "there is nothing here" is one
 /// the eye has to skip past on every session that will never have one.
 export function tabOrder({ pr }: { pr: boolean }): readonly PanelTab[] {
-  if (!pr) return ["changes", "subagents"];
-  return ["pr", "changes", "subagents"] as const;
+  if (!pr) return ["changes"];
+  return ["pr", "changes"] as const;
 }
 
 type RightPanelProps = {
@@ -156,8 +155,7 @@ type RightPanelProps = {
   open: boolean;
   tab: PanelTab;
   onTabChange: (tab: PanelTab) => void;
-  /// Rendered beside its tab's label. Only shown above zero — a tab reading
-  /// "Subagents 0" says the same thing as the empty state one click away.
+  /// Rendered beside its tab's label. Only shown above zero.
   counts?: Partial<Record<PanelTab, number>>;
   /// There is a pull request tab to draw at all — see `prTabVisible`.
   pr?: boolean;
@@ -238,7 +236,7 @@ export default function RightPanel({
             to the thing it acts on, the caps read as belonging to the row
             without a word saying so. Drawn at all — rather than hidden in a
             tooltip the way the rest of the app's shortcuts are — because a
-            chord for a row of two or three tabs is one nobody goes looking for.
+            chord for a row of one or two tabs is one nobody goes looking for.
 
             Three caps, not four: `[ ]` is one key with two ends rather than two
             alternatives, so splitting it reads as a chord wanting both. */}
@@ -248,11 +246,6 @@ export default function RightPanel({
           <Kbd>[ ]</Kbd>
         </KbdGroup>
 
-        {/* Gone entirely on Subagents, which has nothing to re-read. It reserved
-            its width back when the keycaps sat to its right and would have slid
-            on that one tab; with them anchored to the tabs there is nothing left
-            to hold still, and an empty box on the far edge is a slot for a
-            button the reader is not waiting for. */}
         {refresh && (
           // A real tooltip rather than the `title` this used to carry: the
           // chord has to be shown somewhere, and the app puts shortcuts in

@@ -12,11 +12,7 @@ export type AgentEvent = { id: string, sessionId: string, harness: Harness,
  * lines and events the app synthesizes itself, seeded from the persisted log
  * on resume. Never sort by `ts` — most Pi events omit it.
  */
-seq: number, ts: string, turnId: string | null, 
-/**
- * `None` = main conversation, `Some` = the subagent that produced this.
- */
-subagent: Subagent | null, payload: AgentEventPayload, 
+seq: number, ts: string, turnId: string | null, payload: AgentEventPayload, 
 /**
  * `None` on the emitted path — raw lines are archived separately — but
  * always populated for [`AgentEventPayload::Unknown`], which is useless
@@ -81,8 +77,7 @@ queued: boolean,
 from: MessageSender | null, } | { "type": "assistant_text", 
 /**
  * `Some` only when this content was also streamed, naming the preview
- * it supersedes. `None` — the common case, covering Pi
- * subagents and all of Pi — means nothing was streamed and the
+ * it supersedes. `None` — the common case — means nothing was streamed and the
  * event simply appends in `seq` order.
  */
 block: BlockRef | null, text: string, } | { "type": "reasoning", block: BlockRef | null, text: string, encrypted: boolean, } | { "type": "delta" } & DeltaEvent | { "type": "tool_call_started", callId: string, 
@@ -99,13 +94,7 @@ input: JsonValue,
  * Input that isn't JSON at all — Pi's `custom_tool_call.input` is raw
  * JS source.
  */
-rawInput: string | null, title: string | null, } | { "type": "tool_call_completed", callId: string, result: ToolResult, } | { "type": "file_edits", callId: string | null, edits: Array<FileEdit>, } | { "type": "subagent_started", agentId: string, label: string, description: string | null, prompt: string | null, } | { "type": "subagent_progress", agentId: string, 
-/**
- * What the subagent is doing right now — Pi rewrites this per
- * progress event, so it drives a live status line without expanding
- * the subagent's own events.
- */
-description: string | null, lastTool: string | null, usage: Usage | null, } | { "type": "subagent_completed", agentId: string, status: string, summary: string | null, usage: Usage | null, } | { "type": "background_tasks_changed", tasks: Array<BackgroundTask>, } | { "type": "usage_update" } & Usage | { "type": "rate_limited", 
+rawInput: string | null, title: string | null, } | { "type": "tool_call_completed", callId: string, result: ToolResult, } | { "type": "file_edits", callId: string | null, edits: Array<FileEdit>, } | { "type": "usage_update" } & Usage | { "type": "rate_limited", 
 /**
  * `allowed` is the steady state and never reaches here.
  */
@@ -164,18 +153,7 @@ decisionReason: string | null,
  * `rule`, `mode`, `workingDir` and others. Lets a consumer treat a
  * safety escalation differently without parsing prose.
  */
-decisionReasonType: string | null, 
-/**
- * Set when a subagent made the call rather than the main thread.
- *
- * Not a correlation key — it is the harness's own handle and matches no
- * other id — so it answers exactly one question: whether the call being
- * consented to is visible to the reader. A main-thread request renders
- * directly under its own `ToolCallStarted` row; a subagent's renders
- * with that row filed away in a panel, so the card has to carry the
- * arguments itself or it asks about something invisible.
- */
-agentId: string | null, options: Array<PermissionOption>, } | { "type": "questions_asked", requestId: string, 
+decisionReasonType: string | null, options: Array<PermissionOption>, } | { "type": "questions_asked", requestId: string, 
 /**
  * The `AskUserQuestion` call being held. Its own row is already in the
  * transcript and will show the answers once it completes.
@@ -233,17 +211,6 @@ isImage: boolean,
  * copy on disk instead, so the session log never carries image bytes.
  */
 preview: string | null, };
-
-/**
- * One outstanding background task. The harness's wire shape is snake_case, so
- * the parser keeps its own struct and the mapper converts — sharing this one
- * would break on `task_id` vs `taskId`.
- */
-export type BackgroundTask = { taskId: string, 
-/**
- * Free-form kind string — `local_agent` observed, set undocumented.
- */
-taskType: string, description: string, };
 
 /**
  * Joins streamed content to its committed counterpart. A message is often
@@ -349,7 +316,7 @@ export type ContextWindow = { usedTokens: number, maxTokens: number, };
  *
  * **Deltas are a preview, never the source of truth**: the committed event for
  * the same [`BlockRef`] supersedes whatever they accumulated. Absent deltas are
- * the common case — Pi emits none, Pi none for subagent output — so
+ * the common case — Pi emits none — so
  * consumers must render correctly without them.
  * Tagged on `delta`, not `type`: [`AgentEventPayload::Delta`] is a newtype
  * variant, so these fields flatten into the payload object alongside its own
@@ -819,7 +786,7 @@ parentSessionId: string | null, created: string, modified: string, archived: boo
 /**
  * Session-level facts, known at startup.
  */
-export type SessionInfo = { cwd: string | null, model: string | null, harnessVersion: string | null, tools: Array<string>, mcpServers: Array<McpServer>, subagentTypes: Array<string>, settings: Settings | null, };
+export type SessionInfo = { cwd: string | null, model: string | null, harnessVersion: string | null, tools: Array<string>, mcpServers: Array<McpServer>, settings: Settings | null, };
 
 /**
  * What crosses the IPC boundary for one session: its index entry plus the
@@ -928,21 +895,6 @@ approvalPolicy: PermissionMode | null, sandbox: string | null, writableRoots: Ar
 export type SlashCommand = { name: string, description: string, argumentHint: string, aliases: Array<string>, isSkill: boolean, };
 
 /**
- * A running subagent, whose events interleave with the main conversation's on
- * one stdout stream.
- *
- * Pi identifies these by `parent_tool_use_id` — the id of the tool
- * call that spawned it, so this equals the `call_id` of the corresponding
- * [`AgentEventPayload::ToolCallStarted`] and is what nests a subagent's work
- * under it. Pi uses `agent_path`.
- */
-export type Subagent = { id: string, 
-/**
- * Drives the collapsed subagent card's title.
- */
-label: string | null, };
-
-/**
  * Where the current branch stands against its upstream — everything the push
  * button needs to name itself.
  */
@@ -991,7 +943,7 @@ images: Array<ImageRef>, };
  * A rendering hint — which icon and component to use. Nothing depends on this
  * for correctness, and [`ToolType::Other`] must always render acceptably.
  */
-export type ToolType = "shell" | "file_read" | "file_edit" | "search" | "web" | "mcp" | "subagent_spawn" | "other";
+export type ToolType = "shell" | "file_read" | "file_edit" | "search" | "web" | "mcp" | "other";
 
 /**
  * How a turn ended. Pi reports this as `is_error` on its result

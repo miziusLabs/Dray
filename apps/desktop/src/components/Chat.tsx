@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
-import BackgroundTasksIndicator from "@/components/chat/BackgroundTasksIndicator";
 import CheckpointRail, { type Checkpoint } from "@/components/chat/CheckpointRail";
 import CompactingIndicator from "@/components/chat/CompactingIndicator";
 import PermissionRequest from "@/components/chat/PermissionRequest";
@@ -28,14 +27,10 @@ import type { QueuedMessage, SessionSnapshot } from "@/types/events";
 type ChatProps = {
   session: SessionSnapshot | null;
   streamingBlock: StreamingBlock | null;
-  onOpenSubagent: (id: string) => void;
   /// Opens the session that relayed a prompt into this one, for the avatar a
   /// `dray send` message draws. Selecting the session is all it does — the same
   /// thing clicking its sidebar row does.
   onOpenSession: (sessionId: string) => void;
-  /// Opens the subagent panel on no particular run — what the background-task
-  /// notice needs, since it stands for the whole set rather than for one of them.
-  onOpenSubagentPanel: () => void;
   /// Answers a permission request. The agent is blocked until this fires, so it
   /// is the one callback here whose absence stalls a session rather than
   /// degrading a view.
@@ -49,11 +44,6 @@ type ChatProps = {
   /// The current blank-screen wait, or null when something is rendering. Decides
   /// whether the working indicator shows, and carries the token count it draws.
   working?: Working | null;
-  /// Outstanding async subagents. Rendered after the turns rather than inside
-  /// one: the tasks outlive the turn that spawned them, so no single block owns
-  /// them — unlike the working indicator, which must sit where its turn's
-  /// text will land.
-  backgroundTaskCount?: number;
   /// Whether a compaction is running. Sits beside the task indicator for the
   /// same reason: it belongs to the session, not to any one turn.
   compacting?: boolean;
@@ -134,14 +124,11 @@ function useLingeringCards(pending: PendingAsk[]): PendingAsk[] {
 export default function Chat({
   session,
   streamingBlock,
-  onOpenSubagent,
   onOpenSession,
-  onOpenSubagentPanel,
   onRespondPermission,
   onAnswerQuestions,
   busy = false,
   working = null,
-  backgroundTaskCount = 0,
   compacting = false,
   queuedMessages = [],
   crowded = false,
@@ -163,7 +150,7 @@ export default function Chat({
     if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX);
   };
 
-  const { events, turns, subagentById, resultByCallId, pendingAsks } = useMemo(
+  const { events, turns, resultByCallId, pendingAsks } = useMemo(
     () => buildTranscript(session?.events ?? [], busy),
     [session?.events, busy],
   );
@@ -171,8 +158,7 @@ export default function Chat({
   const cards = useLingeringCards(pendingAsks);
 
   // One tick per prompt. A turn with no prompt — a resumed log truncated
-  // mid-conversation, or the promptless `init` a background subagent's
-  // report-back opens — is not a checkpoint: there is nothing the reader wrote
+  // mid-conversation — is not a checkpoint: there is nothing the reader wrote
   // to preview, and jumping to it lands on work with no question above it.
   const checkpoints = useMemo<Checkpoint[]>(
     () =>
@@ -448,9 +434,7 @@ export default function Chat({
             <div key={turn.key} data-turn={turn.key}>
               <TurnBlock
                 turn={turn}
-                subagentById={subagentById}
                 resultByCallId={resultByCallId}
-                onOpenSubagent={onOpenSubagent}
                 onOpenSession={onOpenSession}
                 cwd={session.cwd}
                 // An interrupted turn has no completion event, so only the
@@ -503,13 +487,6 @@ export default function Chat({
           )}
 
           <QueuedMessages messages={queuedMessages} cwd={session.cwd} />
-
-          {backgroundTaskCount > 0 && (
-            <BackgroundTasksIndicator
-              count={backgroundTaskCount}
-              onOpen={onOpenSubagentPanel}
-            />
-          )}
 
           {compacting && <CompactingIndicator />}
         </div>

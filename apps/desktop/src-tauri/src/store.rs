@@ -1090,7 +1090,6 @@ mod tests {
             seq: 0,
             ts: "t".into(),
             turn_id: None,
-            subagent: None,
             payload,
             raw: None,
         };

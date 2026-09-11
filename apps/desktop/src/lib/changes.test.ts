@@ -17,7 +17,6 @@ function prompt(baseline: string | null): AgentEvent {
     seq: 0,
     ts: "2026-08-11T00:00:00Z",
     turnId: null,
-    subagent: null,
     payload: { type: "user_message", text: "hi", images: [], baseline, queued: false, from: null },
     raw: null,
   } as AgentEvent;
@@ -67,9 +66,9 @@ describe("changeRange", () => {
     expect(changeRange(events)).toEqual({ baseline: "bbb", head: null });
   });
 
-  it("takes the newest close, so a report-back turn supersedes the prompt's own", () => {
-    // A background subagent writes past its turn's result; the promptless
-    // turn that narrates its findings closes on a fresher tree.
+  it("takes the newest close, so a continuation turn supersedes the prompt's own", () => {
+    // A continuation writes past its first turn result; the promptless turn
+    // that narrates its findings closes on a fresher tree.
     const events = [prompt("aaa"), turnEnd("first"), turnEnd("later")];
 
     expect(changeRange(events).head).toBe("later");

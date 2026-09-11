@@ -27,7 +27,7 @@ This file is the implementation map for agents working in this repository. Keep 
 - Git branch discovery and switching, including dirty-worktree handling before checkout.
 - Dynamic Pi model catalog with model selection, reasoning/effort selection, configurable model cycling, and separate model/effort preferences for generated session titles.
 - Permission modes: Auto, Plan, Accept edits, Ask every time, and Bypass permissions.
-- Rich transcript rendering for assistant text, user text, reasoning, tool calls, grouped tool calls, file edits, diffs, background tasks, subagents, images, checkpoints, compaction, permission requests, and structured question requests.
+- Rich transcript rendering for assistant text, user text, reasoning, tool calls, grouped tool calls, file edits, diffs, images, checkpoints, compaction, permission requests, and structured question requests.
 - Streaming assistant/tool output and live work indicators.
 - Prompt queuing while a turn is already running, with cancellation/restoration of a queued prompt when still retractable.
 - File attachments via picker or drag/drop, image previews, persistent archived result images, transcript thumbnails, and a keyboard-navigable image lightbox.
@@ -38,7 +38,7 @@ This file is the implementation map for agents working in this repository. Keep 
 - Desktop notifications, in-app notices, dock/taskbar badge state, attention indicators, and notification/celebration sounds.
 - Signed automatic updates from GitHub Releases, with background download and an install/restart notice.
 - Main repository Changes view with uncommitted changes, commit history, changed-file lists, commit metadata, and file diffs.
-- Right inspector with turn-scoped Changes, Subagents, and Pull Request tabs.
+- Right inspector with turn-scoped Changes and Pull Request tabs.
 - Turn-scoped Git snapshots so a completed turn's diff remains stable even if the checkout changes afterward.
 - Git status handoff actions for Commit, Commit & push, Push, Create PR, and Draft PR.
 - GitHub pull request discovery through `gh`, including draft/open/merged/closed state, checks, comments/reviews, changed-file counts, reopen, mark-ready, and merge actions/methods.
@@ -63,9 +63,8 @@ Top-level components in `src/components/`:
 - `Chat.tsx` — transcript list, follow-to-bottom behavior, streaming placement, and turn rendering.
 - `ChatInput.tsx` — composer text input, send/stop behavior, command/file menus, queued-send behavior, error state, and attachment integration.
 - `Sidebar.tsx` — task/session navigation, project grouping, search, nesting, session status, PR markers, pin/settle actions, row menus, and settings entry point.
-- `RightPanel.tsx` — shared inspector frame and tabs for PR, Changes, and Subagents.
+- `RightPanel.tsx` — shared inspector frame and tabs for PR, Changes, and Pull Request.
 - `ChangesPanel.tsx` — right-panel view of changes made by the selected turn.
-- `SubagentPanel.tsx` — subagent run list/detail and individual stop actions.
 - `PrPanel.tsx` — pull request details, checks, comments/reviews, GitHub links, draft/ready/reopen/merge controls, and merge-method selection.
 - `PrStateIcon.tsx` — compact pull request state iconography.
 - `SettingsDialog.tsx` — settled-session toggle, model-cycle configuration, and title-generation model configuration.
@@ -116,8 +115,6 @@ Files in `src/components/chat/`:
 - `PermissionRequest.tsx` — inline agent permission decision UI.
 - `QuestionRequest.tsx` — structured question/answer UI from the agent.
 - `QueuedMessages.tsx` — queued follow-up prompts and cancellation.
-- `BackgroundTasksIndicator.tsx` — live background task list/state.
-- `SubagentRow.tsx` — subagent transcript row.
 - `CheckpointRail.tsx` — turn/checkpoint navigation rail.
 - `CompactingIndicator.tsx` — context-compaction state.
 - `WorkingIndicator.tsx` — active turn indicator.
@@ -176,7 +173,7 @@ Files in `src/hooks/`:
 
 Files in `src/lib/`:
 
-- `transcript.ts` — converts raw backend events into renderable turns, tool/subagent state, and result maps.
+- `transcript.ts` — converts raw backend events into renderable turns and result maps.
 - `streaming.ts` — parses incremental stream payloads and reconstructs streamable content/tool data.
 - `tools.ts` — tool-call classification/grouping helpers.
 - `changes.ts` — turn-to-Git-baseline/change-range helpers.

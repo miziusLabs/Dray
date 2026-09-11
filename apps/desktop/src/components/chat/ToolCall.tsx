@@ -68,9 +68,7 @@ type ToolCallProps = {
   /// Absent while the call is still in flight.
   result?: ToolResult;
   /// Starts the row expanded. Initial state only, so the reader's own closes
-  /// stick. For a row the reader reached deliberately — the call a subagent
-  /// panel row opens onto — where making them click a second time to see the
-  /// thing they asked for is the click that says nothing.
+  /// stick.
   defaultOpen?: boolean;
 };
 

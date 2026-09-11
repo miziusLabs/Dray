@@ -31,8 +31,6 @@ export function toolSummary(
       return field(input, "pattern") ?? field(input, "query");
     case "web":
       return field(input, "url") ?? field(input, "query");
-    case "subagent_spawn":
-      return field(input, "description") ?? field(input, "subagent_type");
     default:
       break;
   }
@@ -171,7 +169,6 @@ export type ToolCategory =
   | "edit"
   | "search"
   | "web"
-  | "subagent"
   | "other";
 
 /// The small visual vocabulary shared by individual calls and grouped calls.
@@ -189,8 +186,6 @@ export function toolCategory({ name, toolType }: ToolDescriptor): ToolCategory {
       return "search";
     case "web":
       return "web";
-    case "subagent_spawn":
-      return "subagent";
     default:
       break;
   }
@@ -217,8 +212,6 @@ function actionPhrase(category: ToolCategory, count: number): string {
       return count === 1 ? "Searched files" : `Searched files ${count} times`;
     case "web":
       return count === 1 ? "Browsed the web" : `Browsed the web ${count} times`;
-    case "subagent":
-      return count === 1 ? "Ran a subagent" : `Ran ${count} subagents`;
     case "other":
       return count === 1 ? "Used a tool" : `Used ${count} tools`;
   }

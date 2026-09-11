@@ -112,7 +112,7 @@ export function markDisagrees(mark: PrMark | undefined, prs: PullRequest[]): boo
 /// badge that exists to say how much is still live. It stays in the list
 /// either way; the list is a record and the badge is a workload.
 ///
-/// Absent at one, like the subagent count: a tab reading "PR 1" says what
+/// Absent at one: a tab reading "PR 1" says what
 /// opening it says.
 export function prBadgeCount(prs: PullRequest[]): number | undefined {
   const live = prs.filter((pr) => pr.state !== "MERGED").length;

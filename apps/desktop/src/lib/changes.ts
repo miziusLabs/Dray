@@ -38,7 +38,7 @@ export function changeRange(events: AgentEvent[]): ChangeRange {
   for (let i = events.length - 1; i >= 0; i--) {
     const payload = events[i].payload;
     // The newest head seen while walking back is the newest turn end overall,
-    // which also covers a background subagent's report-back turn: its closing
+    // which also covers a continuation turn: its closing
     // snapshot is fresher than the prompt's own turn's and supersedes it.
     if (!head && payload.type === "turn_completed" && payload.head) {
       head = payload.head;

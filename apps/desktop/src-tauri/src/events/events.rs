@@ -42,30 +42,12 @@ pub struct AgentEvent {
     pub seq: u64,
     pub ts: String,
     pub turn_id: Option<String>,
-    /// `None` = main conversation, `Some` = the subagent that produced this.
-    pub subagent: Option<Subagent>,
     pub payload: AgentEventPayload,
     /// `None` on the emitted path — raw lines are archived separately — but
     /// always populated for [`AgentEventPayload::Unknown`], which is useless
     /// without it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<Value>,
-}
-
-/// A running subagent, whose events interleave with the main conversation's on
-/// one stdout stream.
-///
-/// Pi identifies these by `parent_tool_use_id` — the id of the tool
-/// call that spawned it, so this equals the `call_id` of the corresponding
-/// [`AgentEventPayload::ToolCallStarted`] and is what nests a subagent's work
-/// under it. Pi uses `agent_path`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "events.ts")]
-#[serde(rename_all = "camelCase")]
-pub struct Subagent {
-    pub id: String,
-    /// Drives the collapsed subagent card's title.
-    pub label: Option<String>,
 }
 
 /// What happened.
@@ -85,8 +67,8 @@ pub enum AgentEventPayload {
     /// grows between them as deferred tools load — so this carries whatever the
     /// turn was configured with. The first of a session is the session's.
     ///
-    /// A turn is not the same as a prompt: the agent opens one for itself when
-    /// an async subagent reports back.
+    /// A turn is not the same as a prompt: the agent can open one for itself
+    /// when continuing work.
     TurnStarted(SessionInfo),
     /// Not a session terminator — one arrives per completed turn.
     TurnCompleted {
@@ -150,8 +132,7 @@ pub enum AgentEventPayload {
     },
     AssistantText {
         /// `Some` only when this content was also streamed, naming the preview
-        /// it supersedes. `None` — the common case, covering Pi
-        /// subagents and all of Pi — means nothing was streamed and the
+        /// it supersedes. `None` — the common case — means nothing was streamed and the
         /// event simply appends in `seq` order.
         #[serde(default)]
         block: Option<BlockRef>,
@@ -197,44 +178,6 @@ pub enum AgentEventPayload {
         call_id: Option<String>,
         #[serde(default)]
         edits: Vec<FileEdit>,
-    },
-
-    // ---------- subagents ----------
-    /// Which subagent these describe is on the envelope's [`Subagent`], as it is
-    /// for every other event a subagent produces. `agent_id` is the harness's
-    /// own internal handle — a *different* id, not a correlation key.
-    SubagentStarted {
-        agent_id: String,
-        label: String,
-        description: Option<String>,
-        prompt: Option<String>,
-    },
-    SubagentProgress {
-        agent_id: String,
-        /// What the subagent is doing right now — Pi rewrites this per
-        /// progress event, so it drives a live status line without expanding
-        /// the subagent's own events.
-        description: Option<String>,
-        last_tool: Option<String>,
-        usage: Option<Usage>,
-    },
-    SubagentCompleted {
-        agent_id: String,
-        status: String,
-        summary: Option<String>,
-        usage: Option<Usage>,
-    },
-    /// The full set of outstanding background tasks, republished whole on every
-    /// change — an empty list means the session's async work has drained.
-    /// Latest wins; consumers keep the last one rather than accumulating.
-    ///
-    /// Not redundant with the subagent lifecycle events above: those describe
-    /// one task's own progress, this says how many are still open — which is
-    /// half of "is the session done", since a turn's result can arrive while
-    /// this is non-empty.
-    BackgroundTasksChanged {
-        #[serde(default)]
-        tasks: Vec<BackgroundTask>,
     },
 
     // ---------- accounting / control ----------
@@ -302,15 +245,6 @@ pub enum AgentEventPayload {
         /// `rule`, `mode`, `workingDir` and others. Lets a consumer treat a
         /// safety escalation differently without parsing prose.
         decision_reason_type: Option<String>,
-        /// Set when a subagent made the call rather than the main thread.
-        ///
-        /// Not a correlation key — it is the harness's own handle and matches no
-        /// other id — so it answers exactly one question: whether the call being
-        /// consented to is visible to the reader. A main-thread request renders
-        /// directly under its own `ToolCallStarted` row; a subagent's renders
-        /// with that row filed away in a panel, so the card has to carry the
-        /// arguments itself or it asks about something invisible.
-        agent_id: Option<String>,
         options: Vec<PermissionOption>,
     },
     /// The agent asking the user something in its own words. Blocks the harness
@@ -510,19 +444,6 @@ pub struct QuestionOption {
     pub preview: Option<String>,
 }
 
-/// One outstanding background task. The harness's wire shape is snake_case, so
-/// the parser keeps its own struct and the mapper converts — sharing this one
-/// would break on `task_id` vs `taskId`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "events.ts")]
-#[serde(rename_all = "camelCase")]
-pub struct BackgroundTask {
-    pub task_id: String,
-    /// Free-form kind string — `local_agent` observed, set undocumented.
-    pub task_type: String,
-    pub description: String,
-}
-
 /// How a turn ended. Pi reports this as `is_error` on its result
 /// event; Pi live emits `turn.completed` (a failed turn is uncaptured so
 /// far). A user-abort outcome likely deserves its own variant once one has been
@@ -551,7 +472,7 @@ pub struct BlockRef {
 ///
 /// **Deltas are a preview, never the source of truth**: the committed event for
 /// the same [`BlockRef`] supersedes whatever they accumulated. Absent deltas are
-/// the common case — Pi emits none, Pi none for subagent output — so
+/// the common case — Pi emits none — so
 /// consumers must render correctly without them.
 /// Tagged on `delta`, not `type`: [`AgentEventPayload::Delta`] is a newtype
 /// variant, so these fields flatten into the payload object alongside its own
@@ -614,7 +535,6 @@ pub enum ToolType {
     Search,
     Web,
     Mcp,
-    SubagentSpawn,
     Other,
 }
 
@@ -717,7 +637,6 @@ pub struct SessionInfo {
     pub harness_version: Option<String>,
     pub tools: Vec<String>,
     pub mcp_servers: Vec<McpServer>,
-    pub subagent_types: Vec<String>,
     pub settings: Option<Settings>,
 }
 

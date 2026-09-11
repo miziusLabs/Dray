@@ -94,9 +94,8 @@ function readString(
 /// not race. They don't, twice over: `command` is checked first when both have
 /// landed, and it arrives first on the wire (41 of 41 Bash calls across every
 /// fixture emit `command,…`, since the model follows the tool's schema order).
-/// Both halves are load-bearing — `description` cannot simply be dropped to
-/// settle it, because it is how a subagent spawn names itself while its far
-/// longer `prompt` is still streaming.
+/// Both halves are load-bearing because extension tools may use `description`
+/// while their other arguments are still streaming.
 ///
 /// `path` marks the ones that get shortened to their last two segments. A
 /// command is not a path — running `shortenPath` over `find /a/b -name x` would
