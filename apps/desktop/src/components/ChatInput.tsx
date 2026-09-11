@@ -4,6 +4,7 @@ import { ArrowUp, CornerDownLeft, Paperclip, Square, X } from "lucide-react";
 
 import AttachmentTray from "@/components/composer/AttachmentTray";
 import FileMentionMenu from "@/components/composer/FileMentionMenu";
+import PromptStashMenu from "@/components/composer/PromptStashMenu";
 import SlashCommandMenu from "@/components/composer/SlashCommandMenu";
 import PickerMenu from "@/components/composer/PickerMenu";
 import {
@@ -14,6 +15,7 @@ import {
   modelLabel,
 } from "@/components/composer/ModelSelector";
 import { Button } from "@/components/ui/button";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import {
   addAttachmentPaths,
   addPastedFile,
@@ -26,6 +28,7 @@ import {
 import { useDraft } from "@/hooks/useDraft";
 import { useFileSearch } from "@/hooks/useFileSearch";
 import { useHotkey } from "@/hooks/useHotkey";
+import { usePromptStash } from "@/hooks/usePromptStash";
 import { SEGMENT_COLOR, highlightSegments, splitMention } from "@/lib/highlight";
 import { applyMention, mentionSpan } from "@/lib/mention";
 import {
@@ -40,6 +43,7 @@ import {
   slashQuery,
 } from "@/lib/slash";
 import { pastedFilePath } from "@/lib/paste";
+import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import type {
   Effort,
@@ -195,12 +199,14 @@ export default function ChatInput({
   // soon as the caret leaves the command, so the next `/` reopens it.
   const [dismissed, setDismissed] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [stashMenuOpen, setStashMenuOpen] = useState(false);
   // Set by a pick, applied once React has painted the new value — a controlled
   // textarea otherwise puts the caret at the end, which is wrong whenever the
   // completed command has arguments after it.
   const pendingCaretRef = useRef<number | null>(null);
 
   const attachments = useAttachments(sessionId);
+  const { prompts: stashedPrompts, stashPrompt, removePrompt } = usePromptStash();
   // Set while the OS is dragging files over the window. Tauri intercepts the
   // native drop before the webview sees it, so there are no HTML drag events to
   // read here — `onDragDropEvent` is the only source, and it reports paths
@@ -273,15 +279,20 @@ export default function ChatInput({
     argument?.commandName === "model" || argument?.commandName === "models"
       ? modelMatches
       : effortMatches;
-  const rowCount = mention
-    ? files.length
-    : argument
-      ? argumentMatches.length
-      : commandMatches.length;
+  const stashMenuVisible =
+    isNewTask && stashMenuOpen && message.trim().length === 0 && stashedPrompts.length > 0;
+  const rowCount = stashMenuVisible
+    ? stashedPrompts.length
+    : mention
+      ? files.length
+      : argument
+        ? argumentMatches.length
+        : commandMatches.length;
   const menuOpen =
-    !dismissed &&
-    rowCount > 0 &&
-    (query !== null || mention !== null || argument !== null);
+    stashMenuVisible ||
+    (!dismissed &&
+      rowCount > 0 &&
+      (query !== null || mention !== null || argument !== null));
   // Clamped rather than trusted: both lists arrive asynchronously, so a list
   // that shrinks under an already-moved selection would otherwise index past
   // its end — and an undefined row only shows up as a crash on the keystroke
@@ -295,6 +306,18 @@ export default function ChatInput({
     setActiveIndex(0);
     if (query === null && mentionQuery === null) setDismissed(false);
   }, [query, mentionQuery]);
+
+  useEffect(() => {
+    if (stashMenuVisible) setActiveIndex(0);
+  }, [stashMenuVisible]);
+
+  const pickStashedPrompt = (prompt: (typeof stashedPrompts)[number]) => {
+    removePrompt(prompt.id);
+    setStashMenuOpen(false);
+    pendingCaretRef.current = prompt.text.length;
+    setMessage(prompt.text);
+    textareaRef.current?.focus();
+  };
 
   const pickCommand = (command: SlashCommand) => {
     const next = applyCommand(message, command.name, command.isSkill, caret);
@@ -324,6 +347,12 @@ export default function ChatInput({
   /// The keyboard's way into whichever list is drawn. A click calls the same
   /// two functions directly, so the two routes cannot diverge.
   const pickRow = (index: number) => {
+    if (stashMenuVisible) {
+      const prompt = stashedPrompts[index];
+      if (prompt) pickStashedPrompt(prompt);
+      return;
+    }
+
     if (mention) {
       const file = files[index];
       if (file) pickFile(file);
@@ -398,6 +427,7 @@ export default function ChatInput({
     el.setSelectionRange(end, end);
     setCaret(end);
     setDismissed(false);
+    setStashMenuOpen(false);
   }, [sessionId]);
 
   // The sizing effect first measures against fallback font metrics, which can
@@ -417,6 +447,22 @@ export default function ChatInput({
 
   // ⌥ as well as ⌘, so the chord can't collide with the webview's own ⌘O.
   useHotkey("o", () => void pickAttachments(sessionId), { alt: true });
+
+  // New Task is the only place a prompt can be saved before it becomes a
+  // session. The same chord restores when the input is empty.
+  useHotkey(
+    "s",
+    () => {
+      if (message.trim()) {
+        stashPrompt(message);
+        setMessage("");
+        setStashMenuOpen(false);
+      } else {
+        setStashMenuOpen(true);
+      }
+    },
+    { enabled: isNewTask },
+  );
 
   const insertPastedText = (text: string) => {
     const textarea = textareaRef.current;
@@ -440,6 +486,11 @@ export default function ChatInput({
   const escapeRef = useRef<() => boolean>(() => false);
   escapeRef.current = () => {
     // Shuts the picker without clearing what was typed.
+    if (stashMenuVisible) {
+      setStashMenuOpen(false);
+      return true;
+    }
+
     if (menuOpen) {
       setDismissed(true);
       return true;
@@ -701,7 +752,14 @@ export default function ChatInput({
               opens downward — upward it would cover the controls it sits next
               to. Its surface still matches the corresponding follow-up picker. */}
           {menuOpen &&
-            (mention ? (
+            (stashMenuVisible ? (
+              <PromptStashMenu
+                prompts={stashedPrompts}
+                activeIndex={active}
+                onPick={pickStashedPrompt}
+                onHover={setActiveIndex}
+              />
+            ) : mention ? (
               <FileMentionMenu
                 files={files}
                 activeIndex={active}
@@ -801,6 +859,7 @@ export default function ChatInput({
                 placeholder={isNewTask ? "Describe a task. @files. $skills and /commands." : "Send follow-up"}
                 onChange={(e) => {
                   setMessage(e.currentTarget.value);
+                  setStashMenuOpen(false);
                   setCaret(e.currentTarget.selectionStart);
                 }}
                 onPaste={(e) => {
@@ -997,7 +1056,21 @@ export default function ChatInput({
           // rather than sending, so the send legend would be misleading.
           !menuOpen && (
             <div className="flex items-center gap-1 pt-2 text-ui text-muted-foreground/60">
-              Press <CornerDownLeft className="size-3" strokeWidth={2} /> to send
+              Press
+              <Kbd>
+                <CornerDownLeft className="size-3" strokeWidth={2} />
+              </Kbd>
+              to send{" "}
+              {(message.trim() || stashedPrompts.length > 0) && (
+                <>
+                  <span>or</span>
+                  <KbdGroup>
+                    <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+                    <Kbd>S</Kbd>
+                  </KbdGroup>
+                  <span>to {message.trim() ? "stash" : "restore"}</span>
+                </>
+              )}
             </div>
           )
         ) : (
