@@ -979,6 +979,10 @@ function SessionRow({
   // one it opens for its own children.
   const ownRail = RAIL_X + (depth - 1) * STEP;
   const parentCarriesOn = guides[depth - 1] ?? false;
+  // Titles generated from prompts may already carry the app's 60-character
+  // ellipsis. Remove that marker so CSS owns the visible truncation and never
+  // leaves a second, separated ellipsis in the row.
+  const title = item.title.trimEnd().replace(/\s*(?:…|\.{3})$/, "");
 
   return (
     <RowMenu
@@ -1161,61 +1165,32 @@ function SessionRow({
           </span>
         )}
 
-        <span className="min-w-0 flex-1 truncate text-ui">{item.title.trimEnd()}</span>
+        <span className="min-w-0 flex-1 truncate whitespace-nowrap text-ui">{title}</span>
 
-        {/* One slot for both, sized by the buttons and the shortcut card — so a
+        {/* Stable trailing slot for the title boundary and row metadata. The
             long title truncates before either one and nothing reflows on hover.
-            The two children stack via `absolute` on the date and crossfade on
+            The indicator and hover action share the same position and crossfade on
             `opacity` over the same duration, so they never both read at once;
             its platform-sized minimum keeps the title's trailing space stable
             whether the shortcut hint is visible or not. */}
         <div
           className={cn(
-            "relative flex shrink-0 items-center justify-end self-stretch pl-0",
+            "relative flex shrink-0 items-center justify-end self-stretch",
             IS_MAC ? "min-w-8" : "min-w-10",
           )}
         >
-          {/* `pointer-events-none` unconditionally: it's never a target, and a
-              faded-but-present element still hit-tests — stacked on `right-0` it
-              would otherwise swallow the cursor over the last button, which reads
-              as that one button being dead while its neighbour works. */}
-          <span
-            className={cn(
-              "pointer-events-none absolute right-0 flex items-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0",
-              !(modifierPressed && shortcutIndex) && "px-1",
-            )}
-          >
-            {/* The orb takes the timestamp's place rather than a slot of its
-                own: a row that's working right now is the one row whose "last
-                activity" reads as stale, and one indicator per row is what keeps
-                the right edge quiet. 20 is the inline-with-text preset, and
-                `theme` is pinned for the same reason as everywhere else — the
-                orb's `auto` looks for `data-theme="dark|light"` and this app
-                stamps a palette name there. */}
-            {/* Three things want this one slot, and the order is the whole of
-                the rule. Checks win: the orb says the agent is working, which
-                the reader already knows because they set it going and the
-                transcript is one click away — where CI reports on a machine
-                elsewhere, on its own schedule, and this row is the only place
-                that lands. The orb comes next, for the same reason it beats the
-                timestamp: "last activity" is the least useful thing to say
-                about a row with anything in flight.
-
-                Same dashed spinner and same command yellow the PR panel's own
-                pending check row uses, at the same 3s turn: one glyph for one
-                fact, so a reader who has seen it in the pane knows it here. It
-                is deliberately not a *verdict* — a check that passed or failed
-                is settled, and the row goes back to its timestamp rather than
-                growing a second colour to decode.
-
-                `mr-[3px]` sits it on the orb's centre line: the glyph is 14px
-                against the orb's 20px box, and both are flush right, so without
-                it the mark shifts sideways row to row. */}
+          {/* The indicator is centered in the exact box occupied by Settle.
+              Keeping this box fixed gives the title one predictable ellipsis
+              boundary, regardless of timestamp, orb, or shortcut. */}
+          <span className="pointer-events-none absolute inset-y-0 -right-1.5 flex w-6 items-center justify-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0">
+            {/* The slot shows one value at a time: ⌘ navigation first, then a
+                running check, then the working orb, and finally the timestamp.
+                Centering each value keeps replacements aligned with Settle. */}
             {modifierPressed && shortcutIndex ? (
-              <Kbd>{`${IS_MAC ? "⌘" : "Ctrl"} ${shortcutIndex}`}</Kbd>
+              <Kbd className="mr-[3px] shrink-0 whitespace-nowrap">{`${IS_MAC ? "⌘" : "Ctrl"} ${shortcutIndex}`}</Kbd>
             ) : marksLive && pr?.checksState === "RUNNING" ? (
               <CircleDashed
-                className="mr-[3px] size-3.5 animate-spin text-accent-command [animation-duration:3s]"
+                className="size-3.5 animate-spin text-accent-command [animation-duration:3s]"
                 strokeWidth={1.5}
                 aria-label="Checks running"
               />
@@ -1247,9 +1222,7 @@ function SessionRow({
 
             <RowAction
               label={item.archived ? "Unsettle" : "Settle"}
-              // Keep this control at the previous right inset; the rest of the
-              // row uses the wider padding.
-              className="-mr-1"
+              className="-mr-1.5"
               active={item.archived}
               onClick={() =>
                 onSetFlags(item.sessionId, { archived: !item.archived })
