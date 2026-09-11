@@ -182,7 +182,7 @@ export default function PickerMenu<T>({
           // gap only reads as the list sitting oddly short of its own edge.
           className={cn(
             "picker-menu-scrollbar-hidden overflow-x-hidden overflow-y-auto overscroll-contain",
-            bare ? "max-h-[14rem]" : "max-h-[15rem] px-1 py-2",
+            bare ? "max-h-[14rem]" : "max-h-[15rem] p-2",
           )}
         >
           {groups.map((group, g) => (
