@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 /// Off, the branch picker to the right decides where the session runs. On, it is
@@ -7,12 +8,14 @@ export default function CloudToggle({
   on,
   onToggle,
   disabled,
+  disabledReason,
 }: {
   on: boolean;
   onToggle: () => void;
   disabled?: boolean;
+  disabledReason?: string;
 }) {
-  return (
+  const toggle = (
     <Button
       type="button"
       variant="ghost"
@@ -21,7 +24,6 @@ export default function CloudToggle({
       aria-checked={on}
       disabled={disabled}
       onClick={onToggle}
-      title={disabled ? "Docker must be installed and running to use Cloud" : undefined}
       className="gap-1.5 px-1.5 text-ui text-muted-foreground aria-checked:text-foreground"
     >
       {/* The track reads as on/off at a glance; the label alone left the
@@ -42,5 +44,20 @@ export default function CloudToggle({
       </span>
       Cloud
     </Button>
+  );
+
+  if (!disabledReason) return toggle;
+
+  // Disabled buttons don't receive pointer events, so the wrapper is the
+  // tooltip trigger that keeps the reason hoverable.
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex cursor-not-allowed">
+          {toggle}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">{disabledReason}</TooltipContent>
+    </Tooltip>
   );
 }

@@ -7,6 +7,7 @@
 //! in the container environment for the lifetime of the container only.
 
 use anyhow::{bail, Context, Result};
+use serde::Serialize;
 use std::process::Stdio;
 use tokio::process::Command;
 
@@ -56,6 +57,38 @@ async fn command_succeeded(mut command: Command) -> bool {
         .status()
         .await
         .is_ok_and(|status| status.success())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CloudAvailability {
+    pub available: bool,
+    pub reason: Option<String>,
+}
+
+/// Checks the prerequisites shown by the New Task Cloud control. Keep the
+/// daemon and image checks separate so the UI can tell the user what to fix.
+pub async fn availability() -> CloudAvailability {
+    if !is_available().await {
+        return CloudAvailability {
+            available: false,
+            reason: Some("Docker is not installed or is not running.".to_string()),
+        };
+    }
+
+    if ensure_image().await.is_err() {
+        return CloudAvailability {
+            available: false,
+            reason: Some(format!(
+                "Cloud image {:?} is not available. Build it with `pnpm build:sandbox`.",
+                image()
+            )),
+        };
+    }
+
+    CloudAvailability {
+        available: true,
+        reason: None,
+    }
 }
 
 /// Verifies that the requested image exists before a session is indexed. A

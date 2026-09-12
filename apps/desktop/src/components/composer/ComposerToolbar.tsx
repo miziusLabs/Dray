@@ -43,6 +43,7 @@ export type ComposerToolbarProps = {
 
   useCloud: boolean;
   cloudAvailable: boolean;
+  cloudUnavailableReason: string;
   onToggleCloud: () => void;
 
   /// Opens the file picker. The attachments themselves are held in a
@@ -85,6 +86,7 @@ export default function ComposerToolbar({
   onCancelBranchSwitch,
   useCloud,
   cloudAvailable,
+  cloudUnavailableReason,
   onToggleCloud,
   onAttach,
   contextUsage,
@@ -149,6 +151,7 @@ export default function ComposerToolbar({
             on={useCloud}
             onToggle={onToggleCloud}
             disabled={!cloudAvailable}
+            disabledReason={!cloudAvailable ? cloudUnavailableReason : undefined}
           />
 
           {projectPath && !useCloud && (

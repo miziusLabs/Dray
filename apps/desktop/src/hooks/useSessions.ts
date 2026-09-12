@@ -86,9 +86,13 @@ export function useSessions(titlePrefs: TitlePrefs) {
     const [pendingBranch, setPendingBranch] = useState<string | null>(null);
     const [useCloud, setUseCloudState] = useState(() => prefs.useCloud);
     // Null means the capability check is still in flight. Cloud remains off until
-    // Docker is confirmed reachable, so an unavailable daemon cannot be selected
-    // during startup or leave the new-task composer in a misleading state.
-    const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null);
+    // Docker and the configured image are confirmed ready, so an unavailable
+    // prerequisite cannot be selected during startup or leave the new-task
+    // composer in a misleading state.
+    const [cloudAvailability, setCloudAvailability] = useState<{
+      available: boolean;
+      reason: string | null;
+    } | null>(null);
     // Per-session, not global: sessions run concurrently and all of their events
     // arrive on the same channel, so a single value would clear on another's
     // turn. The backend drives this via `session_status`, and this map is the
@@ -119,8 +123,8 @@ export function useSessions(titlePrefs: TitlePrefs) {
     const [error, setError] = useState<string | null>(null);
 
 // The preference can remain sticky across launches, but Cloud is only an active
-// mode after Docker has answered the capability check successfully.
-const cloudEnabled = useCloud && dockerAvailable === true;
+// mode after Docker and its image have answered the capability check successfully.
+const cloudEnabled = useCloud && cloudAvailability?.available === true;
 
 // What actually gets sent for the current model: its remembered pick, else its
 // own default, and null for a model that takes no effort flag at all.
@@ -765,14 +769,19 @@ useEffect(() => {
 
 useEffect(() => {
   let cancelled = false;
-  invoke<boolean>("docker_available")
-    .then((available) => {
-      if (!cancelled) setDockerAvailable(available);
+  invoke<{ available: boolean; reason: string | null }>("cloud_availability")
+    .then((availability) => {
+      if (!cancelled) setCloudAvailability(availability);
     })
     .catch(() => {
       // Docker is optional for local sessions, so an unavailable capability is
       // represented by the disabled Cloud control rather than an app error.
-      if (!cancelled) setDockerAvailable(false);
+      if (!cancelled) {
+        setCloudAvailability({
+          available: false,
+          reason: "Docker is not installed or is not running.",
+        });
+      }
     });
   return () => {
     cancelled = true;
@@ -1354,6 +1363,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, projects, projectPath, branches, branch, useCloud: cloudEnabled, dockerAvailable: dockerAvailable === true, busy, working, compacting, contextUsage, error, setError, handleModelChange, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, projects, projectPath, branches, branch, useCloud: cloudEnabled, cloudAvailable: cloudAvailability?.available === true, cloudUnavailableReason: cloudAvailability?.reason ?? "Checking Cloud availability…", busy, working, compacting, contextUsage, error, setError, handleModelChange, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
 
 }

@@ -37,8 +37,8 @@ async fn get_codex_usage() -> Result<usage::CodexUsage, String> {
 }
 
 #[tauri::command]
-async fn docker_available() -> bool {
-    sandbox::is_available().await
+async fn cloud_availability() -> sandbox::CloudAvailability {
+    sandbox::availability().await
 }
 
 #[tauri::command]
@@ -490,7 +490,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            docker_available,
+            cloud_availability,
             get_codex_usage,
             send_msg,
             read_attachments,
