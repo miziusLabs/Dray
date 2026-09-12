@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { usageBarColorClass } from "@/lib/usage";
 import type { CodexUsage, CodexUsageWindow, UsageDisplayMode } from "@/types/usage";
 
 export default function AnalyticsDialog({
@@ -126,7 +127,7 @@ function UsageBar({
         aria-valuenow={percentage ?? 0}
       >
         <div
-          className="h-full rounded-full bg-primary transition-[width]"
+          className={`h-full rounded-full ${usageBarColorClass(percentage, displayMode)} transition-[width]`}
           style={{ width: `${percentage ?? 0}%` }}
         />
       </div>
