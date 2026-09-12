@@ -57,7 +57,9 @@ export default function CloudToggle({
           {toggle}
         </span>
       </TooltipTrigger>
-      <TooltipContent side="top">{disabledReason}</TooltipContent>
+      <TooltipContent side="top" className="h-8 max-w-none whitespace-nowrap">
+        {disabledReason}
+      </TooltipContent>
     </Tooltip>
   );
 }
