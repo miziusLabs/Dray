@@ -5,6 +5,7 @@ import { useLocalStorage } from "@/hooks/useLocalStorage";
 export type StashedPrompt = {
   id: string;
   text: string;
+  projectPath: string | null;
 };
 
 const STASH_KEY = "ade.promptStash";
@@ -12,9 +13,10 @@ const STASH_KEY = "ade.promptStash";
 export function addStashedPrompt(
   prompts: StashedPrompt[],
   text: string,
+  projectPath: string | null,
   id: string,
 ): StashedPrompt[] {
-  return [{ id, text }, ...prompts];
+  return [{ id, text, projectPath }, ...prompts];
 }
 
 export function removeStashedPrompt(
@@ -22,6 +24,13 @@ export function removeStashedPrompt(
   id: string,
 ): StashedPrompt[] {
   return prompts.filter((prompt) => prompt.id !== id);
+}
+
+export function stashedPromptsForProject(
+  prompts: StashedPrompt[],
+  projectPath: string | null,
+): StashedPrompt[] {
+  return prompts.filter((prompt) => prompt.projectPath === projectPath);
 }
 
 function newPromptId() {
@@ -38,10 +47,10 @@ export function usePromptStash() {
   const [prompts, setPrompts] = useLocalStorage<StashedPrompt[]>(STASH_KEY, []);
 
   const stashPrompt = useCallback(
-    (text: string) => {
+    (text: string, projectPath: string | null) => {
       if (!text.trim()) return;
       const id = newPromptId();
-      setPrompts((current) => addStashedPrompt(current, text, id));
+      setPrompts((current) => addStashedPrompt(current, text, projectPath, id));
     },
     [setPrompts],
   );

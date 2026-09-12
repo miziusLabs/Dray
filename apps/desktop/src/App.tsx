@@ -646,6 +646,7 @@ function App() {
           onNewSession={handleNewSession}
           onSettle={settleCurrentSession}
           cwd={composerCwd}
+          projectPath={projectPath}
           onStop={handleInterrupt}
           onCancelQueued={handleCancelQueued}
           queuedCount={queuedMessages.length}

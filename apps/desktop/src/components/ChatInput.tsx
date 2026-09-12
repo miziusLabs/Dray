@@ -28,7 +28,7 @@ import {
 import { useDraft } from "@/hooks/useDraft";
 import { useFileSearch } from "@/hooks/useFileSearch";
 import { useHotkey } from "@/hooks/useHotkey";
-import { usePromptStash } from "@/hooks/usePromptStash";
+import { stashedPromptsForProject, usePromptStash } from "@/hooks/usePromptStash";
 import { SEGMENT_COLOR, highlightSegments, splitMention } from "@/lib/highlight";
 import { applyMention, mentionSpan } from "@/lib/mention";
 import {
@@ -75,6 +75,9 @@ type ChatInputProps = {
   /// Where the `@` picker searches for files. Cloud sessions expose an empty
   /// host-side marker because their actual workspace stays inside Docker.
   cwd?: string | null;
+  /// The Project selected for a new task. Prompt stashes are scoped to this
+  /// path; legacy stashes without a project are intentionally not migrated.
+  projectPath?: string | null;
   /// Interrupts the running turn. Reachable while `busy` and the box is empty —
   /// with something typed the same button sends, since a prompt written during a
   /// turn is queued onto it rather than refused.
@@ -173,6 +176,7 @@ export default function ChatInput({
   onNewSession,
   onSettle,
   cwd = null,
+  projectPath = null,
   onStop,
   onCancelQueued,
   queuedCount = 0,
@@ -206,7 +210,11 @@ export default function ChatInput({
   const pendingCaretRef = useRef<number | null>(null);
 
   const attachments = useAttachments(sessionId);
-  const { prompts: stashedPrompts, stashPrompt, removePrompt } = usePromptStash();
+  const { prompts: allStashedPrompts, stashPrompt, removePrompt } = usePromptStash();
+  const stashedPrompts = useMemo(
+    () => stashedPromptsForProject(allStashedPrompts, projectPath),
+    [allStashedPrompts, projectPath],
+  );
   // Set while the OS is dragging files over the window. Tauri intercepts the
   // native drop before the webview sees it, so there are no HTML drag events to
   // read here — `onDragDropEvent` is the only source, and it reports paths
@@ -454,7 +462,7 @@ export default function ChatInput({
     "s",
     () => {
       if (message.trim()) {
-        stashPrompt(message);
+        stashPrompt(message, projectPath);
         setMessage("");
         setStashMenuOpen(false);
       } else {
