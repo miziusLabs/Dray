@@ -170,13 +170,6 @@ pub async fn init(
     let session_cwd_owned = session_cwd.to_string();
     let app_for_stdout = app.clone();
 
-    // Pi exposes the actual post-compaction context estimate only through this
-    // RPC response, not on message usage. Ask once on startup so resumed
-    // sessions can restore their existing reading before the next turn.
-    if let Err(error) = request_context_stats(&stdin).await {
-        eprintln!("[pi context stats request err] {error}");
-    }
-
     tokio::spawn(async move {
         if let Err(error) = read_stdout(
             stdout,
@@ -266,6 +259,7 @@ async fn read_stdout(
             record_failure(session_id, "unknown_subtype", "unmodeled Pi event", &line).await;
         }
 
+        let is_session = matches!(&pi_event, PiEvent::Session { .. });
         let mapped = match mapper.map(pi_event) {
             Ok(events) => events,
             Err(error) => {
@@ -273,6 +267,16 @@ async fn read_stdout(
                 continue;
             }
         };
+
+        // Pi can answer a stats request sent immediately after spawn with the
+        // empty pre-session value. Wait until its session event has been read so
+        // a resumed session's initial reading cannot race with the first turn
+        // and overwrite the real context usage with zero.
+        if is_session {
+            if let Err(error) = request_context_stats(&flush_stdin).await {
+                eprintln!("[pi context stats request err] {error}");
+            }
+        }
 
         for mut agent_event in mapped {
             if stopped.load(Relaxed) {
