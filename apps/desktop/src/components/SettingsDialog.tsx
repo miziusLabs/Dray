@@ -24,6 +24,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { IS_MAC } from "@/lib/platform";
 import type { Effort, Model, ModelId, PiModel } from "@/types/events";
 import type { UsageDisplayMode } from "@/types/usage";
 import type { UpdateCheckResult } from "@/components/UpdateNotice";
@@ -191,7 +193,16 @@ export default function SettingsDialog({
               selectedKeys={cycleModelKeys}
               onChange={onCycleModelKeysChange}
               label="Cycle models"
-              description="Choose which models Ctrl+M cycles through."
+              description={
+                <>
+                  Choose which models{" "}
+                  <KbdGroup>
+                    <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+                    <Kbd>M</Kbd>
+                  </KbdGroup>{" "}
+                  cycles through.
+                </>
+              }
             />
             <CycleEffortsRow
               selectedEfforts={cycleEfforts}
@@ -365,7 +376,7 @@ function ModelSelectionRow({
   selectedKeys: string[] | null;
   onChange: (next: string[]) => void;
   label: string;
-  description: string;
+  description: ReactNode;
 }) {
   const id = useId();
   const resolvedKeys = selectedKeys ?? models.map(modelKey);
@@ -444,7 +455,16 @@ function CycleEffortsRow({
     <SettingRow
       id={id}
       label="Cycle reasoning levels"
-      description="Choose which reasoning levels Shift+Tab cycles through."
+      description={
+        <>
+          Choose which reasoning levels{" "}
+          <KbdGroup>
+            <Kbd>Shift</Kbd>
+            <Kbd>Tab</Kbd>
+          </KbdGroup>{" "}
+          cycles through.
+        </>
+      }
     >
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
