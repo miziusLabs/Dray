@@ -50,10 +50,6 @@ type ChatProps = {
   /// two toggles, and the rail overlays the transcript at every width anyway — so
   /// this is about how crowded the pane *is*, not whether the rail fits.
   crowded?: boolean;
-  /// Whether the chat tab is the one on screen. The transcript is hidden rather
-  /// than unmounted when another view tab is picked, so ⌘↓ has to be told to
-  /// stop listening — otherwise it scrolls a pane nobody can see.
-  active?: boolean;
 };
 
 /// How long an answered question card holds its place before going.
@@ -125,7 +121,6 @@ export default function Chat({
   compacting = false,
   queuedMessages = [],
   crowded = false,
-  active = true,
 }: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -401,7 +396,7 @@ export default function Chat({
   // this, not its gate, and pressing it while already at the bottom re-arms the
   // pin — which is the useful half when a turn has scrolled you off it.
   useHotkey("ArrowDown", () => {
-    if (active && session) scrollToBottom();
+    if (session) scrollToBottom();
   });
 
   // With no session there is no transcript to draw; AppShell centers the

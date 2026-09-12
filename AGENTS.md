@@ -36,7 +36,6 @@ This file is the implementation map for agents working in this repository. Keep 
 - Per-session draft preservation and focus restoration.
 - Desktop notifications, in-app notices, dock/taskbar badge state, attention indicators, and notification/celebration sounds.
 - Signed automatic updates from GitHub Releases, with background download and an install/restart notice.
-- Main repository Changes view with uncommitted changes, commit history, changed-file lists, commit metadata, and file diffs.
 - Right inspector with turn-scoped Changes and Pull Request tabs.
 - Turn-scoped Git snapshots so a completed turn's diff remains stable even if the checkout changes afterward.
 - Git status handoff actions for Commit, Commit & push, Push, Create PR, and Draft PR.
@@ -120,7 +119,6 @@ Files in `src/components/chat/`:
 
 Files in `src/components/changes/`:
 
-- `ChangesView.tsx` — full repository view with Uncommitted and History sub-tabs.
 - `FileList.tsx` — reusable changed-file list.
 - `DiffPane.tsx` — selected-file diff pane.
 - `HistoryList.tsx` — paginated commit history with expandable file lists.
@@ -131,7 +129,6 @@ Files in `src/components/changes/`:
 
 - `layout/AppShell.tsx` — three-column/window shell.
 - `layout/SessionHeader.tsx` — selected session title and branch context.
-- `layout/ViewTabs.tsx` — main Chat/Changes view tabs.
 - `icons/PanelLeftIcon.tsx`, `PanelRightIcon.tsx`, `GitBranchIcon.tsx` — custom chrome icons.
 
 ### Shared UI primitives
@@ -144,7 +141,7 @@ Files in `src/hooks/`:
 
 - `useSessions.ts` — central frontend session state: session index/snapshots, model/project/branch/cloud controls, send/queue/interrupt/stop/respond/fork/detach/delete operations, backend event subscriptions, status/unread state, notices, and context/background-task derivation.
 - `useChanges.ts` — fetches and caches turn/revision change sets and individual file versions.
-- `useRepo.ts` — HEAD tree, commit history, and sync status for the repository Changes view.
+- `useRepo.ts` — repository tree, history, and sync status helpers.
 - `useWorkStatus.ts` — working tree, branch, upstream, default branch, and ahead/dirty state for handoff actions.
 - `usePullRequest.ts` — selected branch PR loading/polling and PR mutations.
 - `usePrMarks.ts` — per-repository cached PR markers for sidebar sessions.
@@ -239,7 +236,7 @@ Use `DRAY_CLOUD_IMAGE` to override the Docker image tag. `GITHUB_TOKEN` or an au
 
 - A local session is tied to a project/checkout; a Cloud Session has no local repository view.
 - Completed-turn changes use Git tree snapshots. Do not replace them with a live `git diff` or the UI will drift after later edits.
-- The full Changes view is repository-scoped; the right-panel Changes tab is turn-scoped. Keep those concepts separate.
+- The right-panel Changes tab is turn-scoped and backed by Git snapshots.
 - GitHub integration intentionally uses the user's installed/authenticated `gh` CLI rather than owning GitHub authentication.
 - Session status distinguishes active work, waiting-for-user requests, completed-but-unread work, and idle/read work. Sidebar indicators and OS notices depend on that distinction.
 - Parent/child session nesting represents forks/subsessions. Detach changes hierarchy; delete removes the session and its persisted data/resources.
@@ -260,7 +257,6 @@ Use `DRAY_CLOUD_IMAGE` to override the Docker image tag. `GITHUB_TOKEN` or an au
 - `Shift+Tab` — cycle effort/reasoning level for the current model.
 - `Cmd/Ctrl+M` — cycle the configured model subset.
 - `Alt+O` — attach files.
-- In Changes view, `Cmd/Ctrl+Shift+Left/Right` switches Uncommitted/History.
 
 ## Development commands
 

@@ -5,7 +5,6 @@ import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 import Chat from "@/components/Chat";
 import ChangesPanel from "@/components/ChangesPanel";
-import ChangesView from "@/components/changes/ChangesView";
 import AnalyticsDialog from "@/components/AnalyticsDialog";
 import ChatInput from "@/components/ChatInput";
 import DeveloperDialog from "@/components/DeveloperDialog";
@@ -40,7 +39,6 @@ import {
   modelsForKeys,
   nextEffort,
 } from "@/components/composer/ModelSelector";
-import ViewTabs, { type ViewTab } from "@/components/layout/ViewTabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { pickAttachments } from "@/hooks/useAttachments";
 import { useCodeTheme } from "@/hooks/useCodeTheme";
@@ -165,12 +163,6 @@ function App() {
   // indistinguishable from a reader who had chosen Changes, so an open PR could
   // never lead — see `activeTab`.
   const [panelTab, setPanelTab] = useLocalStorage<PanelTab | null>("ade.panelTab", null);
-  // Per session, and deliberately not persisted the way `panelTab` is: which
-  // view you were last on is working context for one session rather than a
-  // standing preference, and reopening the app onto a repo view for every
-  // session would be wrong more often than right.
-  const [viewTabs, setViewTabs] = useState<Record<string, ViewTab>>({});
-
   // Not persisted: settings are opened to change something and closed again, so
   // reopening the app into them would be the app remembering the wrong half of
   // a session.
@@ -181,11 +173,6 @@ function App() {
     "left",
   );
   const [developerOpen, setDeveloperOpen] = useState(false);
-
-  const viewTab: ViewTab = selectedSessionId ? viewTabs[selectedSessionId] ?? "chat" : "chat";
-  const setViewTab = (tab: ViewTab) => {
-    if (selectedSessionId) setViewTabs((prev) => ({ ...prev, [selectedSessionId]: tab }));
-  };
 
   // Themes and Shiki's engine are shared by every code surface, so they load
   // once here instead of on the first diff the user happens to open.
@@ -613,8 +600,6 @@ function App() {
             className="flex-1"
           />
 
-          {selectedSession && <ViewTabs tab={viewTab} onChange={setViewTab} />}
-
           {selectedSession && (
             <PanelToggle
               onToggle={handleTogglePanel}
@@ -650,12 +635,6 @@ function App() {
         ) : null
       }
       footer={
-        // Only under the transcript it writes into. The other views are not
-        // conversations, and a composer under them would send into a session
-        // the reader can't see. Safe to unmount: the draft and the attachment
-        // tray are module-level stores precisely because the composer already
-        // unmounts crossing the empty state.
-        selectedSession && viewTab !== "chat" ? null : (
         <ChatInput
           onSend={handleSendMsg}
           commands={slashSkills}
@@ -721,13 +700,8 @@ function App() {
             />
           }
         />
-        )
       }
     >
-      {/* Hidden rather than unmounted, the same bargain the right panel's tabs
-          make: the transcript keeps its scroll position and its highlighted
-          diffs, and the repo view keeps its selection and its reads. */}
-      <TabBody active={viewTab === "chat"}>
       <Chat
         session={selectedSession}
         streamingBlock={
@@ -740,23 +714,7 @@ function App() {
         queuedMessages={queuedMessages}
         working={working}
         crowded={panelOpen}
-        active={viewTab === "chat"}
       />
-      </TabBody>
-
-      {selectedSession && (
-        // Keyed by session so the selection, the sub-tab and the commit box
-        // reset with it. Cheap to remount: the reads behind it are cached by
-        // tree id at module level and survive the unmount.
-        <TabBody active={viewTab === "changes"}>
-          <ChangesView
-            key={selectedSession.sessionId}
-            cwd={selectedSession.cwd}
-            active={viewTab === "changes"}
-            revision={revision}
-          />
-        </TabBody>
-      )}
     </AppShell>
     {/* Outside `AppShell` on purpose: it is fixed to the window rather than
         placed in the layout, and the shell has no slot that isn't a pane. */}

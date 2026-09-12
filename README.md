@@ -32,7 +32,6 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 - Model and reasoning/effort controls, context usage, queued follow-ups, and generated session titles.
 - Rich chat transcripts with Markdown, syntax highlighting, reasoning, tool calls, file edits, diffs, images, and structured questions.
 - File/image attachments, drag and drop, `@file` fuzzy search, `/commands`, and `$skills` discovered from Pi.
-- Repository Changes view for uncommitted work, commit history, file lists, and highlighted diffs.
 - Turn-scoped change tracking backed by Git snapshots, so completed-turn diffs stay stable after later edits.
 - Git handoff actions for commit, push, and pull-request workflows.
 - GitHub pull request panel through `gh`, including checks, comments/reviews, draft/ready state, reopen, and merge controls.
