@@ -146,66 +146,83 @@ export default function SettingsDialog({
           ))}
         </div>
 
+        {/* Keep every category in the same grid cell so the dialog reserves the
+            height of the largest category while only the selected one is visible. */}
         <div
           id="settings-panel"
           role="tabpanel"
           aria-label={SETTINGS_CATEGORY_LABELS[category]}
-          className="flex flex-col gap-6"
+          className="grid items-start"
         >
-          {category === "general" && (
-            <>
-              <SettledSessionsRow
-                checked={showArchived}
-                onChange={onShowArchivedChange}
-              />
-              <UsageDisplayRow
-                mode={usageDisplayMode}
-                onChange={onUsageDisplayModeChange}
-              />
-            </>
-          )}
-          {category === "models" && (
-            <>
-              <ModelSelectionRow
-                models={models}
-                selectedKeys={visibleModelKeys}
-                onChange={onVisibleModelKeysChange}
-                label="Shown models"
-                description="Choose which models appear in the model selector and /model or /models commands."
-              />
-              <ModelSelectionRow
-                models={models}
-                selectedKeys={cycleModelKeys}
-                onChange={onCycleModelKeysChange}
-                label="Cycle models"
-                description="Choose which models Ctrl+M cycles through."
-              />
-              <CycleEffortsRow
-                selectedEfforts={cycleEfforts}
-                onChange={onCycleEffortsChange}
-              />
-              <TitleGenerationRow
-                models={titleModels}
-                modelId={titleModelId}
-                piModel={titlePiModel}
-                effort={titleEffort}
-                onChange={onTitleModelChange}
-              />
-            </>
-          )}
-          {category === "updates" && (
-            <>
-              <UpdateCheckRow
-                checking={checkingForUpdates}
-                onCheck={onCheckForUpdates}
-                autoDownloadUpdates={autoDownloadUpdates}
-              />
-              <AutoDownloadUpdatesRow
-                checked={autoDownloadUpdates}
-                onChange={onAutoDownloadUpdatesChange}
-              />
-            </>
-          )}
+          <div
+            className={[
+              "col-start-1 row-start-1 flex flex-col gap-6",
+              category !== "general" && "invisible pointer-events-none",
+            ].filter(Boolean).join(" ")}
+            aria-hidden={category !== "general"}
+            inert={category !== "general"}
+          >
+            <SettledSessionsRow
+              checked={showArchived}
+              onChange={onShowArchivedChange}
+            />
+            <UsageDisplayRow
+              mode={usageDisplayMode}
+              onChange={onUsageDisplayModeChange}
+            />
+          </div>
+          <div
+            className={[
+              "col-start-1 row-start-1 flex flex-col gap-6",
+              category !== "models" && "invisible pointer-events-none",
+            ].filter(Boolean).join(" ")}
+            aria-hidden={category !== "models"}
+            inert={category !== "models"}
+          >
+            <ModelSelectionRow
+              models={models}
+              selectedKeys={visibleModelKeys}
+              onChange={onVisibleModelKeysChange}
+              label="Shown models"
+              description="Choose which models appear in the model selector and /model or /models commands."
+            />
+            <ModelSelectionRow
+              models={models}
+              selectedKeys={cycleModelKeys}
+              onChange={onCycleModelKeysChange}
+              label="Cycle models"
+              description="Choose which models Ctrl+M cycles through."
+            />
+            <CycleEffortsRow
+              selectedEfforts={cycleEfforts}
+              onChange={onCycleEffortsChange}
+            />
+            <TitleGenerationRow
+              models={titleModels}
+              modelId={titleModelId}
+              piModel={titlePiModel}
+              effort={titleEffort}
+              onChange={onTitleModelChange}
+            />
+          </div>
+          <div
+            className={[
+              "col-start-1 row-start-1 flex flex-col gap-6",
+              category !== "updates" && "invisible pointer-events-none",
+            ].filter(Boolean).join(" ")}
+            aria-hidden={category !== "updates"}
+            inert={category !== "updates"}
+          >
+            <UpdateCheckRow
+              checking={checkingForUpdates}
+              onCheck={onCheckForUpdates}
+              autoDownloadUpdates={autoDownloadUpdates}
+            />
+            <AutoDownloadUpdatesRow
+              checked={autoDownloadUpdates}
+              onChange={onAutoDownloadUpdatesChange}
+            />
+          </div>
         </div>
 
         <footer className="pt-3 text-center text-xs text-muted-foreground">
