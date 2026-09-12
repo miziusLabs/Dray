@@ -32,6 +32,22 @@ import type { UpdateCheckResult } from "@/components/UpdateNotice";
 ///
 /// Mounted in `App` rather than beside the gear that opens it so the dialog's
 /// lifecycle stays independent from the sidebar controls.
+const SETTINGS_CATEGORIES = ["general", "models", "updates"] as const;
+
+type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
+
+const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
+  general: "General",
+  models: "Models",
+  updates: "Updates",
+};
+
+const SETTINGS_CATEGORY_INDEX: Record<SettingsCategory, number> = {
+  general: 0,
+  models: 1,
+  updates: 2,
+};
+
 export default function SettingsDialog({
   open,
   onOpenChange,
@@ -83,6 +99,8 @@ export default function SettingsDialog({
   checkingForUpdates: boolean;
   onCheckForUpdates: () => Promise<UpdateCheckResult>;
 }) {
+  const [category, setCategory] = useState<SettingsCategory>("general");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Each row carries its own sentence, so there is no one description the
@@ -94,49 +112,100 @@ export default function SettingsDialog({
           <DialogTitle>Settings</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col gap-6">
-          <SettledSessionsRow
-            checked={showArchived}
-            onChange={onShowArchivedChange}
+        <div
+          className="relative flex rounded-lg bg-muted p-0.5"
+          role="tablist"
+          aria-label="Settings categories"
+        >
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-md bg-popover shadow-sm transition-transform duration-200 ease-out"
+            style={{
+              width: "calc((100% - 0.5rem) / 3)",
+              transform: `translateX(${SETTINGS_CATEGORY_INDEX[category] * 100}%)`,
+            }}
           />
-          <UsageDisplayRow
-            mode={usageDisplayMode}
-            onChange={onUsageDisplayModeChange}
-          />
-          <UpdateCheckRow
-            checking={checkingForUpdates}
-            onCheck={onCheckForUpdates}
-            autoDownloadUpdates={autoDownloadUpdates}
-          />
-          <AutoDownloadUpdatesRow
-            checked={autoDownloadUpdates}
-            onChange={onAutoDownloadUpdatesChange}
-          />
-          <ModelSelectionRow
-            models={models}
-            selectedKeys={visibleModelKeys}
-            onChange={onVisibleModelKeysChange}
-            label="Shown models"
-            description="Choose which models appear in the model selector and /model or /models commands."
-          />
-          <ModelSelectionRow
-            models={models}
-            selectedKeys={cycleModelKeys}
-            onChange={onCycleModelKeysChange}
-            label="Cycle models"
-            description="Choose which models Ctrl+M cycles through."
-          />
-          <CycleEffortsRow
-            selectedEfforts={cycleEfforts}
-            onChange={onCycleEffortsChange}
-          />
-          <TitleGenerationRow
-            models={titleModels}
-            modelId={titleModelId}
-            piModel={titlePiModel}
-            effort={titleEffort}
-            onChange={onTitleModelChange}
-          />
+          {SETTINGS_CATEGORIES.map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={category === value}
+              aria-controls="settings-panel"
+              tabIndex={category === value ? 0 : -1}
+              onClick={() => setCategory(value)}
+              className={[
+                "relative z-10 flex-1 rounded-md px-2 py-1.5 text-ui transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                category === value
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              ].join(" ")}
+            >
+              {SETTINGS_CATEGORY_LABELS[value]}
+            </button>
+          ))}
+        </div>
+
+        <div
+          id="settings-panel"
+          role="tabpanel"
+          aria-label={SETTINGS_CATEGORY_LABELS[category]}
+          className="flex flex-col gap-6"
+        >
+          {category === "general" && (
+            <>
+              <SettledSessionsRow
+                checked={showArchived}
+                onChange={onShowArchivedChange}
+              />
+              <UsageDisplayRow
+                mode={usageDisplayMode}
+                onChange={onUsageDisplayModeChange}
+              />
+            </>
+          )}
+          {category === "models" && (
+            <>
+              <ModelSelectionRow
+                models={models}
+                selectedKeys={visibleModelKeys}
+                onChange={onVisibleModelKeysChange}
+                label="Shown models"
+                description="Choose which models appear in the model selector and /model or /models commands."
+              />
+              <ModelSelectionRow
+                models={models}
+                selectedKeys={cycleModelKeys}
+                onChange={onCycleModelKeysChange}
+                label="Cycle models"
+                description="Choose which models Ctrl+M cycles through."
+              />
+              <CycleEffortsRow
+                selectedEfforts={cycleEfforts}
+                onChange={onCycleEffortsChange}
+              />
+              <TitleGenerationRow
+                models={titleModels}
+                modelId={titleModelId}
+                piModel={titlePiModel}
+                effort={titleEffort}
+                onChange={onTitleModelChange}
+              />
+            </>
+          )}
+          {category === "updates" && (
+            <>
+              <UpdateCheckRow
+                checking={checkingForUpdates}
+                onCheck={onCheckForUpdates}
+                autoDownloadUpdates={autoDownloadUpdates}
+              />
+              <AutoDownloadUpdatesRow
+                checked={autoDownloadUpdates}
+                onChange={onAutoDownloadUpdatesChange}
+              />
+            </>
+          )}
         </div>
 
         <footer className="pt-3 text-center text-xs text-muted-foreground">
