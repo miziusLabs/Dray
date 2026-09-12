@@ -34,6 +34,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useHotkey } from "@/hooks/useHotkey";
+import { IS_MAC } from "@/lib/platform";
 import type { Project } from "@/types/events";
 
 export default function ProjectSelector({
@@ -61,6 +65,14 @@ export default function ProjectSelector({
   const contextMenuOpen = useRef(false);
   const selectedProject = projects.find((project) => project.path === value);
 
+  useHotkey("p", () => {
+    if (projects.length === 0) {
+      onAttach();
+    } else {
+      setPickerOpen(true);
+    }
+  });
+
   const startEditing = (project: Project) => {
     setEditName(project.name);
     setEditingProject(project);
@@ -77,18 +89,31 @@ export default function ProjectSelector({
 
   // Nothing to choose between yet, so the trigger does the only useful thing
   // rather than opening a menu whose sole item is the same action.
+  const shortcut = IS_MAC ? "⌘" : "Ctrl";
+
   if (projects.length === 0) {
     return (
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={onAttach}
-        className="gap-1.5 px-1.5 text-ui text-muted-foreground"
-      >
-        <FolderPlus className="size-3.5 shrink-0" />
-        Attach project
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onAttach}
+            className="gap-1.5 px-1.5 text-ui text-muted-foreground"
+          >
+            <FolderPlus className="size-3.5 shrink-0" />
+            Attach project
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          Attach project
+          <KbdGroup>
+            <Kbd>{shortcut}</Kbd>
+            <Kbd>P</Kbd>
+          </KbdGroup>
+        </TooltipContent>
+      </Tooltip>
     );
   }
 
@@ -100,18 +125,29 @@ export default function ProjectSelector({
           if (open || !contextMenuOpen.current) setPickerOpen(open);
         }}
       >
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="max-w-40 px-1.5 text-ui text-muted-foreground"
-          >
-            <span className="truncate">
-              {selectedProject?.name ?? "Attach project"}
-            </span>
-          </Button>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="max-w-40 px-1.5 text-ui text-muted-foreground"
+              >
+                <span className="truncate">
+                  {selectedProject?.name ?? "Attach project"}
+                </span>
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            Choose project
+            <KbdGroup>
+              <Kbd>{shortcut}</Kbd>
+              <Kbd>P</Kbd>
+            </KbdGroup>
+          </TooltipContent>
+        </Tooltip>
 
         <DropdownMenuContent align="start" className="min-w-52">
           <DropdownMenuRadioGroup value={value ?? ""} onValueChange={onSelect}>
