@@ -84,7 +84,7 @@ export default function CheckpointRail({
                     stayed long read as a second, competing hover. */}
                 <span
                   className={cn(
-                    "h-0.5 w-2.5 rounded-full transition-all duration-200 group-hover:w-4",
+                    "h-0.5 w-2.5 rounded-full transition-[width,background-color] duration-200 group-hover:w-4",
                     active
                       ? "bg-foreground/70"
                       : "bg-muted-foreground/40 group-hover:bg-muted-foreground",

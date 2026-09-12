@@ -51,7 +51,7 @@ function FileEditRow({ edit }: { edit: FileEdit }) {
 
         <ChevronRight
           className={cn(
-            "size-3 shrink-0 text-muted-foreground transition-all",
+            "size-3 shrink-0 text-muted-foreground transition-[transform,opacity]",
             open ? "rotate-90 opacity-100" : "opacity-0 group-hover/edit:opacity-100",
             !lines.length && "invisible",
           )}

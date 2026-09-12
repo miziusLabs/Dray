@@ -292,7 +292,7 @@ export function AnalyticsButton({ onOpen }: { onOpen: () => void }) {
           size="icon-sm"
           onClick={onOpen}
           aria-label="Analytics"
-          className="opacity-80 transition-opacity hover:opacity-100"
+          className="text-muted-foreground"
         >
           <BarChart3 className="size-4" />
         </Button>
@@ -311,7 +311,7 @@ export function SettingsButton({ onOpen }: { onOpen: () => void }) {
           size="icon-sm"
           onClick={onOpen}
           aria-label="Settings"
-          className="opacity-80 transition-opacity hover:opacity-100"
+          className="text-muted-foreground"
         >
           <Settings className="size-4" />
         </Button>
@@ -338,7 +338,7 @@ export function DeveloperButton({ onOpen }: { onOpen: () => void }) {
           size="icon-sm"
           onClick={onOpen}
           aria-label="Developer"
-          className="opacity-80 transition-opacity hover:opacity-100"
+          className="text-muted-foreground"
         >
           <Hammer className="size-4" />
         </Button>
@@ -1184,7 +1184,7 @@ function SessionRow({
               boundary, regardless of timestamp, orb, or shortcut. */}
           <span
             className={cn(
-              "pointer-events-none absolute inset-y-0 flex w-6 items-center justify-center text-ui text-muted-foreground transition-opacity duration-150 group-hover:opacity-0 group-data-[state=open]:opacity-0",
+              "pointer-events-none absolute inset-y-0 flex w-6 items-center justify-center text-ui text-muted-foreground group-hover:opacity-0 group-data-[state=open]:opacity-0",
               modifierPressed && shortcutIndex ? "-right-[3px]" : "-right-1.5",
             )}
           >
@@ -1216,7 +1216,7 @@ function SessionRow({
               `inline-flex`, and Tailwind emits that after `hidden` at equal
               specificity, so a `display` utility here silently loses.
               `pointer-events-none` keeps the invisible buttons unclickable. */}
-          <div className="pointer-events-none relative flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-data-[state=open]:pointer-events-auto group-data-[state=open]:opacity-100">
+          <div className="pointer-events-none relative flex items-center gap-0.5 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-data-[state=open]:pointer-events-auto group-data-[state=open]:opacity-100">
             {/* Pin hidden for now; the flag and its write path stay live. */}
             {/* <RowAction
               label={item.pinned ? "Unpin" : "Pin"}
