@@ -46,6 +46,8 @@ export default function SettingsDialog({
   onCycleModelKeysChange,
   cycleEfforts,
   onCycleEffortsChange,
+  autoDownloadUpdates,
+  onAutoDownloadUpdatesChange,
   titleModels,
   titleModelId,
   titlePiModel,
@@ -67,6 +69,8 @@ export default function SettingsDialog({
   onCycleModelKeysChange: (next: string[]) => void;
   cycleEfforts: Effort[] | null;
   onCycleEffortsChange: (next: Effort[]) => void;
+  autoDownloadUpdates: boolean;
+  onAutoDownloadUpdatesChange: (next: boolean) => void;
   titleModels: Model[];
   titleModelId: ModelId;
   titlePiModel: PiModel | null;
@@ -102,6 +106,11 @@ export default function SettingsDialog({
           <UpdateCheckRow
             checking={checkingForUpdates}
             onCheck={onCheckForUpdates}
+            autoDownloadUpdates={autoDownloadUpdates}
+          />
+          <AutoDownloadUpdatesRow
+            checked={autoDownloadUpdates}
+            onChange={onAutoDownloadUpdatesChange}
           />
           <ModelSelectionRow
             models={models}
@@ -182,9 +191,11 @@ function UsageDisplayRow({
 function UpdateCheckRow({
   checking,
   onCheck,
+  autoDownloadUpdates,
 }: {
   checking: boolean;
   onCheck: () => Promise<UpdateCheckResult>;
+  autoDownloadUpdates: boolean;
 }) {
   const id = useId();
   const [message, setMessage] = useState<string | null>(null);
@@ -195,7 +206,9 @@ function UpdateCheckRow({
       const result = await onCheck();
       setMessage(
         result === "available"
-          ? "An update is available and is being downloaded."
+          ? autoDownloadUpdates
+            ? "An update is available and is being downloaded."
+            : "An update is available. Download it from the sidebar."
           : result === "none"
             ? "You're up to date."
             : "Update checks are unavailable in development builds.",
@@ -231,6 +244,26 @@ function UpdateCheckRow({
       >
         {checking ? "Checking…" : "Check for updates"}
       </Button>
+    </SettingRow>
+  );
+}
+
+function AutoDownloadUpdatesRow({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const id = useId();
+
+  return (
+    <SettingRow
+      id={id}
+      label="Automatically download updates"
+      description="Download updates as soon as they become available. Installation still requires a restart."
+    >
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </SettingRow>
   );
 }

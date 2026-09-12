@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 
 export type UpdateState = {
   version: string;
-  phase: "downloading" | "ready" | "installing" | "error";
+  phase: "available" | "downloading" | "ready" | "installing" | "error";
   downloaded: number;
   total: number | null;
 };
@@ -22,9 +22,10 @@ function downloadLabel(state: UpdateState): string {
 }
 
 /**
- * Checks GitHub Releases at launch and every 15 minutes, downloading a signed
- * update in the background. Installation stays behind an explicit restart
- * action so an update never interrupts work merely because it became available.
+ * Checks GitHub Releases at launch and every 15 minutes. Signed updates are
+ * downloaded in the background when enabled. Installation stays behind an
+ * explicit restart action so an update never interrupts work merely because it
+ * became available.
  */
 export type UpdateCheckResult = "available" | "none" | "unsupported";
 
@@ -39,7 +40,7 @@ export type UpdateController = {
 
 const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
-export function useUpdate(): UpdateController {
+export function useUpdate(autoDownloadUpdates: boolean): UpdateController {
   const updateRef = useRef<Update | null>(null);
   const checkRef = useRef<Promise<UpdateCheckResult> | null>(null);
   const stateRef = useRef<UpdateState | null>(null);
@@ -73,6 +74,7 @@ export function useUpdate(): UpdateController {
 
     const currentState = stateRef.current;
     if (
+      currentState?.phase === "available" ||
       currentState?.phase === "downloading" ||
       currentState?.phase === "installing" ||
       currentState?.phase === "ready"
@@ -87,7 +89,16 @@ export function useUpdate(): UpdateController {
         const update = await check({ timeout: 30_000 });
         if (!update) return "none";
         updateRef.current = update;
-        await download(update);
+        if (autoDownloadUpdates) {
+          await download(update);
+        } else {
+          setState({
+            version: update.version,
+            phase: "available",
+            downloaded: 0,
+            total: null,
+          });
+        }
         return "available";
       } finally {
         setChecking(false);
@@ -96,7 +107,13 @@ export function useUpdate(): UpdateController {
     })();
     checkRef.current = request;
     return request;
-  }, [download]);
+  }, [autoDownloadUpdates, download]);
+
+  useEffect(() => {
+    if (!autoDownloadUpdates || stateRef.current?.phase !== "available") return;
+    const update = updateRef.current;
+    if (update) void download(update);
+  }, [autoDownloadUpdates, download]);
 
   useEffect(() => {
     // The development binary has no release bundle to replace and should not
@@ -168,13 +185,15 @@ export default function UpdateNotice({
   if (!state) return null;
 
   const label =
-    state.phase === "ready"
-      ? "Install and restart"
-      : state.phase === "error"
-        ? "Retry download"
-        : state.phase === "installing"
-          ? "Installing…"
-          : downloadLabel(state);
+    state.phase === "available"
+      ? "Download update"
+      : state.phase === "ready"
+        ? "Install and restart"
+        : state.phase === "error"
+          ? "Retry download"
+          : state.phase === "installing"
+            ? "Installing…"
+            : downloadLabel(state);
   const disabled = state.phase === "downloading" || state.phase === "installing";
 
   return (
@@ -187,8 +206,8 @@ export default function UpdateNotice({
         title={`Dray ${state.version}: ${label}`}
         aria-label={`Dray ${state.version}: ${label}`}
         onClick={() => {
-          if (state.phase === "ready") void install();
-          else if (state.phase === "error") retry();
+          if (state.phase === "available" || state.phase === "error") retry();
+          else if (state.phase === "ready") void install();
         }}
       >
         <Download />

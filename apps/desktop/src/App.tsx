@@ -60,7 +60,11 @@ import { playCelebration } from "@/lib/sound";
 
 function App() {
   const [titlePrefs, setTitlePrefs] = useTitlePrefs();
-  const update = useUpdate();
+  const [autoDownloadUpdates, setAutoDownloadUpdates] = useLocalStorage<boolean>(
+    "ade.autoDownloadUpdates",
+    true,
+  );
+  const update = useUpdate(autoDownloadUpdates);
   const {
     selectedSessionId,
     selectedSession,
@@ -795,6 +799,8 @@ function App() {
       onCycleModelKeysChange={setCycleModelKeys}
       cycleEfforts={cycleEfforts}
       onCycleEffortsChange={setCycleEfforts}
+      autoDownloadUpdates={autoDownloadUpdates}
+      onAutoDownloadUpdatesChange={setAutoDownloadUpdates}
       titleModels={titleModelOptions}
       titleModelId={titlePrefs.modelId}
       titlePiModel={titlePrefs.piModel}
