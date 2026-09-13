@@ -471,7 +471,9 @@ export default function Sidebar({
     return (path: string) =>
       path === CLOUD_PROJECT_PATH
         ? CLOUD_PROJECT_PATH
-        : (named.get(path) ?? basename(path));
+        : path === ""
+          ? "No Project"
+          : (named.get(path) ?? basename(path));
   }, [projects]);
 
   // A filtered list that comes up empty is different from an empty app, and

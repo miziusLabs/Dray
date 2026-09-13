@@ -43,8 +43,8 @@ pub struct SessionIndexItem {
     /// Where the agent actually runs. Equals `project_path` for a normal
     /// session; points inside `~/.dray/cloud/<id>` for a Cloud one.
     pub cwd: String,
-    /// Project metadata used for sidebar grouping; a Cloud does not mount or
-    /// clone this project.
+    /// Project metadata used for sidebar grouping; empty for No Project. A
+    /// Cloud does not mount or clone this project.
     pub project_path: String,
     pub branch: Option<String>,
     /// `Some` marks this a Cloud session. Cloud sessions use a private Docker

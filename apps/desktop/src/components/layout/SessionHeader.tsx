@@ -31,7 +31,11 @@ export default function SessionHeader({ session, branch, className }: SessionHea
 
   // Cloud is a synthetic project: it should not inherit the local project
   // metadata retained on the session for its source context.
-  const project = session.cloudName !== null ? "Cloud" : basename(session.projectPath);
+  const project = session.cloudName !== null
+    ? "Cloud"
+    : session.projectPath
+      ? basename(session.projectPath)
+      : "No Project";
 
   return (
     <div className={cn("flex min-w-0 items-center gap-3 text-ui", className)}>

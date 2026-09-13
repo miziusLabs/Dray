@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { FolderPlus, Pencil, Plus, Trash2 } from "lucide-react";
+import { FolderPlus, Pencil, Trash2, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -38,6 +38,7 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHotkey } from "@/hooks/useHotkey";
 import { IS_MAC } from "@/lib/platform";
+import { NO_PROJECT_SELECTION } from "@/lib/projects";
 import type { Project } from "@/types/events";
 
 export default function ProjectSelector({
@@ -50,7 +51,7 @@ export default function ProjectSelector({
 }: {
   projects: Project[];
   value: string | null;
-  onSelect: (path: string) => void;
+  onSelect: (path: string | null) => void;
   onAttach: () => void;
   onRename: (path: string, name: string) => Promise<boolean>;
   onDelete: (path: string) => Promise<boolean>;
@@ -65,13 +66,7 @@ export default function ProjectSelector({
   const contextMenuOpen = useRef(false);
   const selectedProject = projects.find((project) => project.path === value);
 
-  useHotkey("p", () => {
-    if (projects.length === 0) {
-      onAttach();
-    } else {
-      setPickerOpen(true);
-    }
-  });
+  useHotkey("p", () => setPickerOpen(true));
 
   const startEditing = (project: Project) => {
     setEditName(project.name);
@@ -87,35 +82,7 @@ export default function ProjectSelector({
     if (saved) setEditingProject(null);
   };
 
-  // Nothing to choose between yet, so the trigger does the only useful thing
-  // rather than opening a menu whose sole item is the same action.
   const shortcut = IS_MAC ? "⌘" : "Ctrl";
-
-  if (projects.length === 0) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onAttach}
-            className="gap-1.5 px-1.5 text-ui text-muted-foreground"
-          >
-            <FolderPlus className="size-3.5 shrink-0" />
-            Attach project
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top">
-          Attach project
-          <KbdGroup>
-            <Kbd>{shortcut}</Kbd>
-            <Kbd>P</Kbd>
-          </KbdGroup>
-        </TooltipContent>
-      </Tooltip>
-    );
-  }
 
   return (
     <>
@@ -135,7 +102,7 @@ export default function ProjectSelector({
                 className="max-w-40 px-1.5 text-ui text-muted-foreground"
               >
                 <span className="truncate">
-                  {selectedProject?.name ?? "Attach project"}
+                  {selectedProject?.name ?? (value === null ? "No Project" : "Attach project")}
                 </span>
               </Button>
             </DropdownMenuTrigger>
@@ -150,7 +117,17 @@ export default function ProjectSelector({
         </Tooltip>
 
         <DropdownMenuContent align="start" className="min-w-52">
-          <DropdownMenuRadioGroup value={value ?? ""} onValueChange={onSelect}>
+          <DropdownMenuRadioGroup
+            value={value ?? NO_PROJECT_SELECTION}
+            onValueChange={(next) =>
+              onSelect(next === NO_PROJECT_SELECTION ? null : next)
+            }
+          >
+            <DropdownMenuRadioItem value={NO_PROJECT_SELECTION} className="text-ui">
+              <X />
+              No Project
+            </DropdownMenuRadioItem>
+
             {projects.map((project) => (
               <ContextMenu
                 key={project.path}
@@ -186,7 +163,7 @@ export default function ProjectSelector({
           </DropdownMenuRadioGroup>
 
           <DropdownMenuItem onSelect={onAttach} className="text-ui">
-            <Plus />
+            <FolderPlus />
             Attach project…
           </DropdownMenuItem>
         </DropdownMenuContent>

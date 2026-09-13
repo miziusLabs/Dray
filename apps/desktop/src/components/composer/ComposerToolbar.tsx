@@ -27,7 +27,7 @@ export type ComposerToolbarProps = {
 
   projects: Project[];
   projectPath: string | null;
-  onSelectProject: (path: string) => void;
+  onSelectProject: (path: string | null) => void;
   onAttachProject: () => void;
   onRenameProject: (path: string, name: string) => Promise<boolean>;
   onDeleteProject: (path: string) => Promise<boolean>;

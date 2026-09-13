@@ -7,6 +7,7 @@ import {
   type EffortByModel,
 } from "@/hooks/useComposerPrefs";
 import { useDockBadge } from "@/hooks/useDockBadge";
+import { useLocalStorage } from "@/hooks/useLocalStorage";
 import type { TitlePrefs } from "@/hooks/useTitlePrefs";
 import {
   ANSWERED_BY_OPENING,
@@ -17,6 +18,7 @@ import {
 import { isWindowFocused, onFocusChange } from "@/lib/focus";
 import { notifyOS } from "@/lib/notify";
 import { playNotification } from "@/lib/sound";
+import { DEFAULT_NO_PROJECT_PATH } from "@/lib/projects";
 import { AgentEvent, BranchList, Effort, Harness, Model, ModelId, PiModel, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
@@ -54,7 +56,7 @@ export type StreamingBlock = {
     callId: string | null,
 }
 
-export function useSessions(titlePrefs: TitlePrefs) {
+export function useSessions(titlePrefs: TitlePrefs, noProjectPath: string) {
 
     // The sticky defaults. Live state below seeds from these and writes back on
     // every user-initiated change; restoring a session writes live state only.
@@ -76,6 +78,10 @@ export function useSessions(titlePrefs: TitlePrefs) {
     const [piModel, setPiModel] = useState<PiModel | null>(() => prefs.piModel);
     const [effortByModel, setEffortByModel] = useState<EffortByModel>(() => prefs.effortByModel);
     const [projects, setProjects] = useState<Project[]>([]);
+    const [noProjectSelected, setNoProjectSelected] = useLocalStorage<boolean>(
+      "ade.noProjectSelected",
+      false,
+    );
     const [projectPath, setProjectPath] = useState<string | null>(null);
     // Derived from the selected project, not a preference — refetched on switch
     // and never persisted.
@@ -180,13 +186,18 @@ const handleAttachProject = async () => {
     // Returns the list already sorted, so the attached project is at the front.
     setProjects(await invoke<Project[]>("add_project", { path: picked }));
     setProjectPath(picked);
+    setNoProjectSelected(false);
   } catch (e) {
     setError(String(e));
   }
 };
 
-const handleSelectProject = (path: string) => {
+const handleSelectProject = (path: string | null) => {
   setProjectPath(path);
+  setNoProjectSelected(path === null);
+  // No Project is a built-in choice rather than an attached project, so it has
+  // no persisted project record to stamp as recently selected.
+  if (path === null) return;
   // Fire and forget: losing the remembered pick costs one dropdown next launch.
   void invoke("set_last_selected_project", { path }).catch(() => {});
 };
@@ -327,14 +338,15 @@ const handleSendMsg = async (
   // A Cloud starts in an empty Docker workspace, so a project is optional.
   // Keep the selected project as metadata when there is one, but use the
   // current app directory as a valid launch context when there is not.
+  const configuredNoProjectPath = noProjectPath.trim() || DEFAULT_NO_PROJECT_PATH;
   const cwd = isNewSession
     ? cloudEnabled
       ? projectPath ?? "."
-      : projectPath
+      : projectPath ?? configuredNoProjectPath
     : existing?.cwd ?? projectPath;
 
   if (!cwd) {
-    setError("Attach a project first, or enable Cloud.");
+    setError("Could not determine a session directory.");
     return;
   }
 
@@ -371,6 +383,7 @@ const handleSendMsg = async (
       titleModel: titlePrefs.piModel,
       titleEffort: titlePrefs.effort,
       cwd,
+      projectPath,
       // Cloud only records branch context; it never checks out the selected
       // project.
       branch: isNewSession ? branch : null,
@@ -793,8 +806,9 @@ useEffect(() => {
     .then((list) => {
       setProjects(list);
       // Sorted most-recently-selected first, so the front of the list *is* the
-      // project to reopen — no separate pointer to keep in step.
-      setProjectPath(list[0]?.path ?? null);
+      // project to reopen — unless the built-in No Project choice was the last
+      // selection, which has no backend project record to sort.
+      setProjectPath(noProjectSelected ? null : list[0]?.path ?? null);
     })
     // Without this a failed read leaves the picker silently empty, and the
     // reason only reaches the console.

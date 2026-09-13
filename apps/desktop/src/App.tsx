@@ -55,9 +55,14 @@ import { useSlashCommands } from "@/hooks/useSlashCommands";
 import { changeRange, turnChangedTree } from "@/lib/changes";
 import { prBadgeCount, sessionBranch } from "@/lib/pr";
 import { playCelebration } from "@/lib/sound";
+import { DEFAULT_NO_PROJECT_PATH } from "@/lib/projects";
 
 function App() {
   const [titlePrefs, setTitlePrefs] = useTitlePrefs();
+  const [noProjectPath, setNoProjectPath] = useLocalStorage<string>(
+    "ade.noProjectPath",
+    DEFAULT_NO_PROJECT_PATH,
+  );
   const [autoDownloadUpdates, setAutoDownloadUpdates] = useLocalStorage<boolean>(
     "ade.autoDownloadUpdates",
     true,
@@ -111,7 +116,7 @@ function App() {
     forkSession,
     detachSession,
     deleteSession,
-  } = useSessions(titlePrefs);
+  } = useSessions(titlePrefs, noProjectPath);
 
   const titleModelOptions = useMemo(() => titleModels(models), [models]);
   const handleTitleModelChange = (
@@ -183,7 +188,7 @@ function App() {
   // which branch the pull requests are looked up by. Read on the same falling
   // edge as those, since a turn is what moves all of it.
   const { status: workStatus, refresh: refreshWorkStatus } = useWorkStatus(
-    selectedSession?.cwd ?? "",
+    selectedSession?.projectPath ? selectedSession.cwd : "",
     busy,
   );
 
@@ -209,7 +214,7 @@ function App() {
         : [
             ...new Set(
               visibleSessions
-                .filter((item) => !item.cloudName)
+                .filter((item) => !item.cloudName && item.projectPath)
                 .map((item) => item.projectPath),
             ),
           ],
@@ -230,11 +235,9 @@ function App() {
   // `workStatus.branch` is git's own reading of HEAD and outranks the name the
   // index carries, which is only ever a guess made at creation — see
   // `sessionBranch`. It lands a frame late and the fallback covers that frame.
-  const prBranch = selectedSession?.cloudName
+  const prBranch = selectedSession?.cloudName || !selectedSession?.projectPath
     ? null
-    : selectedSession
-      ? sessionBranch(selectedSession, workStatus?.branch)
-      : null;
+    : sessionBranch(selectedSession, workStatus?.branch);
   // "The PR tab is on screen", read off the *pick* rather than off `activeTab`,
   // which cannot exist yet — it is derived from this hook's own answer. An
   // unset pick counts, since the derived default is the PR tab whenever there
@@ -243,7 +246,9 @@ function App() {
   // reads true — harmless, because a merged PR never settles and the poll is
   // gated on that too.
   const pullRequests = usePullRequest(
-    selectedSession?.cloudName ? "" : selectedSession?.cwd ?? "",
+    selectedSession?.cloudName || !selectedSession?.projectPath
+      ? ""
+      : selectedSession.cwd,
     prBranch,
     panelOpen && (panelTab === "pr" || panelTab === null),
     // A pull request appearing is the moment the session stops being about the
@@ -285,7 +290,9 @@ function App() {
   // this can never leave a tab drawn for a branch it found no PR on. The two
   // can disagree — the mark is looked up by the branch the index remembers and
   // the panel by the one git reports — and the window closes either way.
-  const markHere = prMarks.prFor(selectedSession?.projectPath ?? "", prBranch);
+  const markHere = selectedSession?.projectPath
+    ? prMarks.prFor(selectedSession.projectPath, prBranch)
+    : null;
   const hasPrTab =
     prTabVisible(pullRequests.prs, pullRequests.error) || (pullRequests.loading && !!markHere);
 
@@ -753,6 +760,8 @@ function App() {
       onShowArchivedChange={setShowArchived}
       usageDisplayMode={usageDisplayMode}
       onUsageDisplayModeChange={setUsageDisplayMode}
+      noProjectPath={noProjectPath}
+      onNoProjectPathChange={setNoProjectPath}
       models={models}
       visibleModelKeys={visibleModelKeys}
       onVisibleModelKeysChange={setVisibleModelKeys}

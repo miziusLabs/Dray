@@ -25,6 +25,7 @@ use uuid::Uuid;
 pub use crate::harness::Harness;
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
         Arc,
@@ -63,6 +64,30 @@ use tokio::process::Command;
 pub const SESSION_CREATED: &str = "session_created";
 
 const CLOUD_SESSION_PROMPT: &str = "You are working inside a Cloud environment. Clone repositories if needed.";
+
+/// Resolves the home-relative form used by the No Project setting. PathBuf
+/// handles the native separator on both macOS and Windows; accepting both slash
+/// forms keeps a manually entered `~/...` path portable as well.
+fn resolve_local_cwd(cwd: &str, home: &std::path::Path) -> PathBuf {
+    if cwd == "~" {
+        home.to_path_buf()
+    } else if let Some(rest) = cwd.strip_prefix("~/").or_else(|| cwd.strip_prefix("~\\")) {
+        home.join(rest)
+    } else {
+        PathBuf::from(cwd)
+    }
+}
+
+/// Ensures the local launch directory exists before spawning Pi.
+async fn prepare_local_cwd(cwd: &str) -> Result<String> {
+    let home = dirs::home_dir().context("could not resolve home directory")?;
+    let path = resolve_local_cwd(cwd, &home);
+    tokio::fs::create_dir_all(&path)
+        .await
+        .with_context(|| format!("could not create session directory: {}", path.display()))?;
+
+    Ok(path.to_string_lossy().into_owned())
+}
 
 /// Emitted as `session_status` when a session's status changes, so the sidebar
 /// and composer update without a refetch. Like `SessionTitleEvent`, this is not
@@ -300,6 +325,9 @@ impl SessionManager {
         title_model: Option<PiModel>,
         title_effort: Option<Effort>,
         cwd: &str,
+        // The attached project used for sidebar/Git metadata. `None` means the
+        // built-in No Project choice and is kept out of project grouping.
+        project_path: Option<&str>,
         // Recorded, not acted on for Cloud sessions. The branch picker supplies
         // metadata and never changes the host checkout when Cloud is enabled.
         branch: Option<&str>,
@@ -335,6 +363,11 @@ impl SessionManager {
         let effort = resolve_effort(&model_spec, effort);
 
         if is_new_session {
+            let local_cwd = if use_cloud || project_path.is_some() {
+                None
+            } else {
+                Some(prepare_local_cwd(cwd).await?)
+            };
             let cloud_name = if use_cloud {
                 Some(resolve_unclaimed_cloud_name(cwd, cloud_name).await?)
             } else {
@@ -348,7 +381,7 @@ impl SessionManager {
                     sandbox::ensure_image().await?;
                     path
                 }
-                None => cwd.to_string(),
+                None => local_cwd.clone().unwrap_or_else(|| cwd.to_string()),
             };
             // Give the agent the Cloud-specific workspace instruction on the
             // first prompt. Keep the original prompt for the session title.
@@ -366,15 +399,23 @@ impl SessionManager {
             {
                 Some(branch) => Some(branch),
                 None if cloud_name.is_some() => None,
-                None => git::current_branch(cwd).await,
+                None => git::current_branch(&session_cwd).await,
             };
             let recorded_branch = selected_branch.clone();
+            // Cloud's unselected-project behavior historically used `.` as its
+            // metadata marker. Local No Project sessions use an empty grouping
+            // key so they cannot be mistaken for a repository path.
+            let recorded_project_path = project_path.unwrap_or(if cloud_name.is_some() {
+                cwd
+            } else {
+                ""
+            });
 
             let mut item = SessionIndexItem::new(
                 session_id,
                 harness,
                 &session_cwd,
-                cwd,
+                recorded_project_path,
                 cloud_name.as_deref(),
                 recorded_branch.as_deref(),
                 prompt,
@@ -403,11 +444,7 @@ impl SessionManager {
                 None
             };
 
-            let launch_cwd = if cloud_name.is_some() {
-                session_cwd.as_str()
-            } else {
-                cwd
-            };
+            let launch_cwd = session_cwd.as_str();
             let mut session = Session::init(
                 session_id,
                 harness,
@@ -437,7 +474,7 @@ impl SessionManager {
                 // the Docker-backed session. Title generation runs as a
                 // local one-shot Pi process, so use the selected project
                 // context instead (or "." when Cloud has no project).
-                cwd,
+                if cloud_name.is_some() { cwd } else { &session_cwd },
                 title_model.as_ref(),
                 title_effort,
                 app,
@@ -1361,6 +1398,15 @@ mod tests {
             "/skill:commit-and-push now"
         );
         assert_eq!(normalize_skill_prompt("fix the bug"), "fix the bug");
+    }
+
+    #[test]
+    fn resolves_home_relative_paths_with_both_separator_styles() {
+        let home = std::path::Path::new("/home/tester");
+
+        assert_eq!(resolve_local_cwd("~/Coding/Sandbox", home), home.join("Coding/Sandbox"));
+        assert_eq!(resolve_local_cwd(r"~\Coding\Sandbox", home), home.join(r"Coding\Sandbox"));
+        assert_eq!(resolve_local_cwd("/tmp/sandbox", home), std::path::PathBuf::from("/tmp/sandbox"));
     }
 
     fn turn_completed() -> AgentEventPayload {

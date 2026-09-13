@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 
 import packageJson from "../../package.json";
 import {
@@ -15,6 +16,7 @@ import ModelSelector, {
   modelLabel,
 } from "@/components/composer/ModelSelector";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -57,6 +59,8 @@ export default function SettingsDialog({
   onShowArchivedChange,
   usageDisplayMode,
   onUsageDisplayModeChange,
+  noProjectPath,
+  onNoProjectPathChange,
   models,
   visibleModelKeys,
   onVisibleModelKeysChange,
@@ -80,6 +84,8 @@ export default function SettingsDialog({
   onShowArchivedChange: (next: boolean) => void;
   usageDisplayMode: UsageDisplayMode;
   onUsageDisplayModeChange: (next: UsageDisplayMode) => void;
+  noProjectPath: string;
+  onNoProjectPathChange: (next: string) => void;
   models: Model[];
   visibleModelKeys: string[] | null;
   onVisibleModelKeysChange: (next: string[]) => void;
@@ -171,6 +177,10 @@ export default function SettingsDialog({
             <UsageDisplayRow
               mode={usageDisplayMode}
               onChange={onUsageDisplayModeChange}
+            />
+            <NoProjectDirectoryRow
+              path={noProjectPath}
+              onChange={onNoProjectPathChange}
             />
           </div>
           <div
@@ -519,6 +529,47 @@ function TitleGenerationRow({
         effort={effort}
         onChange={onChange}
       />
+    </SettingRow>
+  );
+}
+
+function NoProjectDirectoryRow({
+  path,
+  onChange,
+}: {
+  path: string;
+  onChange: (next: string) => void;
+}) {
+  const id = useId();
+
+  const chooseDirectory = async () => {
+    const picked = await open({ directory: true, multiple: false });
+    if (typeof picked === "string") onChange(picked);
+  };
+
+  return (
+    <SettingRow
+      id={id}
+      label="No Project directory"
+      description="Choose where sessions without a project start. The default is ~/Coding/Sandbox."
+    >
+      <div className="flex w-64 gap-2">
+        <Input
+          id={id}
+          value={path}
+          onChange={(event) => onChange(event.target.value)}
+          aria-label="No Project directory"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0 text-ui"
+          onClick={() => void chooseDirectory()}
+        >
+          Browse
+        </Button>
+      </div>
     </SettingRow>
   );
 }
