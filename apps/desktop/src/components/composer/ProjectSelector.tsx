@@ -13,12 +13,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -65,6 +59,7 @@ export default function ProjectSelector({
   const [editName, setEditName] = useState("");
   const [saving, setSaving] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [shiftHeld, setShiftHeld] = useState(false);
   const [draggingProjectPath, setDraggingProjectPath] = useState<string | null>(null);
   // The boundary after row n is represented by n, so the marker can be drawn
   // between rows rather than highlighting the row that would receive the drop.
@@ -88,13 +83,29 @@ export default function ProjectSelector({
     dropIndexRef.current = nextIndex;
     setDropIndex(nextIndex);
   };
-  // A context menu is portalled outside the dropdown. Keep its project row
-  // mounted while focus moves between those two portals, then close both.
-  const contextMenuOpen = useRef(false);
   const selectedProject = projects.find((project) => project.path === value);
 
   // Keep the whole window honest while the handle owns the pointer drag, and
   // restore any cursor the host window had before it started.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Shift") setShiftHeld(true);
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Shift") setShiftHeld(false);
+    };
+    const handleWindowBlur = () => setShiftHeld(false);
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, []);
+
   useEffect(() => {
     if (!draggingProjectPath) return;
 
@@ -169,7 +180,7 @@ export default function ProjectSelector({
         open={pickerOpen}
         onOpenChange={(open) => {
           if (!open && sortingRef.current) return;
-          if (open || !contextMenuOpen.current) setPickerOpen(open);
+          setPickerOpen(open);
         }}
       >
         <Tooltip>
@@ -204,20 +215,14 @@ export default function ProjectSelector({
             }
           >
             {projects.map((project) => (
-              <ContextMenu
-                key={project.path}
-                onOpenChange={(open) => {
-                  contextMenuOpen.current = open;
-                  if (!open && !sortingRef.current) setPickerOpen(false);
-                }}
-              >
-                <ContextMenuTrigger asChild>
+              <Tooltip key={project.path}>
+                <TooltipTrigger asChild>
                   <DropdownMenuRadioItem
                     value={project.path}
                     title={project.path}
                     data-project-index={projects.indexOf(project)}
                     className={cn(
-                      "group relative pr-8 text-ui hover:[&>span[data-slot=dropdown-menu-radio-item-indicator]]:opacity-0",
+                      "group relative min-h-7 w-full cursor-pointer rounded-md py-0 pr-8 pl-2 text-ui hover:[&>span[data-slot=dropdown-menu-radio-item-indicator]]:opacity-0",
                       draggingProjectPath === project.path && [
                         "opacity-50",
                         "[&>span[data-slot=dropdown-menu-radio-item-indicator]]:opacity-0",
@@ -237,6 +242,55 @@ export default function ProjectSelector({
                       />
                     )}
                     <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                    <div
+                      className={cn(
+                        "pointer-events-none absolute right-2 z-10 flex items-center gap-0.5 opacity-0 transition-opacity",
+                        shiftHeld && "group-hover:pointer-events-auto group-hover:opacity-100",
+                      )}
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`Rename ${project.name}`}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setPickerOpen(false);
+                          startEditing(project);
+                        }}
+                        className="size-6 min-w-6 max-w-6 cursor-pointer rounded-[min(var(--radius-md),10px)] p-0 text-foreground"
+                      >
+                        <Pencil className="size-3 text-foreground" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`Delete ${project.name}`}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setPickerOpen(false);
+                          setDeletingProject(project);
+                        }}
+                        className="size-6 min-w-6 max-w-6 cursor-pointer rounded-[min(var(--radius-md),10px)] p-0 !text-destructive hover:!text-destructive -mr-1.5"
+                      >
+                        <Trash2
+                          className="size-3"
+                          color="var(--destructive)"
+                          stroke="var(--destructive)"
+                          style={{ color: "var(--destructive)", stroke: "var(--destructive)" }}
+                          aria-hidden="true"
+                        />
+                      </Button>
+                    </div>
                     <button
                       type="button"
                       aria-label={`Reorder ${project.name}`}
@@ -269,28 +323,22 @@ export default function ProjectSelector({
                         endDrag();
                       }}
                       className={cn(
-                        "pointer-events-none absolute right-2 z-10 flex size-5 cursor-grab items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:pointer-events-auto group-hover:opacity-100 active:cursor-grabbing",
+                        "pointer-events-none absolute right-2 z-10 flex size-5 cursor-grab items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing",
+                        shiftHeld
+                          ? "group-hover:pointer-events-none group-hover:opacity-0"
+                          : "group-hover:pointer-events-auto group-hover:opacity-100",
                         draggingProjectPath === project.path && "cursor-grabbing opacity-100",
                       )}
                     >
                       <Menu className="size-3.5" aria-hidden="true" />
                     </button>
                   </DropdownMenuRadioItem>
-                </ContextMenuTrigger>
-                <ContextMenuContent>
-                  <ContextMenuItem onSelect={() => startEditing(project)}>
-                    <Pencil />
-                    Edit
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    variant="destructive"
-                    onSelect={() => setDeletingProject(project)}
-                  >
-                    <Trash2 />
-                    Delete
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <Kbd>Shift</Kbd>
+                  to show more
+                </TooltipContent>
+              </Tooltip>
             ))}
 
             <DropdownMenuRadioItem value={NO_PROJECT_SELECTION} className="text-ui">
