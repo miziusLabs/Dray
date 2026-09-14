@@ -20,8 +20,8 @@
 
 use anyhow::{Context, Result};
 use fff_search::{
-    FFFMode, FilePicker, FilePickerOptions, FileSearchConfig, FuzzySearchOptions, PaginationArgs,
-    QueryParser, SharedFilePicker, SharedFrecency,
+    DirSearchConfig, FFFMode, FilePicker, FilePickerOptions, FileSearchConfig, FuzzySearchOptions,
+    MixedItemRef, PaginationArgs, QueryParser, SharedFilePicker, SharedFrecency,
 };
 use serde::Serialize;
 use std::{
@@ -44,6 +44,8 @@ pub struct FileMatch {
     pub name: String,
     /// Everything before `name`, without a trailing slash. Empty at the root.
     pub dir: String,
+    /// Whether this row is a directory rather than a regular file.
+    pub is_directory: bool,
 }
 
 /// How many indexes are kept alive at once.
@@ -139,6 +141,27 @@ pub fn warm(cwd: &str) -> Result<()> {
     Ok(())
 }
 
+fn to_file_match(path: String, is_directory: bool) -> FileMatch {
+    // Directory entries carry a trailing slash in the index, but the selected
+    // path should have the same shape as a file path and still split into a
+    // visible folder name.
+    let path = path.trim_end_matches('/').to_string();
+    // Split here rather than in the frontend: the crate already knows where the
+    // last segment starts, and a path is bytes the UI should not be re-parsing
+    // to draw a row.
+    let (dir, name) = match path.rfind('/') {
+        Some(cut) => (path[..cut].to_string(), path[cut + 1..].to_string()),
+        None => (String::new(), path.clone()),
+    };
+
+    FileMatch {
+        path,
+        name,
+        dir,
+        is_directory,
+    }
+}
+
 /// The best `limit` matches for `query` in `cwd`, best first.
 ///
 /// An empty query is not a special case in the crate and is not one here: it
@@ -160,32 +183,37 @@ pub fn search(cwd: &str, query: &str, limit: usize) -> Result<Vec<FileMatch>> {
         .as_ref()
         .context("the file index was torn down mid-search")?;
 
-    let parser = QueryParser::new(FileSearchConfig::default());
-    let parsed = parser.parse(query);
+    let options = FuzzySearchOptions {
+        pagination: PaginationArgs { offset: 0, limit },
+        ..Default::default()
+    };
 
-    let result = picker.fuzzy_search(
-        &parsed,
-        None,
-        FuzzySearchOptions {
-            pagination: PaginationArgs { offset: 0, limit },
-            ..Default::default()
-        },
-    );
+    // A trailing slash means the user is browsing into a folder. Search only
+    // directories in that case, parsing the slash-free text because directory
+    // paths in the index do not carry a trailing separator.
+    if query.ends_with('/') || query.ends_with(std::path::MAIN_SEPARATOR) {
+        let query = query.trim_end_matches(['/', std::path::MAIN_SEPARATOR]);
+        let parsed = QueryParser::new(DirSearchConfig::default()).parse(query);
+        let result = picker.fuzzy_search_directories(&parsed, options);
+
+        return Ok(result
+            .items
+            .iter()
+            .map(|directory| to_file_match(directory.relative_path(picker), true))
+            .collect());
+    }
+
+    // Keep the file picker's path-segment and extension ranking for ordinary
+    // queries while adding matching directories to the same ranked list.
+    let parsed = QueryParser::new(FileSearchConfig::default()).parse(query);
+    let result = picker.fuzzy_search_mixed(&parsed, None, options);
 
     Ok(result
         .items
         .iter()
-        .map(|item| {
-            let path = item.relative_path(picker);
-            // Split here rather than in the frontend: the crate already knows
-            // where the last segment starts, and a path is bytes the UI should
-            // not be re-parsing to draw a row.
-            let (dir, name) = match path.rfind('/') {
-                Some(cut) => (path[..cut].to_string(), path[cut + 1..].to_string()),
-                None => (String::new(), path.clone()),
-            };
-
-            FileMatch { path, name, dir }
+        .map(|item| match item {
+            MixedItemRef::File(file) => to_file_match(file.relative_path(picker), false),
+            MixedItemRef::Dir(directory) => to_file_match(directory.relative_path(picker), true),
         })
         .collect())
 }
@@ -226,9 +254,9 @@ mod tests {
     fn matches_on_a_path_segment() {
         let hits = search(&repo(), "composer/Model", 5).unwrap();
 
-        assert_eq!(
-            hits.first().map(|h| h.path.as_str()),
-            Some("src/components/composer/ModelSelector.tsx"),
+        assert!(
+            hits.iter()
+                .any(|h| h.path == "src/components/composer/ModelSelector.tsx"),
             "got {hits:?}"
         );
     }
@@ -267,14 +295,27 @@ mod tests {
 
     /// An empty query is a real query, and its ranking is the whole reason a
     /// bare `@` opens on something useful. Asserts only that it answers with
-    /// real files — *which* files depends on the working tree's git status,
+    /// real paths — *which* paths depends on the working tree's git status,
     /// which a test has no business pinning.
     #[test]
-    fn an_empty_query_still_lists_files() {
+    fn an_empty_query_lists_files_and_directories() {
         let hits = search(&repo(), "", 8).unwrap();
 
         assert_eq!(hits.len(), 8, "got {hits:?}");
         assert!(hits.iter().all(|h| !h.name.is_empty()));
+    }
+
+    #[test]
+    fn finds_a_directory() {
+        let hits = search(&repo(), "components/", 5).unwrap();
+        let directory = hits
+            .iter()
+            .find(|h| h.path == "src/components")
+            .unwrap_or_else(|| panic!("got {hits:?}"));
+
+        assert!(directory.is_directory);
+        assert_eq!(directory.name, "components");
+        assert_eq!(directory.dir, "src");
     }
 
     /// The second call must reuse the index rather than rebuilding it — that is

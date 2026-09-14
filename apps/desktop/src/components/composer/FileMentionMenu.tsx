@@ -1,3 +1,5 @@
+import { Folder } from "lucide-react";
+
 import FileIcon from "@/components/FileIcon";
 import PickerMenu from "@/components/composer/PickerMenu";
 import type { FileMatch } from "@/types/events";
@@ -38,10 +40,13 @@ export default function FileMentionMenu({
       bare={bare}
       renderItem={(file) => (
         <>
-          {/* The one place in this menu that carries colour, and the reason the
-              rows read as files at a glance rather than as another list of
-              strings. Same set the changes panel uses. */}
-          <FileIcon path={file.path} className="size-3.5" />
+          {/* Files keep their type colour while folders use a neutral outline,
+              so both kinds of filesystem entry read clearly at a glance. */}
+          {file.isDirectory ? (
+            <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          ) : (
+            <FileIcon path={file.path} className="size-3.5" />
+          )}
 
           <span className="shrink-0 font-medium">{file.name}</span>
 

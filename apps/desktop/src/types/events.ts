@@ -294,7 +294,11 @@ name: string,
 /**
  * Everything before `name`, without a trailing slash. Empty at the root.
  */
-dir: string, };
+dir: string,
+/**
+ * Whether this row is a directory rather than a regular file.
+ */
+isDirectory: boolean, };
 
 /**
  * Both sides of one file's change, as the text a diff viewer compares.
