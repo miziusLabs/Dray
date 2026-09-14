@@ -1,18 +1,20 @@
 // The sound files use an opaque extension so Finder does not offer its media
-// Play button for them. Fetching them into an audio Blob keeps the browser's
-// playback MIME type explicit without exposing a standalone playable asset.
-function loadSound(path: string): Promise<HTMLAudioElement | null> {
+// Play button for them. Decode them through Web Audio rather than creating
+// HTMLAudioElements: short effects should not register as resumable media with
+// the operating system's keyboard controls.
+let audioContext: AudioContext | null = null;
+
+function getAudioContext() {
+  return (audioContext ??= new AudioContext());
+}
+
+function loadSound(path: string): Promise<AudioBuffer | null> {
   return fetch(path)
     .then((response) => {
       if (!response.ok) throw new Error(`Failed to load sound: ${path}`);
       return response.arrayBuffer();
     })
-    .then((bytes) => {
-      const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
-      const audio = new Audio(url);
-      audio.preload = "auto";
-      return audio;
-    })
+    .then((bytes) => getAudioContext().decodeAudioData(bytes))
     .catch(() => null);
 }
 
@@ -21,11 +23,17 @@ function loadSound(path: string): Promise<HTMLAudioElement | null> {
 const celebration = loadSound("/celebration.dray-sound");
 const notification = loadSound("/notification.dray-sound");
 
-function play(sound: Promise<HTMLAudioElement | null>) {
-  void sound.then((audio) => {
-    if (!audio) return;
-    audio.currentTime = 0;
-    return audio.play().catch(() => {});
+function play(sound: Promise<AudioBuffer | null>) {
+  void sound.then((buffer) => {
+    if (!buffer) return;
+    const context = getAudioContext();
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    void context
+      .resume()
+      .then(() => source.start())
+      .catch(() => source.disconnect());
   });
 }
 
