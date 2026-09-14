@@ -260,6 +260,10 @@ async fn read_stdout(
         }
 
         let is_session = matches!(&pi_event, PiEvent::Session { .. });
+        // A Pi turn is one model response plus its tool calls. Requesting stats
+        // here updates the context meter between model turns instead of making
+        // it wait for the whole agent operation to settle.
+        let is_turn_end = matches!(&pi_event, PiEvent::TurnEnd { .. });
         let mapped = match mapper.map(pi_event) {
             Ok(events) => events,
             Err(error) => {
@@ -374,6 +378,12 @@ async fn read_stdout(
                 if let Err(error) = request_context_stats(&flush_stdin).await {
                     eprintln!("[pi context stats request err] {error}");
                 }
+            }
+        }
+
+        if is_turn_end {
+            if let Err(error) = request_context_stats(&flush_stdin).await {
+                eprintln!("[pi context stats request err] {error}");
             }
         }
     }
