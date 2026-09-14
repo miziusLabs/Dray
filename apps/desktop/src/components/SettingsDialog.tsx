@@ -552,6 +552,7 @@ function NoProjectDirectoryRow({
       id={id}
       label="No Project directory"
       description="Choose where sessions without a project start. The default is ~/Coding/Sandbox."
+      stacked
     >
       <div className="flex w-64 gap-2">
         <Input
@@ -594,30 +595,29 @@ function SettledSessionsRow({
   );
 }
 
-/// Label and reason on the left, control on the right — the shape every
-/// settings row here should take, so the second one costs no layout decisions.
+/// Label and reason on the left, with the control beside or below them.
 function SettingRow({
   id,
   label,
   description,
   children,
+  stacked = false,
 }: {
   id: string;
   label: string;
   description: ReactNode;
   children: ReactNode;
+  stacked?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className={stacked ? "flex flex-col gap-1" : "flex items-start justify-between gap-4"}>
       <div className="flex flex-col gap-1">
         <label htmlFor={id} className="text-ui font-medium">
           {label}
         </label>
         <p className="text-ui text-muted-foreground">{description}</p>
       </div>
-      {/* Nudged to sit on the label's own line rather than the row's top edge,
-          which the description below makes taller than the control. */}
-      <div className="mt-0.5">{children}</div>
+      <div className={stacked ? "mt-2" : "mt-0.5"}>{children}</div>
     </div>
   );
 }
