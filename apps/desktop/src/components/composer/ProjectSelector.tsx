@@ -123,11 +123,6 @@ export default function ProjectSelector({
               onSelect(next === NO_PROJECT_SELECTION ? null : next)
             }
           >
-            <DropdownMenuRadioItem value={NO_PROJECT_SELECTION} className="text-ui">
-              <X />
-              No Project
-            </DropdownMenuRadioItem>
-
             {projects.map((project) => (
               <ContextMenu
                 key={project.path}
@@ -160,6 +155,11 @@ export default function ProjectSelector({
                 </ContextMenuContent>
               </ContextMenu>
             ))}
+
+            <DropdownMenuRadioItem value={NO_PROJECT_SELECTION} className="text-ui">
+              <X />
+              No Project
+            </DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
 
           <DropdownMenuItem onSelect={onAttach} className="text-ui">
