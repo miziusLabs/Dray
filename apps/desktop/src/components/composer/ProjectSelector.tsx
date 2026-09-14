@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { FolderPlus, Pencil, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -163,7 +163,7 @@ export default function ProjectSelector({
           </DropdownMenuRadioGroup>
 
           <DropdownMenuItem onSelect={onAttach} className="text-ui">
-            <FolderPlus />
+            <Plus />
             Attach project…
           </DropdownMenuItem>
         </DropdownMenuContent>
