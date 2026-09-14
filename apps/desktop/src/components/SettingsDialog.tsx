@@ -121,7 +121,7 @@ export default function SettingsDialog({
         </DialogHeader>
 
         <div
-          className="relative flex rounded-lg bg-muted p-0.5"
+          className="relative grid grid-cols-3 rounded-lg bg-muted p-0.5"
           role="tablist"
           aria-label="Settings categories"
         >
@@ -143,7 +143,7 @@ export default function SettingsDialog({
               tabIndex={category === value ? 0 : -1}
               onClick={() => setCategory(value)}
               className={[
-                "relative z-10 flex-1 rounded-md px-2 py-1.5 text-ui transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                "relative z-10 rounded-md px-2 py-1.5 text-ui transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
                 category === value
                   ? "text-foreground"
                   : "text-muted-foreground hover:text-foreground",
