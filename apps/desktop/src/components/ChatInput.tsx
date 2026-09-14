@@ -682,8 +682,13 @@ export default function ChatInput({
     );
   }
 
-  const promptShortcutHint = !menuOpen && (
-    <div className="flex items-center gap-1 pt-2 text-ui text-muted-foreground/60">
+  const promptShortcutHint = !menuOpen && (isNewTask || !message.trim()) && (
+    <div
+      className={cn(
+        "flex items-center gap-1 text-ui text-muted-foreground/60",
+        isNewTask ? "pt-2" : "pointer-events-none absolute inset-0 px-1",
+      )}
+    >
       Press
       <Kbd>
         <CornerDownLeft className="size-3" strokeWidth={2} />
@@ -896,7 +901,13 @@ export default function ChatInput({
                   const mirror = mirrorRef.current;
                   if (mirror) mirror.scrollTop = e.currentTarget.scrollTop;
                 }}
-                placeholder={isNewTask ? "Describe a task. @files. $skills and /commands." : "Send follow-up"}
+                placeholder={
+                  isNewTask
+                    ? "Describe a task. @files. $skills and /commands."
+                    : menuOpen
+                      ? "Send follow-up"
+                      : ""
+                }
                 onChange={(e) => {
                   setMessage(e.currentTarget.value);
                   setStashMenuOpen(false);
@@ -1009,6 +1020,8 @@ export default function ChatInput({
                 )}
               />
 
+              {!isNewTask && !message.trim() && promptShortcutHint}
+
               {/* Draws the text the textarea is hiding, so a command or a file
                   mention can take a colour — a textarea has no way to style part
                   of its value. Painted *over* the textarea rather than under it,
@@ -1063,8 +1076,8 @@ export default function ChatInput({
                 `type="button"` on Stop so pressing it can't also submit.
 
                 Enter-to-send lives in `onKeyDown`, not in this button being the
-                form's submitter, so the empty state can drop it for the hint
-                below without losing the keyboard path. Neither `busy` nor a
+                form's submitter, so the empty state can drop it for the in-card
+                hint without losing the keyboard path. Neither `busy` nor a
                 queue is reachable there — nothing runs before a session
                 exists. */}
             {!isNewTask &&
@@ -1092,14 +1105,12 @@ export default function ChatInput({
         </div>
 
         {isNewTask ? (
-          // Gone while a picker is open: Enter completes the highlighted row
-          // rather than sending, so the send legend would be misleading.
+          // The new-task legend remains below the card; while a picker is open,
+          // Enter completes the highlighted row rather than sending, so it stays
+          // hidden.
           promptShortcutHint
         ) : (
-          <>
-            <div className="pt-1.5">{toolbar}</div>
-            {promptShortcutHint}
-          </>
+          <div className="pt-1.5">{toolbar}</div>
         )}
       </form>
     </div>
