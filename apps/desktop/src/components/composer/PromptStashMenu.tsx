@@ -28,14 +28,17 @@ export default function PromptStashMenu({
       onHover={onHover}
       placement={placement}
       surface="composer"
-      renderItem={(prompt) => (
-        <>
-          <Bookmark className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 truncate" title={prompt.text}>
-            {prompt.text.replace(/\s+/g, " ")}
-          </span>
-        </>
-      )}
+      renderItem={(prompt) => {
+        const preview = prompt.text.replace(/\s+/g, " ").trim();
+        return (
+          <>
+            <Bookmark className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 truncate" title={preview || "Attached files"}>
+              {preview || "Attached files"}
+            </span>
+          </>
+        );
+      }}
     />
   );
 }

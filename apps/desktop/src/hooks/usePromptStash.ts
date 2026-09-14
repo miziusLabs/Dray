@@ -6,6 +6,7 @@ export type StashedPrompt = {
   id: string;
   text: string;
   projectPath: string | null;
+  attachmentPaths: string[];
 };
 
 const STASH_KEY = "ade.promptStash";
@@ -15,8 +16,9 @@ export function addStashedPrompt(
   text: string,
   projectPath: string | null,
   id: string,
+  attachmentPaths: string[] = [],
 ): StashedPrompt[] {
-  return [{ id, text, projectPath }, ...prompts];
+  return [{ id, text, projectPath, attachmentPaths }, ...prompts];
 }
 
 export function removeStashedPrompt(
@@ -42,15 +44,17 @@ function newPromptId() {
 }
 
 /// Prompts saved from a composer. Unlike a draft, a stash is intentional,
-/// app-wide, and should survive relaunches until the user restores it.
+/// app-wide, and should survive relaunches until the user restores it. Paths
+/// are persisted rather than previews so images can be re-read by the normal
+/// attachment pipeline when restored.
 export function usePromptStash() {
   const [prompts, setPrompts] = useLocalStorage<StashedPrompt[]>(STASH_KEY, []);
 
   const stashPrompt = useCallback(
-    (text: string, projectPath: string | null) => {
-      if (!text.trim()) return;
+    (text: string, projectPath: string | null, attachmentPaths: string[] = []) => {
+      if (!text.trim() && !attachmentPaths.length) return;
       const id = newPromptId();
-      setPrompts((current) => addStashedPrompt(current, text, projectPath, id));
+      setPrompts((current) => addStashedPrompt(current, text, projectPath, id, attachmentPaths));
     },
     [setPrompts],
   );

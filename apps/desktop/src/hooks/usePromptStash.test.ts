@@ -7,10 +7,16 @@ import {
   type StashedPrompt,
 } from "./usePromptStash";
 
-const prompt = (id: string, text: string, projectPath: string | null = null): StashedPrompt => ({
+const prompt = (
+  id: string,
+  text: string,
+  projectPath: string | null = null,
+  attachmentPaths: string[] = [],
+): StashedPrompt => ({
   id,
   text,
   projectPath,
+  attachmentPaths,
 });
 
 describe("prompt stash", () => {
@@ -20,6 +26,12 @@ describe("prompt stash", () => {
     expect(addStashedPrompt(existing, "  keep this spacing  ", "/repo", "new")).toEqual([
       prompt("new", "  keep this spacing  ", "/repo"),
       existing[0],
+    ]);
+  });
+
+  it("preserves attached paths when adding a prompt", () => {
+    expect(addStashedPrompt([], "inspect this", "/repo", "new", ["/repo/image.png"])).toEqual([
+      prompt("new", "inspect this", "/repo", ["/repo/image.png"]),
     ]);
   });
 

@@ -329,6 +329,7 @@ export default function ChatInput({
     setStashMenuOpen(false);
     pendingCaretRef.current = prompt.text.length;
     setMessage(prompt.text);
+    void addAttachmentPaths(sessionId, prompt.attachmentPaths ?? []);
     textareaRef.current?.focus();
   };
 
@@ -462,11 +463,17 @@ export default function ChatInput({
   useHotkey("o", () => void pickAttachments(sessionId), { alt: true });
 
   // The stash belongs to the app, not the current session. The same chord
-  // restores when the input is empty, whether this is a New Task or follow-up.
+  // restores when the input is empty, whether this is a New Task or follow-up;
+  // a prompt with only attachments is still content worth stashing.
   useHotkey("s", () => {
-    if (message.trim()) {
-      stashPrompt(message, projectPath);
+    if (message.trim() || attachments.length) {
+      stashPrompt(
+        message,
+        projectPath,
+        attachments.map((attachment) => attachment.path),
+      );
       setMessage("");
+      clearAttachments(sessionId);
       setStashMenuOpen(false);
     } else {
       setStashMenuOpen(true);
