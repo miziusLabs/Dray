@@ -155,7 +155,7 @@ function MarkdownImpl({
         // Strip the outer chrome and let App.css position the copy icon over the
         // code block without making it part of the code's layout.
         "[&_[data-streamdown=code-block]]:gap-0",
-        "[&_[data-streamdown=code-block]]:bg-transparent [&_[data-streamdown=code-block]]:p-0",
+        "[&_[data-streamdown=code-block]]:bg-sidebar [&_[data-streamdown=code-block]]:p-0",
         "[&_[data-streamdown=code-block-header]]:hidden",
         // Copy control: no chrome at rest, a subtle fill only under the cursor.
         "[&_[data-streamdown=code-block-actions]]:border-0 [&_[data-streamdown=code-block-actions]]:bg-transparent",
