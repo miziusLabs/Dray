@@ -329,16 +329,7 @@ function UpdateCheckRow({
     <SettingRow
       id={id}
       label="App updates"
-      description={
-        <>
-          <span>Check for a newer version of Dray. Automatic checks run every 15 minutes.</span>
-          {message && (
-            <span className="mt-1 block" role="status">
-              {message}
-            </span>
-          )}
-        </>
-      }
+      description="Check for a newer version of Dray. Automatic checks run every 15 minutes."
     >
       <Button
         id={id}
@@ -349,7 +340,7 @@ function UpdateCheckRow({
         disabled={checking}
         onClick={() => void checkForUpdates()}
       >
-        {checking ? "Checking…" : "Check for updates"}
+        {checking ? "Checking…" : message ?? "Check for updates"}
       </Button>
     </SettingRow>
   );
