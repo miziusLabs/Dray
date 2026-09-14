@@ -685,8 +685,10 @@ export default function ChatInput({
   const promptShortcutHint = !menuOpen && (isNewTask || !message.trim()) && (
     <div
       className={cn(
-        "flex items-center gap-1 text-ui text-muted-foreground/60",
-        isNewTask ? "pt-2" : "pointer-events-none absolute inset-0 px-1",
+        "flex items-center gap-1",
+        isNewTask
+          ? "pt-2 text-ui text-muted-foreground/60"
+          : "pointer-events-none absolute inset-0 px-1 text-composer text-foreground/80",
       )}
     >
       Press
