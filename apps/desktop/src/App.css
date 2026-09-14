@@ -402,8 +402,8 @@
   }
 
   /* Thin scrollbar that appears while the list is hovered. The gutter is
-     reserved permanently, so the thumb showing never reflows the rows — the
-     gutter is the container's right padding.
+     reserved permanently on both edges, so the thumb showing never reflows the
+     rows and the list keeps equal outer padding.
 
      Standard properties, not ::-webkit-scrollbar. WebKit re-resolves the pseudo
      styles only when the bar itself takes pointer events, so a hover-driven
@@ -411,7 +411,7 @@
      element and invalidates like any other property, so `:hover` just works.
      Setting it also disables the base layer's pseudo styling here. */
   .scrollbar-overlay {
-    scrollbar-gutter: stable;
+    scrollbar-gutter: stable both-edges;
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
   }
