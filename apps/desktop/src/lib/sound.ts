@@ -5,7 +5,10 @@
 let audioContext: AudioContext | null = null;
 
 function getAudioContext() {
-  return (audioContext ??= new AudioContext());
+  if (!audioContext || audioContext.state === "closed") {
+    audioContext = new AudioContext();
+  }
+  return audioContext;
 }
 
 function loadSound(path: string): Promise<AudioBuffer | null> {
@@ -23,15 +26,33 @@ function loadSound(path: string): Promise<AudioBuffer | null> {
 const celebration = loadSound("/celebration.dray-sound");
 const notification = loadSound("/notification.dray-sound");
 
+function resumeAudioContext() {
+  const context = getAudioContext();
+  if (context.state === "suspended") void context.resume().catch(() => {});
+}
+
+// A settle action updates the backend before it plays its effect, so its call
+// no longer sits directly inside the click handler. Resume on the interaction
+// itself to retain the webview's user-activation permission for later effects.
+if (typeof window !== "undefined") {
+  window.addEventListener("pointerdown", resumeAudioContext, { passive: true });
+  window.addEventListener("keydown", resumeAudioContext);
+}
+
 function play(sound: Promise<AudioBuffer | null>) {
+  const context = getAudioContext();
+  // Resume before waiting for the decoded buffer. Waiting first loses the
+  // transient user activation that desktop webviews require for audio, and it
+  // also leaves later event-driven notifications dependent on a suspended
+  // context.
+  const resumed = context.state === "suspended" ? context.resume() : Promise.resolve();
+
   void sound.then((buffer) => {
     if (!buffer) return;
-    const context = getAudioContext();
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
-    void context
-      .resume()
+    void resumed
       .then(() => source.start())
       .catch(() => source.disconnect());
   });
