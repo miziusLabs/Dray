@@ -201,16 +201,15 @@
   }
 }
 
-/* Streamdown puts the border and radius on the same element that scrolls
-   horizontally, and a scrolling box paints its border unclipped by its own
-   radius — the corners visibly break apart. The border has to move out to the
-   non-scrolling wrapper. Plain CSS rather than an arbitrary variant because
-   these compete with Streamdown's own utilities at equal specificity, where
-   source order decides and Tailwind's ordering isn't ours to control. */
+/* The code block itself is an unframed transcript element. Keep it relative so
+   the copy control can sit in its corner without becoming part of the code's
+   layout. Plain CSS rather than arbitrary variants because these compete with
+   Streamdown's own utilities at equal specificity. */
 [data-streamdown="code-block"] {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
+  position: relative;
+  border: 0 !important;
+  border-radius: 0 !important;
+  overflow: visible;
 }
 
 /* `!important` because these compete with Streamdown's own utilities on the same
@@ -220,13 +219,34 @@
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
+  padding-top: 2.5rem !important;
 }
 
-/* Reveal the copy control for the block under the cursor, not every block in a
-   hovered message. */
+/* Streamdown's action row is sticky and negatively margined for its visible
+   header. That header is hidden here, so take the row out of flow and anchor its
+   icon to the code block's top-right corner instead. */
+[data-streamdown="code-block"] > div:has([data-streamdown="code-block-actions"]) {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  width: auto;
+  height: auto;
+  margin: 0 !important;
+}
+
 [data-streamdown="code-block-actions"] {
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
   opacity: 0;
   transition: opacity 150ms;
+}
+
+[data-streamdown="code-block-copy-button"] {
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0.375rem !important;
 }
 
 [data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"] {

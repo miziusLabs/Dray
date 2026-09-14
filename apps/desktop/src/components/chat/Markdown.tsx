@@ -152,20 +152,11 @@ function MarkdownImpl({
         "[&_pre_code>span]:block",
 
         // Code: Streamdown nests a bordered card around another bordered box.
-        // Strip the outer chrome and let the inner `pre` be the block.
+        // Strip the outer chrome and let App.css position the copy icon over the
+        // code block without making it part of the code's layout.
         "[&_[data-streamdown=code-block]]:gap-0",
         "[&_[data-streamdown=code-block]]:bg-transparent [&_[data-streamdown=code-block]]:p-0",
         "[&_[data-streamdown=code-block-header]]:hidden",
-        // The action bar already floats via `sticky` + `-mt-10`, which pulls it
-        // up into the header's row. With the header hidden that space is gone
-        // and the bar lands above the block, so the negative margin is dropped
-        // and the bar overlays the first line instead. It's an unnamed wrapper,
-        // hence the positional selector.
-        "[&_[data-streamdown=code-block]>div:has([data-streamdown=code-block-actions])]:mt-2",
-        "[&_[data-streamdown=code-block]>div:has([data-streamdown=code-block-actions])]:-mb-10",
-        // The code block's border, radius, and scroll containment live in
-        // App.css — they have to outrank Streamdown's own utilities, which these
-        // arbitrary variants can't do at equal specificity.
         // Copy control: no chrome at rest, a subtle fill only under the cursor.
         "[&_[data-streamdown=code-block-actions]]:border-0 [&_[data-streamdown=code-block-actions]]:bg-transparent",
         "[&_[data-streamdown=code-block-actions]]:supports-[backdrop-filter]:bg-transparent",
