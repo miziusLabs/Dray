@@ -208,6 +208,41 @@ export function withLineBreaks(text: string): string {
   return text.replace(/\\n/g, "\n");
 }
 
+export type PromptBlock = {
+  kind: "text" | "code";
+  text: string;
+};
+
+/// Splits complete backtick fences from prompt prose. Incomplete fences stay in
+/// the text run so a prompt is never unexpectedly reformatted while it is being
+/// composed or relayed.
+export function splitFencedCodeBlocks(text: string): PromptBlock[] {
+  const lines = text.split(/(?<=\n)/);
+  const blocks: PromptBlock[] = [];
+  let textStart = 0;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const opening = lines[i].match(/^ {0,3}(`{3,})(?!`)[^\r\n]*\r?\n$/);
+    if (!opening) continue;
+
+    const fence = opening[1];
+    const closing = new RegExp(`^ {0,3}${"`".repeat(fence.length)}[\\t ]*(?:\\r?\\n)?$`);
+    let end = i + 1;
+    while (end < lines.length && !closing.test(lines[end])) end += 1;
+    if (end === lines.length) continue;
+
+    const prose = lines.slice(textStart, i).join("");
+    if (prose) blocks.push({ kind: "text", text: prose });
+    blocks.push({ kind: "code", text: lines.slice(i, end + 1).join("") });
+    textStart = end + 1;
+    i = end;
+  }
+
+  const prose = lines.slice(textStart).join("");
+  if (prose || !blocks.length) blocks.push({ kind: "text", text: prose });
+  return blocks;
+}
+
 /// Finds bare paths only in ordinary text runs, preserving the original string.
 export function withPaths(segments: Segment[]): Segment[] {
   const out: Segment[] = [];

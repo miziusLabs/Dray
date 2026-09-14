@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   highlightSegments,
+  splitFencedCodeBlocks,
   splitMention,
   withLineBreaks,
   withPaths,
@@ -183,6 +184,20 @@ describe("inline prompt rendering", () => {
       inner: "src/lib/a.ts",
       line: 12,
     });
+  });
+
+  it("separates complete fenced code blocks from prompt prose", () => {
+    expect(splitFencedCodeBlocks("before\n```ts\nconst value = 1;\n```\nafter")).toEqual([
+      { kind: "text", text: "before\n" },
+      { kind: "code", text: "```ts\nconst value = 1;\n```\n" },
+      { kind: "text", text: "after" },
+    ]);
+  });
+
+  it("leaves an incomplete fence as prose", () => {
+    expect(splitFencedCodeBlocks("before\n```ts\nconst value = 1;")).toEqual([
+      { kind: "text", text: "before\n```ts\nconst value = 1;" },
+    ]);
   });
 
   it("keeps the composer segmentation lossless", () => {
