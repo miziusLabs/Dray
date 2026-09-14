@@ -201,15 +201,15 @@
   }
 }
 
-/* The code block itself is an unframed transcript element. Keep it relative so
-   the copy control can sit in its corner without becoming part of the code's
-   layout. Plain CSS rather than arbitrary variants because these compete with
-   Streamdown's own utilities at equal specificity. */
+/* The code block is a raised, rounded transcript surface without a frame. Keep
+   it relative so the copy control can sit in its corner without becoming part of
+   the code's layout. Plain CSS rather than arbitrary variants because these
+   compete with Streamdown's own utilities at equal specificity. */
 [data-streamdown="code-block"] {
   position: relative;
   border: 0 !important;
-  border-radius: 0 !important;
-  overflow: visible;
+  border-radius: var(--radius-md) !important;
+  overflow: hidden;
 }
 
 /* `!important` because these compete with Streamdown's own utilities on the same
@@ -218,8 +218,11 @@
 [data-streamdown="code-block-body"] {
   border: 0 !important;
   border-radius: 0 !important;
+  background: var(--card) !important;
+}
+
+[data-streamdown="code-block-body"] > pre {
   background: transparent !important;
-  padding-top: 2.5rem !important;
 }
 
 /* Streamdown's action row is sticky and negatively margined for its visible
