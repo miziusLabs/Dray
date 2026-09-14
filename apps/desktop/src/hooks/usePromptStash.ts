@@ -41,8 +41,8 @@ function newPromptId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-/// Prompts saved from the New Task composer. Unlike a draft, a stash is
-/// intentional and should survive relaunches until the user restores it.
+/// Prompts saved from a composer. Unlike a draft, a stash is intentional,
+/// app-wide, and should survive relaunches until the user restores it.
 export function usePromptStash() {
   const [prompts, setPrompts] = useLocalStorage<StashedPrompt[]>(STASH_KEY, []);
 

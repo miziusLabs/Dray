@@ -76,8 +76,8 @@ type ChatInputProps = {
   /// Where the `@` picker searches for files. Cloud sessions expose an empty
   /// host-side marker because their actual workspace stays inside Docker.
   cwd?: string | null;
-  /// The Project selected for a new task. Prompt stashes are scoped to this
-  /// path; legacy stashes without a project are intentionally not migrated.
+  /// The project associated with this composer. Prompt stashes are scoped to
+  /// this path; legacy stashes without a project are intentionally not migrated.
   projectPath?: string | null;
   /// Interrupts the running turn. Reachable while `busy` and the box is empty —
   /// with something typed the same button sends, since a prompt written during a
@@ -293,7 +293,7 @@ export default function ChatInput({
       ? modelMatches
       : effortMatches;
   const stashMenuVisible =
-    isNewTask && stashMenuOpen && message.trim().length === 0 && stashedPrompts.length > 0;
+    stashMenuOpen && message.trim().length === 0 && stashedPrompts.length > 0;
   const rowCount = stashMenuVisible
     ? stashedPrompts.length
     : mention
@@ -461,21 +461,17 @@ export default function ChatInput({
   // ⌥ as well as ⌘, so the chord can't collide with the webview's own ⌘O.
   useHotkey("o", () => void pickAttachments(sessionId), { alt: true });
 
-  // New Task is the only place a prompt can be saved before it becomes a
-  // session. The same chord restores when the input is empty.
-  useHotkey(
-    "s",
-    () => {
-      if (message.trim()) {
-        stashPrompt(message, projectPath);
-        setMessage("");
-        setStashMenuOpen(false);
-      } else {
-        setStashMenuOpen(true);
-      }
-    },
-    { enabled: isNewTask },
-  );
+  // The stash belongs to the app, not the current session. The same chord
+  // restores when the input is empty, whether this is a New Task or follow-up.
+  useHotkey("s", () => {
+    if (message.trim()) {
+      stashPrompt(message, projectPath);
+      setMessage("");
+      setStashMenuOpen(false);
+    } else {
+      setStashMenuOpen(true);
+    }
+  });
 
   const insertPastedText = (text: string) => {
     const textarea = textareaRef.current;
@@ -686,6 +682,26 @@ export default function ChatInput({
     );
   }
 
+  const promptShortcutHint = !menuOpen && (
+    <div className="flex items-center gap-1 pt-2 text-ui text-muted-foreground/60">
+      Press
+      <Kbd>
+        <CornerDownLeft className="size-3" strokeWidth={2} />
+      </Kbd>
+      to send{" "}
+      {(message.trim() || stashedPrompts.length > 0) && (
+        <>
+          <span>or</span>
+          <KbdGroup>
+            <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+            <Kbd>S</Kbd>
+          </KbdGroup>
+          <span>to {message.trim() ? "stash" : "restore"}</span>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div className="px-4 pb-4">
       <form
@@ -781,6 +797,7 @@ export default function ChatInput({
                 activeIndex={active}
                 onPick={pickStashedPrompt}
                 onHover={setActiveIndex}
+                placement={isNewTask ? "below" : "above"}
               />
             ) : mention ? (
               <FileMentionMenu
@@ -1077,27 +1094,12 @@ export default function ChatInput({
         {isNewTask ? (
           // Gone while a picker is open: Enter completes the highlighted row
           // rather than sending, so the send legend would be misleading.
-          !menuOpen && (
-            <div className="flex items-center gap-1 pt-2 text-ui text-muted-foreground/60">
-              Press
-              <Kbd>
-                <CornerDownLeft className="size-3" strokeWidth={2} />
-              </Kbd>
-              to send{" "}
-              {(message.trim() || stashedPrompts.length > 0) && (
-                <>
-                  <span>or</span>
-                  <KbdGroup>
-                    <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
-                    <Kbd>S</Kbd>
-                  </KbdGroup>
-                  <span>to {message.trim() ? "stash" : "restore"}</span>
-                </>
-              )}
-            </div>
-          )
+          promptShortcutHint
         ) : (
-          <div className="pt-1.5">{toolbar}</div>
+          <>
+            <div className="pt-1.5">{toolbar}</div>
+            {promptShortcutHint}
+          </>
         )}
       </form>
     </div>
