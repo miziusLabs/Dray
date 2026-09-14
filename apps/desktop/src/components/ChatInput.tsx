@@ -702,7 +702,7 @@ export default function ChatInput({
       <Kbd>
         <CornerDownLeft className="size-3" strokeWidth={2} />
       </Kbd>
-      to send{" "}
+      to {isNewTask ? "send" : "send follow up"}{" "}
       {(message.trim() || attachments.length > 0 || stashedPrompts.length > 0) && (
         <>
           <span>or</span>
