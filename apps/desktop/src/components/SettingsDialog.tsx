@@ -560,6 +560,7 @@ function NoProjectDirectoryRow({
           value={path}
           onChange={(event) => onChange(event.target.value)}
           aria-label="No Project directory"
+          className="border-0"
         />
         <Button
           type="button"
