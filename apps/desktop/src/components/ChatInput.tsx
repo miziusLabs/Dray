@@ -703,14 +703,14 @@ export default function ChatInput({
         <CornerDownLeft className="size-3" strokeWidth={2} />
       </Kbd>
       to send{" "}
-      {(message.trim() || stashedPrompts.length > 0) && (
+      {(message.trim() || attachments.length > 0 || stashedPrompts.length > 0) && (
         <>
           <span>or</span>
           <KbdGroup>
             <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
             <Kbd>S</Kbd>
           </KbdGroup>
-          <span>to {message.trim() ? "stash" : "restore"}</span>
+          <span>to {message.trim() || attachments.length > 0 ? "stash" : "restore"}</span>
         </>
       )}
     </div>
