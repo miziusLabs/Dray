@@ -18,9 +18,12 @@ pub struct Project {
     /// User-facing label. Starts as the folder name and can be edited without
     /// changing the directory a session runs in.
     pub name: String,
-    /// Doubles as the sort key and the "which project was last open" answer:
-    /// selecting a project *is* what makes it most recent, so a separate
-    /// `last_selected` pointer would be a second place to keep the same fact.
+    /// The user's explicit position in the project picker. Unlike
+    /// [`last_selected`], selecting a project does not change this value.
+    #[serde(default)]
+    pub position: usize,
+    /// Used only to restore the selected project on startup. It must not sort
+    /// the picker because selecting a project should not undo manual ordering.
     pub last_selected: String,
 }
 
@@ -59,9 +62,19 @@ pub async fn read_projects() -> Result<Vec<Project>> {
     for project in &mut projects {
         repair_legacy_name(project);
     }
-    // Descending, so the newest selection sorts to the front. RFC 3339 stamps
-    // compare correctly as strings at fixed width.
-    projects.sort_by(|a, b| b.last_selected.cmp(&a.last_selected));
+    // Builds before explicit ordering was added have no position field, which
+    // deserializes as zero for every project. Preserve their old recency order
+    // once, then use that order as their initial explicit order.
+    let legacy_order = projects.len() > 1 && projects.iter().all(|p| p.position == 0);
+    if legacy_order {
+        // RFC 3339 stamps compare correctly as strings at fixed width.
+        projects.sort_by(|a, b| b.last_selected.cmp(&a.last_selected));
+        for (position, project) in projects.iter_mut().enumerate() {
+            project.position = position;
+        }
+    } else {
+        projects.sort_by_key(|project| project.position);
+    }
 
     Ok(projects)
 }
@@ -99,11 +112,16 @@ pub async fn add_project(path: &str) -> Result<Vec<Project>> {
         None => projects.push(Project {
             name: basename(&path),
             path,
+            position: projects
+                .iter()
+                .map(|project| project.position)
+                .max()
+                .unwrap_or(0)
+                + 1,
             last_selected: now,
         }),
     }
 
-    projects.sort_by(|a, b| b.last_selected.cmp(&a.last_selected));
     write_projects(&projects).await?;
 
     Ok(projects)
@@ -141,9 +159,41 @@ pub async fn remove_project(path: &str) -> Result<Vec<Project>> {
     Ok(projects)
 }
 
-/// Stamps a project as the most recently selected, which also moves it to the
-/// front of the next read. Unknown paths are ignored rather than inserted —
-/// attaching is [`add_project`]'s job.
+/// Persists the order of the attached projects. The frontend sends every
+/// attached path in its new order, so special picker entries never enter this
+/// contract and cannot be moved.
+pub async fn reorder_projects(paths: &[String]) -> Result<Vec<Project>> {
+    let _guard = PROJECTS_LOCK.lock().await;
+    let projects = read_projects().await?;
+    anyhow::ensure!(
+        paths.len() == projects.len(),
+        "project order must include every attached project"
+    );
+
+    let mut reordered = Vec::with_capacity(projects.len());
+    for (position, path) in paths.iter().enumerate() {
+        let mut project = projects
+            .iter()
+            .find(|project| project.path == *path)
+            .with_context(|| format!("project is not attached: {path}"))?
+            .clone();
+        anyhow::ensure!(
+            reordered
+                .iter()
+                .all(|existing: &Project| existing.path != project.path),
+            "project order contains a duplicate"
+        );
+        project.position = position;
+        reordered.push(project);
+    }
+
+    write_projects(&reordered).await?;
+
+    Ok(reordered)
+}
+
+/// Stamps a project as the most recently selected. This is separate from the
+/// explicit picker order, so selecting a project never moves it in the list.
 pub async fn set_last_selected_project(path: &str) -> Result<()> {
     let _guard = PROJECTS_LOCK.lock().await;
     let mut projects = read_projects().await?;
@@ -153,7 +203,6 @@ pub async fn set_last_selected_project(path: &str) -> Result<()> {
     };
 
     project.last_selected = now_rfc3339();
-    projects.sort_by(|a, b| b.last_selected.cmp(&a.last_selected));
 
     write_projects(&projects).await
 }
@@ -183,24 +232,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn most_recently_selected_sorts_first() {
+    fn explicit_position_sorts_first() {
         let mut projects = vec![
             Project {
                 path: "/a".into(),
                 name: "a".into(),
+                position: 1,
                 last_selected: "2026-08-01T00:00:00Z".into(),
             },
             Project {
                 path: "/b".into(),
                 name: "b".into(),
+                position: 0,
                 last_selected: "2026-08-08T00:00:00Z".into(),
             },
         ];
 
-        projects.sort_by(|a, b| b.last_selected.cmp(&a.last_selected));
+        projects.sort_by_key(|project| project.position);
 
-        // The picker takes its default from the front, so this ordering is the
-        // whole of "reopen the project I was last in".
         assert_eq!(projects[0].path, "/b");
     }
 
@@ -219,6 +268,7 @@ mod tests {
         let mut project = Project {
             path: r"\\?\C:\Users\y\proj".into(),
             name: r"\\?\C:\Users\y\proj".into(),
+            position: 0,
             last_selected: String::new(),
         };
 

@@ -514,9 +514,13 @@ path: string,
  */
 name: string, 
 /**
- * Doubles as the sort key and the "which project was last open" answer:
- * selecting a project *is* what makes it most recent, so a separate
- * `last_selected` pointer would be a second place to keep the same fact.
+ * The user's explicit position in the project picker. Unlike
+ * [`last_selected`], selecting a project does not change this value.
+ */
+position: number,
+/**
+ * Used only to restore the selected project on startup. It must not sort
+ * the picker because selecting a project should not undo manual ordering.
  */
 lastSelected: string, };
 
@@ -643,8 +647,8 @@ export type SessionIndexItem = { sessionId: string, harness: Harness,
  */
 cwd: string, 
 /**
- * Project metadata used for sidebar grouping; a Cloud does not mount or
- * clone this project.
+ * Project metadata used for sidebar grouping; empty for No Project. A
+ * Cloud does not mount or clone this project.
  */
 projectPath: string, branch: string | null, 
 /**
@@ -704,8 +708,8 @@ export type SessionSnapshot = { events: Array<AgentEvent>, sessionId: string, ha
  */
 cwd: string, 
 /**
- * Project metadata used for sidebar grouping; a Cloud does not mount or
- * clone this project.
+ * Project metadata used for sidebar grouping; empty for No Project. A
+ * Cloud does not mount or clone this project.
  */
 projectPath: string, branch: string | null, 
 /**

@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { Menu, Pencil, Plus, Trash2, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -39,6 +39,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useHotkey } from "@/hooks/useHotkey";
 import { IS_MAC } from "@/lib/platform";
 import { NO_PROJECT_SELECTION } from "@/lib/projects";
+import { notifyProjectDrag } from "@/lib/projectDrag";
+import { cn } from "@/lib/utils";
 import type { Project } from "@/types/events";
 
 export default function ProjectSelector({
@@ -48,6 +50,7 @@ export default function ProjectSelector({
   onAttach,
   onRename,
   onDelete,
+  onReorder,
 }: {
   projects: Project[];
   value: string | null;
@@ -55,16 +58,92 @@ export default function ProjectSelector({
   onAttach: () => void;
   onRename: (path: string, name: string) => Promise<boolean>;
   onDelete: (path: string) => Promise<boolean>;
+  onReorder: (paths: string[]) => Promise<boolean>;
 }) {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [editName, setEditName] = useState("");
   const [saving, setSaving] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [draggingProjectPath, setDraggingProjectPath] = useState<string | null>(null);
+  // The boundary after row n is represented by n, so the marker can be drawn
+  // between rows rather than highlighting the row that would receive the drop.
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const dropIndexRef = useRef<number | null>(null);
+  const dragRef = useRef<{ path: string; pointerId: number } | null>(null);
+  const sortingRef = useRef(false);
+
+  const updateDropIndex = (event: PointerEvent) => {
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    const row = target?.closest<HTMLElement>("[data-project-index]");
+    if (!row) {
+      dropIndexRef.current = null;
+      setDropIndex(null);
+      return;
+    }
+
+    const rowIndex = Number(row.dataset.projectIndex);
+    const box = row.getBoundingClientRect();
+    const nextIndex = rowIndex + (event.clientY >= box.top + box.height / 2 ? 1 : 0);
+    dropIndexRef.current = nextIndex;
+    setDropIndex(nextIndex);
+  };
   // A context menu is portalled outside the dropdown. Keep its project row
   // mounted while focus moves between those two portals, then close both.
   const contextMenuOpen = useRef(false);
   const selectedProject = projects.find((project) => project.path === value);
+
+  // Keep the whole window honest while the handle owns the pointer drag, and
+  // restore any cursor the host window had before it started.
+  useEffect(() => {
+    if (!draggingProjectPath) return;
+
+    const root = document.documentElement;
+    const previousCursor = root.style.cursor;
+    const previousUserSelect = root.style.userSelect;
+    root.style.cursor = "grabbing";
+    root.style.userSelect = "none";
+
+    return () => {
+      root.style.cursor = previousCursor;
+      root.style.userSelect = previousUserSelect;
+    };
+  }, [draggingProjectPath]);
+
+  const moveProject = async (path: string, index: number) => {
+    const from = projects.findIndex((project) => project.path === path);
+    if (from < 0) return;
+
+    const next = [...projects];
+    const [moved] = next.splice(from, 1);
+    const insertionIndex = from < index ? index - 1 : index;
+    if (insertionIndex === from) return;
+
+    next.splice(insertionIndex, 0, moved);
+    sortingRef.current = true;
+    setDropIndex(null);
+    try {
+      await onReorder(next.map((project) => project.path));
+    } finally {
+      sortingRef.current = false;
+      // Reordering replaces the project list while the menu is open. Restore
+      // the controlled open state after that update so sorting never dismisses
+      // the picker the user is still working in.
+      setPickerOpen(true);
+    }
+  };
+
+  const endDrag = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    setDraggingProjectPath(null);
+    setDropIndex(null);
+    notifyProjectDrag(false);
+
+    const index = dropIndexRef.current;
+    dropIndexRef.current = null;
+    if (drag && index !== null) void moveProject(drag.path, index);
+  };
 
   useHotkey("p", () => setPickerOpen(true));
 
@@ -89,6 +168,7 @@ export default function ProjectSelector({
       <DropdownMenu
         open={pickerOpen}
         onOpenChange={(open) => {
+          if (!open && sortingRef.current) return;
           if (open || !contextMenuOpen.current) setPickerOpen(open);
         }}
       >
@@ -128,16 +208,73 @@ export default function ProjectSelector({
                 key={project.path}
                 onOpenChange={(open) => {
                   contextMenuOpen.current = open;
-                  if (!open) setPickerOpen(false);
+                  if (!open && !sortingRef.current) setPickerOpen(false);
                 }}
               >
                 <ContextMenuTrigger asChild>
                   <DropdownMenuRadioItem
                     value={project.path}
                     title={project.path}
-                    className="text-ui"
+                    data-project-index={projects.indexOf(project)}
+                    className={cn(
+                      "group relative pr-8 text-ui hover:[&>span[data-slot=dropdown-menu-radio-item-indicator]]:opacity-0",
+                      draggingProjectPath === project.path && [
+                        "opacity-50",
+                        "[&>span[data-slot=dropdown-menu-radio-item-indicator]]:opacity-0",
+                      ],
+                    )}
                   >
-                    <span className="truncate">{project.name}</span>
+                    {dropIndex === projects.indexOf(project) && (
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-x-1 -top-px z-10 h-0.5 rounded-full bg-ring"
+                      />
+                    )}
+                    {dropIndex === projects.indexOf(project) + 1 && (
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-x-1 -bottom-px z-10 h-0.5 rounded-full bg-ring"
+                      />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Reorder ${project.name}`}
+                      title="Reorder project"
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        dragRef.current = {
+                          path: project.path,
+                          pointerId: event.pointerId,
+                        };
+                        notifyProjectDrag(true);
+                        setDraggingProjectPath(project.path);
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerMove={(event) => {
+                        if (dragRef.current?.pointerId !== event.pointerId) return;
+                        updateDropIndex(event);
+                      }}
+                      onPointerUp={(event) => {
+                        if (dragRef.current?.pointerId !== event.pointerId) return;
+                        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        }
+                        endDrag();
+                      }}
+                      onPointerCancel={(event) => {
+                        if (dragRef.current?.pointerId !== event.pointerId) return;
+                        endDrag();
+                      }}
+                      className={cn(
+                        "pointer-events-none absolute right-2 z-10 flex size-5 cursor-grab items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:pointer-events-auto group-hover:opacity-100 active:cursor-grabbing",
+                        draggingProjectPath === project.path && "cursor-grabbing opacity-100",
+                      )}
+                    >
+                      <Menu className="size-3.5" aria-hidden="true" />
+                    </button>
                   </DropdownMenuRadioItem>
                 </ContextMenuTrigger>
                 <ContextMenuContent>

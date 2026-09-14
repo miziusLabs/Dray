@@ -43,6 +43,7 @@ import {
   slashQuery,
 } from "@/lib/slash";
 import { pastedFilePath } from "@/lib/paste";
+import { PROJECT_DRAG_EVENT } from "@/lib/projectDrag";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import type {
@@ -220,6 +221,10 @@ export default function ChatInput({
   // read here — `onDragDropEvent` is the only source, and it reports paths
   // rather than `File` handles, which is exactly what the backend wants anyway.
   const [dragging, setDragging] = useState(false);
+  // HTML project drags also cross the Tauri webview, but must never become file
+  // attachments. This ref lets the native listener ignore those events without
+  // delaying or changing the ordinary file-drop path.
+  const projectDraggingRef = useRef(false);
 
   // The runs that take a colour. Empty of anything but plain text most of the
   // time, which is what the overlay below checks before mounting at all.
@@ -547,9 +552,17 @@ export default function ChatInput({
 
     let unlisten: (() => void) | null = null;
     let live = true;
+    const onProjectDrag = (event: Event) => {
+      const active = (event as CustomEvent<{ active: boolean }>).detail.active;
+      projectDraggingRef.current = active;
+      if (active) setDragging(false);
+    };
+    window.addEventListener(PROJECT_DRAG_EVENT, onProjectDrag);
 
     void getCurrentWebview()
       .onDragDropEvent((event) => {
+        if (projectDraggingRef.current) return;
+
         // `enter` and `over` are one state here — the drag is over the window
         // and hasn't been dropped. Treating `enter` as anything else flashes
         // the overlay off for the frame between it and the first `over`.
@@ -572,6 +585,8 @@ export default function ChatInput({
 
     return () => {
       live = false;
+      window.removeEventListener(PROJECT_DRAG_EVENT, onProjectDrag);
+      projectDraggingRef.current = false;
       unlisten?.();
     };
   }, [sessionId, archived]);

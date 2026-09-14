@@ -183,7 +183,6 @@ const handleAttachProject = async () => {
   if (typeof picked !== "string") return;
 
   try {
-    // Returns the list already sorted, so the attached project is at the front.
     setProjects(await invoke<Project[]>("add_project", { path: picked }));
     setProjectPath(picked);
     setNoProjectSelected(false);
@@ -219,6 +218,16 @@ const handleDeleteProject = async (path: string) => {
     if (projectPath === path) {
       setProjectPath(nextProjects[0]?.path ?? null);
     }
+    return true;
+  } catch (e) {
+    setError(String(e));
+    return false;
+  }
+};
+
+const handleReorderProjects = async (paths: string[]) => {
+  try {
+    setProjects(await invoke<Project[]>("reorder_projects", { paths }));
     return true;
   } catch (e) {
     setError(String(e));
@@ -805,10 +814,14 @@ useEffect(() => {
   invoke<Project[]>("list_projects")
     .then((list) => {
       setProjects(list);
-      // Sorted most-recently-selected first, so the front of the list *is* the
-      // project to reopen — unless the built-in No Project choice was the last
-      // selection, which has no backend project record to sort.
-      setProjectPath(noProjectSelected ? null : list[0]?.path ?? null);
+      // The picker has an explicit user order, while startup selection still
+      // follows the most recently selected attached project.
+      const mostRecentlySelected = list.reduce<Project | null>(
+        (latest, project) =>
+          !latest || project.lastSelected > latest.lastSelected ? project : latest,
+        null,
+      );
+      setProjectPath(noProjectSelected ? null : mostRecentlySelected?.path ?? null);
     })
     // Without this a failed read leaves the picker silently empty, and the
     // reason only reaches the console.
@@ -1377,6 +1390,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, projects, projectPath, branches, branch, useCloud: cloudEnabled, cloudAvailable: cloudAvailability?.available === true, cloudUnavailableReason: cloudAvailability?.reason ?? "Checking Cloud availability…", busy, working, compacting, contextUsage, error, setError, handleModelChange, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, projects, projectPath, branches, branch, useCloud: cloudEnabled, cloudAvailable: cloudAvailability?.available === true, cloudUnavailableReason: cloudAvailability?.reason ?? "Checking Cloud availability…", busy, working, compacting, contextUsage, error, setError, handleModelChange, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleReorderProjects, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
 
 }

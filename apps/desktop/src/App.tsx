@@ -100,6 +100,7 @@ function App() {
     handleSelectProject,
     handleRenameProject,
     handleDeleteProject,
+    handleReorderProjects,
     handleSelectBranch,
     pendingBranch,
     setPendingBranch,
@@ -690,6 +691,7 @@ function App() {
               onAttachProject={handleAttachProject}
               onRenameProject={handleRenameProject}
               onDeleteProject={handleDeleteProject}
+              onReorderProjects={handleReorderProjects}
               branches={branches}
               branch={branch}
               onSelectBranch={handleSelectBranch}

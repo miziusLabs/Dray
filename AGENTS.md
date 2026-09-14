@@ -23,7 +23,7 @@ This file is the implementation map for agents working in this repository. Keep 
 - Native desktop chat UI for Pi coding-agent sessions.
 - Multiple persistent sessions with search, unread/waiting/working state, pinning, settling/archiving, deletion, forking, and parent/child nesting.
 - Local Sessions that run in a selected project checkout and Cloud Sessions that run Pi inside an isolated Docker container and persistent Docker volume.
-- Project picker with attach, rename, delete-from-picker, recent-project ordering, and remembered selection.
+- Project picker with attach, rename, delete-from-picker, manual ordering, and remembered selection.
 - Git branch discovery and switching, including dirty-worktree handling before checkout.
 - Dynamic Pi model catalog with model selection, reasoning/effort selection, configurable model cycling, and separate model/effort preferences for generated session titles.
 - Rich transcript rendering for assistant text, user text, reasoning, tool calls, grouped tool calls, file edits, diffs, images, checkpoints, compaction, and structured question requests.
@@ -77,7 +77,7 @@ Top-level components in `src/components/`:
 Files in `src/components/composer/`:
 
 - `ComposerToolbar.tsx` — attachment, project, cloud/local, branch, model, effort, and context controls.
-- `ProjectSelector.tsx` — attach/select/rename/remove projects.
+- `ProjectSelector.tsx` — attach/select/reorder/rename/remove projects.
 - `BranchSelector.tsx` — branch picker and dirty-worktree warning context.
 - `BranchSwitchDialog.tsx` — branch-switch resolution when local changes need handling.
 - `CloudToggle.tsx` — toggles Docker-backed Cloud Session mode.

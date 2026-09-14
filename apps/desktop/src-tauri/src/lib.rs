@@ -232,6 +232,13 @@ async fn set_last_selected_project(path: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn reorder_projects(paths: Vec<String>) -> Result<Vec<Project>, String> {
+    projects::reorder_projects(&paths)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn list_branches(cwd: &str) -> Result<BranchList, String> {
     git::list_branches(cwd).await.map_err(|e| e.to_string())
 }
@@ -510,6 +517,7 @@ pub fn run() {
             rename_project,
             remove_project,
             set_last_selected_project,
+            reorder_projects,
             list_branches,
             checkout_branch,
             changes_since,
