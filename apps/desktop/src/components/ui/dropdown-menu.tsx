@@ -128,9 +128,13 @@ function DropdownMenuRadioItem({
   className,
   children,
   inset,
+  indicatorClassName,
+  indicatorIconClassName,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem> & {
   inset?: boolean
+  indicatorClassName?: string
+  indicatorIconClassName?: string
 }) {
   return (
     <DropdownMenuPrimitive.RadioItem
@@ -143,12 +147,14 @@ function DropdownMenuRadioItem({
       {...props}
     >
       <span
-        className="pointer-events-none absolute right-2 flex items-center justify-center"
+        className={cn(
+          "pointer-events-none absolute right-2 flex items-center justify-center",
+          indicatorClassName,
+        )}
         data-slot="dropdown-menu-radio-item-indicator"
       >
         <DropdownMenuPrimitive.ItemIndicator>
-          <CheckIcon
-          />
+          <CheckIcon className={indicatorIconClassName} />
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
       {children}

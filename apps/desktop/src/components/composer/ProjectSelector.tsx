@@ -221,6 +221,8 @@ export default function ProjectSelector({
                     value={project.path}
                     title={project.path}
                     data-project-index={projects.indexOf(project)}
+                    indicatorClassName="size-6 p-0"
+                    indicatorIconClassName="size-3"
                     className={cn(
                       "group relative min-h-7 w-full cursor-pointer rounded-md py-0 pr-8 pl-2 text-ui hover:[&>span[data-slot=dropdown-menu-radio-item-indicator]]:opacity-0",
                       draggingProjectPath === project.path && [
@@ -341,7 +343,12 @@ export default function ProjectSelector({
               </Tooltip>
             ))}
 
-            <DropdownMenuRadioItem value={NO_PROJECT_SELECTION} className="text-ui">
+            <DropdownMenuRadioItem
+              value={NO_PROJECT_SELECTION}
+              indicatorClassName="size-6 p-0"
+              indicatorIconClassName="size-3"
+              className="text-ui"
+            >
               <X />
               No Project
             </DropdownMenuRadioItem>
