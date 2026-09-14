@@ -129,7 +129,7 @@ export default function SettingsDialog({
             aria-hidden
             className="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-md bg-popover shadow-sm transition-transform duration-200 ease-out"
             style={{
-              width: "calc((100% - 0.5rem) / 3)",
+              width: "calc((100% - 0.25rem) / 3)",
               transform: `translateX(${SETTINGS_CATEGORY_INDEX[category] * 100}%)`,
             }}
           />
