@@ -237,7 +237,6 @@ export default function SettingsDialog({
             <UpdateCheckRow
               checking={checkingForUpdates}
               onCheck={onCheckForUpdates}
-              autoDownloadUpdates={autoDownloadUpdates}
             />
             <AutoDownloadUpdatesRow
               checked={autoDownloadUpdates}
@@ -298,11 +297,9 @@ function UsageDisplayRow({
 function UpdateCheckRow({
   checking,
   onCheck,
-  autoDownloadUpdates,
 }: {
   checking: boolean;
   onCheck: () => Promise<UpdateCheckResult>;
-  autoDownloadUpdates: boolean;
 }) {
   const id = useId();
   const [message, setMessage] = useState<string | null>(null);
@@ -313,9 +310,7 @@ function UpdateCheckRow({
       const result = await onCheck();
       setMessage(
         result === "available"
-          ? autoDownloadUpdates
-            ? "An update is available and is being downloaded."
-            : "An update is available. Download it from the sidebar."
+          ? "Update available"
           : result === "none"
             ? "You're up to date."
             : "Update checks are unavailable in development builds.",

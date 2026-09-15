@@ -15,12 +15,6 @@ export type UpdateState = {
   total: number | null;
 };
 
-function downloadLabel(state: UpdateState): string {
-  if (state.phase !== "downloading") return "Downloading…";
-  if (!state.total) return "Downloading…";
-  return `Downloading ${Math.min(100, Math.round((state.downloaded / state.total) * 100))}%`;
-}
-
 /**
  * Checks GitHub Releases at launch and every 15 minutes. Signed updates are
  * downloaded in the background when enabled. Installation stays behind an
@@ -184,16 +178,7 @@ export default function UpdateNotice({
   const { state, install, retry } = controller;
   if (!state) return null;
 
-  const label =
-    state.phase === "available"
-      ? "Download update"
-      : state.phase === "ready"
-        ? "Install and restart"
-        : state.phase === "error"
-          ? "Retry download"
-          : state.phase === "installing"
-            ? "Installing…"
-            : downloadLabel(state);
+  const label = "Update available";
   const disabled = state.phase === "downloading" || state.phase === "installing";
 
   return (
