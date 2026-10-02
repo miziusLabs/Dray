@@ -221,6 +221,7 @@ pub async fn sign_out(app: &AppHandle) -> Result<()> {
         credentials.access_token.clear();
         credentials.id_token.clear();
         store(Some(&credentials))?;
+        crate::harness::dray::commands::invalidate_model_catalog();
         let revoked = async {
             let config: Value = http()?
                 .get(format!("{ISSUER}/.well-known/openid-configuration"))
@@ -389,6 +390,7 @@ pub async fn begin(app: AppHandle) -> Result<()> {
                     let credentials=Credentials { client_id,subject,email:claims["email"].as_str().map(str::to_string),id_token,access_token:tokens.access_token,refresh_token:tokens.refresh_token.context("Missing ChatGPT refresh token")?,scope,expires_at:now()+tokens.expires_in };
                     let _guard=LOCK.get_or_init(||Mutex::new(())).lock().await;
                     store(Some(&credentials))?;
+                    crate::harness::dray::commands::invalidate_model_catalog();
                     status()
                 }.await;
                 let body=if result.is_ok() { "Connected to ChatGPT. You can close this window and return to Dray." } else { "Sign-in failed. Return to Dray for details and try again." };
