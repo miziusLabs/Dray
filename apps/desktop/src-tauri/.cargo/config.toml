@@ -9,4 +9,7 @@ TS_RS_EXPORT_DIR = { value = "../src/types", relative = true }
 # resulting export table exceeds PE's 65,535-entry limit; the app has no public
 # DLL API, so do not auto-export implementation symbols.
 [target.x86_64-pc-windows-gnu]
-rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]
+# Native dependencies compile with the installed MinGW. Use its linker and CRT
+# too; mixing current pthread headers with Rust's bundled libraries fails.
+linker = "gcc"
+rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols", "-C", "link-self-contained=no"]

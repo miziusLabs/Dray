@@ -12,7 +12,7 @@ use std::{
 use tokio::sync::mpsc;
 
 pub const API: &str = "https://api.openai.com/v1";
-mod process_tree;
+mod process;
 pub mod skills;
 mod tools;
 

@@ -244,7 +244,7 @@ Use `DRAY_CLOUD_IMAGE` to override the Docker image tag. `GITHUB_TOKEN` or an au
 `packages/agent/src/lib.rs` owns the persistent request/tool loop, SSE parsing,
 queued follow-ups, interruption checkpoints, prompt caching, and compaction.
 `tools.rs` provides search, processes, questions, read-only research, and GitHub
-retrieval; `process_tree.rs` cleans up shell descendants. `skills.rs` discovers
+retrieval; `process.rs` cleans up shell descendants. `skills.rs` discovers
 standard SKILL.md files in global and applicable ancestor `.dray/skills`
 directories. The embedded `SYSTEM.md` is the supplied personal Pi system prompt;
 Pi itself and its authentication are no longer dependencies.

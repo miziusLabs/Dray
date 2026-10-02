@@ -228,7 +228,7 @@ struct Background {
     child: Child,
     stdin: Option<ChildStdin>,
     output: Arc<Mutex<Vec<u8>>>,
-    tree: Option<super::process_tree::ProcessTree>,
+    tree: Option<super::process::ProcessTree>,
 }
 static BACKGROUND: OnceLock<AsyncMutex<HashMap<String, Background>>> = OnceLock::new();
 fn registry() -> &'static AsyncMutex<HashMap<String, Background>> {
@@ -255,7 +255,7 @@ pub async fn foreground(command: &str, cwd: &Path) -> Result<String> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;
-    let _tree = super::process_tree::ProcessTree::attach(&child)?;
+    let _tree = super::process::ProcessTree::attach(&child)?;
     let output = Arc::new(Mutex::new(Vec::new()));
     let stdout = tokio::spawn(drain(
         child.stdout.take().context("missing stdout")?,
@@ -285,7 +285,7 @@ pub async fn background(args: &Value, cwd: &Path) -> Result<String> {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()?;
-        let tree = Some(super::process_tree::ProcessTree::attach(&child)?);
+        let tree = Some(super::process::ProcessTree::attach(&child)?);
         let output = Arc::new(Mutex::new(Vec::new()));
         tokio::spawn(drain(
             child.stdout.take().context("missing stdout")?,

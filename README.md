@@ -84,6 +84,10 @@ pnpm app           # desktop app (Tauri + Vite), with hot reload
 pnpm app:no-watch  # desktop app without frontend or backend auto-reload
 ```
 
+Windows GNU builds require MinGW with `gcc` and `windres`. The Tauri launcher
+finds Scoop's MinGW installation automatically; for direct Cargo commands,
+include MinGW's `bin` directory in your terminal's PATH.
+
 Commands beyond starting an app should be run from its own directory, because
 `tauri.conf.json`, `.cargo/config.toml`, and `scripts/install.ps1` resolve their
 paths against it:
