@@ -31,7 +31,7 @@ This file is the implementation map for agents working in this repository. Keep 
 - Prompt queuing while a turn is already running, with cancellation/restoration of a queued prompt when still retractable.
 - File attachments via picker or drag/drop, image previews, persistent archived result images, transcript thumbnails, and a keyboard-navigable image lightbox.
 - `@file` fuzzy search backed by a warmed Rust file index.
-- `/commands` and `$skills` discovered from `.dray/skills`, with search, source-aware grouping, aliases, and recent-command ranking.
+- `/commands` and `$skills` discovered from `.agents/skills`, with search, source-aware grouping, aliases, and recent-command ranking.
 - Context-window meter in the composer.
 - Per-session draft preservation and focus restoration.
 - Desktop notifications, in-app notices, dock/taskbar badge state, attention indicators, and notification/celebration sounds.
@@ -199,7 +199,7 @@ Files in `src-tauri/src/`:
 - `harness/dray/dray.rs` — native process/Docker transport, auth delivery, persistence, and snapshots.
 - `harness/dray/parser.rs` — native JSON-line event parsing.
 - `harness/dray/mapper.rs` — maps native runtime events into the normalized event model.
-- `harness/dray/commands.rs` — account model catalog and `.dray/skills` discovery.
+- `harness/dray/commands.rs` — account model catalog and `.agents/skills` discovery.
 - `account.rs` — loopback OAuth, PKCE, identity verification, serialized refresh, credential storage, cancellation, and revocation. `account/credential_store.rs` splits Windows credentials into bounded OS credential entries, publishing each complete generation through a manifest while retaining compatibility with older single-entry credentials.
 - `usage.rs` — account-wide Codex plan limits from `/backend-api/wham/usage`, following the official Codex client with backend-only ChatGPT OAuth credentials; exposes five-hour and weekly windows.
 
@@ -211,7 +211,7 @@ Cloud mode is local Docker isolation, not a hosted service. `src-tauri/src/sandb
 
 The image is defined by `apps/desktop/sandbox/Dockerfile` and launched through
 `sandbox-entrypoint.sh`. A Rust build stage creates `dray-agent`; the runtime
-includes Java 21, Java 25, Node.js 24, GitHub CLI, and Git. Host `~/.dray/skills`
+includes Java 21, Java 25, Node.js 24, GitHub CLI, and Git. Host `~/.agents/skills`
 is mounted read-only. History lives in the persistent workspace volume.
 OAuth credentials remain on the host; short-lived access tokens travel through
 stdin. GitHub credentials are exposed only to the container and converted to
@@ -226,7 +226,7 @@ queued follow-ups, interruption checkpoints, prompt caching, and compaction.
 and GitHub retrieval; file discovery and text searches use the terminal (including
 in the finder subagent), not dedicated find/grep tools. `process.rs` cleans up
 shell descendants. `skills.rs` discovers
-standard SKILL.md files in global and applicable ancestor `.dray/skills`
+standard SKILL.md files in global and applicable ancestor `.agents/skills`
 directories. The embedded `SYSTEM.md` is the supplied personal Pi system prompt;
 Pi itself and its authentication are no longer dependencies.
 

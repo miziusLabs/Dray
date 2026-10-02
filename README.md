@@ -33,7 +33,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 - Native file editing, search, shell and background commands, questions, codebase/GitHub research, and web search.
 - Automatic OpenAI prompt caching with recorded token and cache-hit indicators.
 - Rich chat transcripts with Markdown, syntax highlighting, reasoning, tool calls, file edits, diffs, images, and structured questions.
-- File/image attachments, drag and drop, `@file` fuzzy search, `/commands`, and `$skills` discovered from `.dray/skills`.
+- File/image attachments, drag and drop, `@file` fuzzy search, `/commands`, and `$skills` discovered from `.agents/skills`.
 - Git handoff actions for commit, push, and pull-request workflows.
 - GitHub pull request markers and ready-to-merge notifications through `gh`.
 - Themes, native window integration, keyboard shortcuts, sounds, notices, and safe quit handling while work is active.
@@ -45,8 +45,8 @@ Model and reasoning choices come from the account's OpenAI catalog. Credentials
 stay in the native backend and operating system credential store on Windows
 and macOS. Dray never imports Pi authentication.
 
-Skills live in `~/.dray/skills/<name>/SKILL.md` or a project's
-`.dray/skills/<name>/SKILL.md`. Use YAML frontmatter with `name` and `description`,
+Skills live in `~/.agents/skills/<name>/SKILL.md` or a project's
+`.agents/skills/<name>/SKILL.md`. Use YAML frontmatter with `name` and `description`,
 followed by the skill instructions. Select a skill in the composer or invoke it
 with `$name`. Project skills override global skills with the same name.
 
@@ -100,7 +100,7 @@ cd apps/desktop/src-tauri && cargo test
 
 Cloud Sessions run the standalone Dray agent in Docker without mounting or
 cloning the selected project. The image includes Java 21, Java 25, Node.js 24,
-GitHub CLI, Git, and Dray. Host `~/.dray/skills` is mounted read-only. Each
+GitHub CLI, Git, and Dray. Host `~/.agents/skills` is mounted read-only. Each
 workspace has its own persistent history. Short-lived OpenAI access tokens
 travel through stdin; credentials remain on the host. GitHub authentication
 uses `GITHUB_TOKEN` or an authenticated host `gh`.

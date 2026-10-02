@@ -134,7 +134,7 @@ pub async fn agent_command(
     agent_args: &[String],
 ) -> Result<Command> {
     let home = dirs::home_dir().context("could not resolve home directory")?;
-    let skills = home.join(".dray").join("skills");
+    let skills = home.join(".agents").join("skills");
     let volume = volume_name(cloud_name);
     let container = container_name(session_id);
 
@@ -161,7 +161,7 @@ pub async fn agent_command(
             .context("Skills directory is not valid UTF-8")?;
         command.args([
             "--mount",
-            &format!("type=bind,source={source},target=/home/agent/.dray/skills,readonly"),
+            &format!("type=bind,source={source},target=/home/agent/.agents/skills,readonly"),
         ]);
     }
 

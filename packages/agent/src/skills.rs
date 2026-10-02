@@ -36,12 +36,12 @@ pub fn discover(cwd: &Path) -> Vec<Skill> {
 
     let mut roots = Vec::new();
     if let Some(home) = dirs::home_dir() {
-        roots.push(home.join(".dray/skills"));
+        roots.push(home.join(".agents/skills"));
     }
     let mut ancestors: Vec<_> = cwd.ancestors().collect();
     ancestors.reverse();
     for dir in ancestors {
-        roots.push(dir.join(".dray/skills"));
+        roots.push(dir.join(".agents/skills"));
     }
     for root in roots {
         let Ok(entries) = std::fs::read_dir(root) else {
@@ -117,6 +117,38 @@ mod tests {
         assert_eq!(metadata("---\r\nname: review-code\r\ndescription: >-\r\n  Review changes\r\n  for bugs.\r\n---\r\nInstructions"),Some(("review-code".into(),"Review changes for bugs.".into())));
         assert!(metadata("---\nname: ../escape\ndescription: bad\n---\n").is_none());
         assert!(metadata("# Missing frontmatter").is_none());
+    }
+
+    #[test]
+    fn discovers_project_skills_from_agents_directory_not_dray() {
+        let root = std::env::temp_dir().join(format!("dray-skills-{}", uuid::Uuid::new_v4()));
+        let cwd = root.join("nested/project");
+        let new_name = format!("new-{}", uuid::Uuid::new_v4());
+        let old_name = format!("old-{}", uuid::Uuid::new_v4());
+        let new_skill_path = root
+            .join(".agents/skills")
+            .join(&new_name)
+            .join("SKILL.md");
+        let old_skill_path = root
+            .join(".dray/skills")
+            .join(&old_name)
+            .join("SKILL.md");
+
+        for (path, name) in [(&new_skill_path, &new_name), (&old_skill_path, &old_name)] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                path,
+                format!("---\nname: {name}\ndescription: Test skill.\n---\nInstructions."),
+            )
+            .unwrap();
+        }
+
+        let skills = discover(&cwd);
+        let discovered = skills.iter().find(|skill| skill.name == new_name).unwrap();
+        assert_eq!(discovered.path.as_deref(), Some(new_skill_path.as_path()));
+        assert!(!skills.iter().any(|skill| skill.name == old_name));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
