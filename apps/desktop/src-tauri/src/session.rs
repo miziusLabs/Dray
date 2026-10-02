@@ -741,7 +741,33 @@ impl SessionManager {
         // `kill` marks the stdout reader before terminating the child, so data
         // already buffered in the pipe cannot publish a late in-progress or
         // completed status after this stop has been acknowledged.
+        let stopped_at = now_rfc3339();
+        let events = session.events.clone();
+        let seq = session.seq.clone();
+        let cwd = session.cwd.clone();
+        let cloud = session.cloud;
         session.kill().await?;
+
+        // Stop bypasses the runtime's settled event. Close the turn ourselves
+        // so its elapsed time survives transcript reloads. Use the stop time,
+        // not the time spent terminating the process or taking the snapshot.
+        let event = {
+            let events = events.lock().await;
+            interrupted_turn(&events, &stopped_at, &seq)
+        };
+        if let Some(mut event) = event {
+            if let AgentEventPayload::TurnCompleted { head, .. } = &mut event.payload {
+                if !cloud {
+                    *head = git::snapshot_tree(&cwd).await;
+                }
+            }
+            if let Err(error) = append_session_event(session_id, event.clone()).await {
+                eprintln!("[stop write err] {error}");
+            }
+            if let Err(error) = app.emit("agent_event", &event) {
+                eprintln!("[stop emit err] {error}");
+            }
+        }
         publish_status(session_id, SessionStatus::Idle, app).await;
         drop(sessions_guard);
         Ok(())
@@ -830,6 +856,54 @@ impl SessionManager {
             _ => Ok(None),
         }
     }
+}
+
+/// Closes only an unfinished prompted turn. Queued prompts belong to the
+/// existing turn and must not reset its start time.
+fn interrupted_turn(
+    events: &[AgentEvent],
+    stopped_at: &str,
+    seq: &AtomicU64,
+) -> Option<AgentEvent> {
+    let start = events
+        .iter()
+        .rposition(|event| matches!(event.payload, AgentEventPayload::TurnCompleted { .. }))
+        .map_or(0, |index| index + 1);
+    let pending = &events[start..];
+    let boundary = pending
+        .iter()
+        .rev()
+        .find(|event| {
+            matches!(
+                event.payload,
+                AgentEventPayload::UserMessage { queued: false, .. }
+            )
+        })
+        // A queued prompt flushed after completion starts a new turn.
+        .or_else(|| {
+            pending
+                .iter()
+                .find(|event| matches!(event.payload, AgentEventPayload::UserMessage { .. }))
+        })?;
+
+    Some(AgentEvent {
+        id: Uuid::now_v7().to_string(),
+        session_id: boundary.session_id.clone(),
+        harness: boundary.harness,
+        seq: seq.fetch_add(1, Relaxed),
+        // The UI derives elapsed time from the prompt and completion timestamps.
+        ts: stopped_at.to_string(),
+        turn_id: None,
+        payload: AgentEventPayload::TurnCompleted {
+            status: crate::events::TurnStatus::Error,
+            stop_reason: Some("aborted".to_string()),
+            final_text: None,
+            usage: None,
+            duration_ms: None,
+            head: None,
+        },
+        raw: None,
+    })
 }
 
 /// Owns a Windows job containing the Dray process and all of its descendants.
@@ -1417,6 +1491,66 @@ mod tests {
             duration_ms: None,
             head: None,
         }
+    }
+
+    fn prompt_event(ts: &str, queued: bool) -> AgentEvent {
+        AgentEvent {
+            id: Uuid::now_v7().to_string(),
+            session_id: "test-session".to_string(),
+            harness: Dray,
+            seq: 0,
+            ts: ts.to_string(),
+            turn_id: None,
+            payload: AgentEventPayload::UserMessage {
+                text: "work".to_string(),
+                images: Vec::new(),
+                baseline: None,
+                queued,
+                from: None,
+            },
+            raw: None,
+        }
+    }
+
+    #[test]
+    fn interrupted_turn_preserves_elapsed_time_from_original_prompt() {
+        let events = vec![
+            prompt_event("2026-01-01T12:00:00Z", false),
+            prompt_event("2026-01-01T12:01:00Z", true),
+        ];
+        let seq = AtomicU64::new(2);
+        let event = interrupted_turn(&events, "2026-01-01T12:01:26Z", &seq).unwrap();
+        assert_eq!(event.ts, "2026-01-01T12:01:26Z");
+        assert_eq!(event.seq, 2);
+        assert!(matches!(
+            event.payload,
+            AgentEventPayload::TurnCompleted {
+                status: crate::events::TurnStatus::Error,
+                stop_reason: Some(ref reason),
+                ..
+            } if reason == "aborted"
+        ));
+
+        // Replay retains the end timestamp used by the UI's elapsed timer.
+        let saved = serde_json::to_string(&event).unwrap();
+        let replayed: AgentEvent = serde_json::from_str(&saved).unwrap();
+        assert_eq!(replayed.ts, event.ts);
+    }
+
+    #[test]
+    fn interrupted_turn_does_not_close_an_already_completed_turn() {
+        let seq = AtomicU64::new(2);
+        assert!(interrupted_turn(&[], "2026-01-01T12:01:26Z", &seq).is_none());
+        let prompt = prompt_event("2026-01-01T12:00:00Z", false);
+        let mut completed = prompt.clone();
+        completed.payload = turn_completed();
+        let mut events = vec![prompt, completed];
+        assert!(interrupted_turn(&events, "2026-01-01T12:01:26Z", &seq).is_none());
+        assert_eq!(seq.load(Relaxed), 2);
+
+        events.push(prompt_event("2026-01-01T12:01:20Z", false));
+        let event = interrupted_turn(&events, "2026-01-01T12:01:26Z", &seq).unwrap();
+        assert_eq!(event.ts, "2026-01-01T12:01:26Z");
     }
 
     /// Only a finished-and-unread session clears on read; selecting a running
