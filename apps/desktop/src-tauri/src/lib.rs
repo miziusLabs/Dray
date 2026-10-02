@@ -105,6 +105,7 @@ async fn send_msg(
     use_cloud: bool,
     cloud_name: Option<&str>,
     is_new_session: bool,
+    queue_after_turn: bool,
     app: AppHandle,
     manager: State<'_, SessionManager>,
 ) -> Result<SendOutcome, String> {
@@ -133,6 +134,7 @@ async fn send_msg(
             // recorded and used as the cloud's starting point.
             None,
             is_new_session,
+            queue_after_turn,
             // The composer has no parent session, and its prompts are the
             // user's own.
             None,

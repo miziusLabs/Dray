@@ -334,6 +334,7 @@ const mirrorSessionModel = (
 const handleSendMsg = async (
   message: string,
   attachmentPaths: string[] = [],
+  queueAfterTurn = false,
 ) => {
 
   let sessionId = selectedSessionId;
@@ -395,6 +396,7 @@ const handleSendMsg = async (
       useCloud: isNewSession && cloudEnabled,
       cloudName: null,
       isNewSession,
+      queueAfterTurn,
     });
 
     // A turn was already running, so the prompt is held rather than sent. It
@@ -878,19 +880,18 @@ useEffect(() => {
             ),
             );
 
-            // A held prompt reached the CLI, so the pending row it was drawn as
-            // gives way to the real one now in the transcript. Matched by
-            // position rather than by id — the flush delivers oldest-first and
-            // the event carries the event's own id, not the queue entry's — so
-            // dropping the head is exact.
-            if (
-              agentEvent.payload.type === "user_message" &&
-              agentEvent.payload.queued
-            ) {
+            // A pending prompt reached the CLI, so its row gives way to the
+            // delivered `user_message`. The queue id is reused for this event
+            // whether it steers the active turn or starts a follow-up turn, and
+            // matching by id preserves older follow-ups still waiting in line.
+            if (agentEvent.payload.type === "user_message") {
               setQueuedBySession((prev) => {
                 const cur = prev[agentEvent.sessionId];
-                if (!cur?.length) return prev;
-                return { ...prev, [agentEvent.sessionId]: cur.slice(1) };
+                if (!cur?.some((message) => message.id === agentEvent.id)) return prev;
+                return {
+                  ...prev,
+                  [agentEvent.sessionId]: cur.filter((message) => message.id !== agentEvent.id),
+                };
               });
             }
 

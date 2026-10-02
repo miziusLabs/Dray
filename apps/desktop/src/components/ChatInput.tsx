@@ -15,6 +15,7 @@ import {
   modelLabel,
 } from "@/components/composer/ModelSelector";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import {
   addAttachmentPaths,
@@ -58,7 +59,7 @@ type ChatInputProps = {
   /// `attachmentPaths` is what the tray held, as absolute paths. The backend
   /// re-reads each one — nothing but paths crosses the bridge, so a pinned
   /// screenshot is never uploaded twice.
-  onSend: (message: string, attachmentPaths: string[]) => void;
+  onSend: (message: string, attachmentPaths: string[], queueAfterTurn?: boolean) => void;
   /// Dray-provided skills for the `$` picker. Empty until the backend's probe
   /// lands, and empty forever if it failed — Dray commands remain available and
   /// text typed by hand still works.
@@ -80,8 +81,8 @@ type ChatInputProps = {
   /// this path; legacy stashes without a project are intentionally not migrated.
   projectPath?: string | null;
   /// Interrupts the running turn. Reachable while `busy` and the box is empty —
-  /// with something typed the same button sends, since a prompt written during a
-  /// turn is queued onto it rather than refused.
+  /// with something typed Enter steers the active turn, while Ctrl+Enter queues
+  /// a follow-up for after it completes.
   onStop?: () => void;
   /// Takes back the newest prompt still waiting on the CLI, resolving to it so
   /// its text can go back in the box. `null` when the flush got there first.
@@ -594,8 +595,7 @@ export default function ChatInput({
     };
   }, [sessionId, archived]);
 
-  // `busy` no longer gates this: a prompt typed into a running turn is queued
-  // rather than refused, and the CLI folds it into that turn on its own.
+  // Enter steers the active turn; Ctrl+Enter queues a separate follow-up.
   const canSend = message.trim().length > 0 || attachments.length > 0;
 
   const runInternalCommand = (text: string): boolean => {
@@ -636,7 +636,7 @@ export default function ChatInput({
     return false;
   };
 
-  const submit = () => {
+  const submit = (queueAfterTurn = false) => {
     const trimmed = message.trim();
     // An attachment on its own is a real prompt — dropping a screenshot and
     // pressing Enter is asking about the screenshot.
@@ -653,6 +653,7 @@ export default function ChatInput({
     onSend(
       trimmed,
       attachments.map((a) => a.path),
+      queueAfterTurn,
     );
     setMessage("");
     clearAttachments(sessionId);
@@ -985,6 +986,19 @@ export default function ChatInput({
                   // Whichever picker is open owns these keys, and only while it
                   // is — Enter completes the highlighted row instead of sending,
                   // which is the one place the composer's usual rule gives way.
+                  if (
+                    e.key === "Enter" &&
+                    e.ctrlKey &&
+                    !e.metaKey &&
+                    !e.altKey &&
+                    !e.shiftKey &&
+                    !e.nativeEvent.isComposing
+                  ) {
+                    e.preventDefault();
+                    submit(busy);
+                    return;
+                  }
+
                   if (menuOpen && !e.nativeEvent.isComposing) {
                     if (e.key === "ArrowDown") {
                       e.preventDefault();
@@ -1078,36 +1092,64 @@ export default function ChatInput({
               )}
             </div>
 
-            {/* One button, two jobs, and what is typed decides which. Stopping
-                is what an empty composer during a turn is for; with text in it
-                the prompt is queued onto the running turn instead, so Send has
-                to stay reachable — refusing it is the behaviour this replaced.
-                `type="button"` on Stop so pressing it can't also submit.
-
-                Enter-to-send lives in `onKeyDown`, not in this button being the
-                form's submitter, so the empty state can drop it for the in-card
-                hint without losing the keyboard path. Neither `busy` nor a
-                queue is reachable there — nothing runs before a session
-                exists. */}
+            {/* Stop when the composer is empty during a turn; with text, Enter
+                steers the active turn and Ctrl+Enter queues a separate follow-up.
+                Stop is a button rather than a form submitter, so it cannot also
+                send the draft. */}
             {!isNewTask &&
               (() => {
                 const stopping = busy && !canSend;
 
                 return (
-                  <Button
-                    type={stopping ? "button" : "submit"}
-                    size="icon-sm"
-                    disabled={stopping ? !onStop : !canSend}
-                    onClick={stopping ? onStop : undefined}
-                    title={stopping ? "Stop" : busy ? "Send — queued onto this turn" : "Send"}
-                    className="rounded-full"
-                  >
-                    {stopping ? (
-                      <Square className="fill-current" />
-                    ) : (
-                      <ArrowUp strokeWidth={2} />
-                    )}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type={stopping ? "button" : "submit"}
+                        size="icon-sm"
+                        aria-label={stopping ? "Stop" : "Send"}
+                        disabled={stopping ? !onStop : !canSend}
+                        onClick={stopping ? onStop : undefined}
+                        className="rounded-full"
+                      >
+                        {stopping ? (
+                          <Square className="fill-current" />
+                        ) : (
+                          <ArrowUp strokeWidth={2} />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      className={cn(
+                        "max-w-none whitespace-nowrap",
+                        busy && canSend && "flex-col items-start gap-1.5",
+                      )}
+                    >
+                      {stopping ? (
+                        "Stop"
+                      ) : busy ? (
+                        <>
+                          <span className="flex items-center gap-1.5">
+                            <Kbd>Enter</Kbd>
+                            <span>to steer</span>
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <KbdGroup>
+                              <Kbd>Ctrl</Kbd>
+                              <span>+</span>
+                              <Kbd>Enter</Kbd>
+                            </KbdGroup>
+                            <span>to queue</span>
+                          </span>
+                        </>
+                      ) : (
+                        <span className="flex items-center gap-1.5">
+                          <Kbd>Enter</Kbd>
+                          <span>to send</span>
+                        </span>
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
                 );
               })()}
           </div>

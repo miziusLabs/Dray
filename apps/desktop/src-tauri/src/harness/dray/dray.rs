@@ -381,6 +381,10 @@ async fn read_stdout(
                 &agent_event.payload,
                 AgentEventPayload::TurnCompleted { .. }
             );
+            let turn_baseline = match &agent_event.payload {
+                AgentEventPayload::TurnCompleted { head, .. } => head.clone(),
+                _ => None,
+            };
 
             events.lock().await.push(agent_event.clone());
             if let Err(error) = append_session_event(session_id, agent_event).await {
@@ -400,6 +404,8 @@ async fn read_stdout(
                     &flush_events,
                     &flush_stdin,
                     &status,
+                    turn_completed,
+                    turn_baseline,
                     app,
                 )
                 .await;

@@ -129,9 +129,18 @@ pub struct QueuedMessage {
     pub from: Option<MessageSender>,
 }
 
-/// Held prompts, oldest first. Shared with the stdout task, which is where the
-/// boundary that flushes them is seen.
-pub type QueuedMessages = Arc<Mutex<Vec<QueuedMessage>>>;
+/// A prompt waiting for either an active-turn steering boundary or the end of
+/// the current turn. This mode stays internal; the frontend only needs the
+/// cancelable prompt itself.
+#[derive(Debug, Clone)]
+pub struct PendingPrompt {
+    message: QueuedMessage,
+    after_turn: bool,
+}
+
+/// Held prompts, oldest first. Shared with the stdout task, which sees when
+/// active-turn prompts can be steered and when a turn has completed.
+pub type QueuedMessages = Arc<Mutex<Vec<PendingPrompt>>>;
 
 /// What a send did. The two fields are mutually exclusive in practice — a
 /// session being created cannot already be running a turn — but they answer
@@ -347,6 +356,7 @@ impl SessionManager {
         // here; Cloud itself does not resolve or validate Git refs.
         base_ref: Option<&str>,
         is_new_session: bool,
+        queue_after_turn: bool,
         // Recorded rather than acted on — the depth cap reads it back off the
         // index on the *next* create.
         parent_session_id: Option<&str>,
@@ -506,25 +516,6 @@ impl SessionManager {
 
         let mut sessions_guard = self.sessions.lock().await;
 
-        // Decided here rather than by the caller: the frontend's own `busy` is
-        // optimistic, and this is the only reading taken on the same lock the
-        // write goes out under.
-        // Three readings, not one, because the questions below differ: whether
-        // anything is working at all decides that the child must not be
-        // replaced, while only an open model call means this prompt has a turn
-        // to be folded into.
-        let (_busy, turn_in_flight, tool_in_flight) = match sessions_guard.get(session_id) {
-            Some(s) => {
-                let tracker = s.status.lock().await;
-                (
-                    tracker.is_busy(),
-                    tracker.turn_in_flight(),
-                    tracker.tool_in_flight(),
-                )
-            }
-            None => (false, false, false),
-        };
-
         // The caller's `cwd` is a hint for a new session only. From here on the
         // recorded one wins: with a project picker the two can disagree, and
         // resuming in the wrong directory is both silent and destructive. It is
@@ -542,6 +533,22 @@ impl SessionManager {
             // the child fails — the prompt event is persisted ahead of stdin too.
             touch_session_index_item(session_id, model, model_spec.agent_model.as_ref(), effort)
                 .await?;
+
+            // Re-read after the index write: a turn may finish while that disk
+            // operation is in flight. Hold the status lock through queueing a
+            // Ctrl+Enter prompt so the completion flush cannot pass it first.
+            let (turn_in_flight, tool_in_flight) = {
+                let tracker = s.status.lock().await;
+                let turn_in_flight = tracker.turn_in_flight();
+                if turn_in_flight && queue_after_turn {
+                    let queued = s.queue_msg(prompt, attachment_paths, from, true).await;
+                    return Ok(SendOutcome {
+                        snapshot: None,
+                        queued: Some(queued),
+                    });
+                }
+                (turn_in_flight, tracker.tool_in_flight())
+            };
 
             // A model call is open, so this prompt is held rather than sent.
             //
@@ -561,12 +568,14 @@ impl SessionManager {
                 // The cost is that there is no window to cancel in — which the
                 // UI states by itself, since a prompt written straight through
                 // draws no pending row and so offers no Esc.
-                if tool_in_flight {
+                if tool_in_flight && !queue_after_turn {
                     s.queue_and_flush(prompt, attachment_paths, from, app).await;
                     return Ok(SendOutcome::default());
                 }
 
-                let queued = s.queue_msg(prompt, attachment_paths, from).await;
+                let queued = s
+                    .queue_msg(prompt, attachment_paths, from, false)
+                    .await;
                 return Ok(SendOutcome {
                     snapshot: None,
                     queued: Some(queued),
@@ -1049,6 +1058,7 @@ impl Session {
             attachment_paths,
             baseline,
             false,
+            None,
             from,
             &self.seq,
             &self.events,
@@ -1072,6 +1082,7 @@ impl Session {
         prompt: &str,
         attachment_paths: &[String],
         from: Option<MessageSender>,
+        after_turn: bool,
     ) -> QueuedMessage {
         let message = QueuedMessage {
             id: Uuid::now_v7().to_string(),
@@ -1080,7 +1091,10 @@ impl Session {
             attachment_paths: attachment_paths.to_vec(),
             from,
         };
-        self.queued.lock().await.push(message.clone());
+        self.queued.lock().await.push(PendingPrompt {
+            message: message.clone(),
+            after_turn,
+        });
         message
     }
 
@@ -1091,7 +1105,7 @@ impl Session {
     /// leaving the composer alone: the prompt is on its way and the frontend
     /// learns so from the `user_message` that follows.
     pub async fn cancel_queued(&self) -> Option<QueuedMessage> {
-        self.queued.lock().await.pop()
+        self.queued.lock().await.pop().map(|pending| pending.message)
     }
 
     /// Holds a prompt and immediately hands it over, for the case where a tool
@@ -1106,7 +1120,7 @@ impl Session {
         from: Option<MessageSender>,
         app: &AppHandle,
     ) {
-        self.queue_msg(prompt, attachment_paths, from).await;
+        self.queue_msg(prompt, attachment_paths, from, false).await;
         flush_queued(
             &self.id,
             self.harness,
@@ -1115,6 +1129,8 @@ impl Session {
             &self.events,
             &self.stdin,
             &self.status,
+            false,
+            None,
             app,
         )
         .await;
@@ -1290,6 +1306,7 @@ async fn deliver_prompt(
     attachment_paths: &[String],
     baseline: Option<String>,
     queued: bool,
+    event_id: Option<&str>,
     from: Option<MessageSender>,
     seq: &Arc<AtomicU64>,
     events: &Arc<Mutex<Vec<AgentEvent>>>,
@@ -1319,7 +1336,9 @@ async fn deliver_prompt(
         from,
     };
     let agent_event = AgentEvent {
-        id: Uuid::now_v7().to_string(),
+        id: event_id
+            .map(str::to_string)
+            .unwrap_or_else(|| Uuid::now_v7().to_string()),
         session_id: session_id.to_string(),
         harness,
         seq,
@@ -1356,9 +1375,8 @@ async fn deliver_prompt(
             .collect::<Vec<_>>());
     }
     if queued {
-        // Dray requires a delivery mode when a prompt arrives while its agent
-        // loop is active. Dray's queued prompts are steering messages, so they
-        // are delivered at the next tool boundary.
+        // Steering prompts use the next tool boundary. A queued follow-up waits
+        // for the current turn and starts a new one without this mode.
         line["streamingBehavior"] = json!("steer");
     }
     let token = crate::account::access_token().await?;
@@ -1377,18 +1395,39 @@ fn normalize_skill_prompt(prompt: &str) -> String {
     format!("/skill:{}{}", &rest[..split], &rest[split..])
 }
 
-/// Hands every held prompt to the child, oldest first.
-///
-/// Called from the stdout loop on a tool call starting or finishing, or on the
-/// turn ending. Those are the points where writing costs nothing: the CLI
-/// buffers a mid-turn prompt and injects it at its *next* tool result, so a
-/// prompt written while a tool runs lands on that tool's result rather than
-/// waiting for the one after — and a turn that never calls a tool would not
-/// have absorbed it at all, so flushing at the end just starts the new turn the
-/// CLI would have started anyway.
-///
-/// Verified against the CLI: nothing is written back to say a prompt was
-/// absorbed, so the boundary is the app's only handle on when to let go of one.
+/// Takes prompts that are ready at this boundary, preserving follow-ups until
+/// the active turn completes. Enter-submitted prompts are steered into the live
+/// turn; Ctrl+Enter prompts start one new turn at a time after it.
+fn take_ready_prompts(queue: &mut Vec<PendingPrompt>, turn_completed: bool) -> Vec<PendingPrompt> {
+    let mut steering = Vec::new();
+    let mut after_turn = Vec::new();
+
+    for pending in queue.drain(..) {
+        if pending.after_turn {
+            after_turn.push(pending);
+        } else {
+            steering.push(pending);
+        }
+    }
+
+    if !steering.is_empty() {
+        *queue = after_turn;
+        return steering;
+    }
+
+    if turn_completed && !after_turn.is_empty() {
+        let first = after_turn.remove(0);
+        *queue = after_turn;
+        return vec![first];
+    }
+
+    *queue = after_turn;
+    Vec::new()
+}
+
+/// Hands ready prompts to the child at a safe boundary. A turn completion can
+/// release only one queued follow-up, so each accepted follow-up becomes its
+/// own turn and later ones remain cancelable until that turn also completes.
 ///
 /// Failures are logged, not propagated — the stdout loop must survive anything,
 /// and a prompt that cannot be written is one the user can retype.
@@ -1400,30 +1439,32 @@ pub async fn flush_queued(
     events: &Arc<Mutex<Vec<AgentEvent>>>,
     stdin: &Arc<Mutex<ChildStdin>>,
     status: &Arc<Mutex<StatusTracker>>,
+    turn_completed: bool,
+    turn_baseline: Option<String>,
     app: &AppHandle,
 ) {
-    // Drained under one lock so a cancel arriving mid-flush either takes a
-    // message back before any of this or finds nothing — never races a
-    // half-written batch.
-    let batch: Vec<QueuedMessage> = std::mem::take(&mut *queued.lock().await);
+    // Select and remove under one lock so cancellation either takes a prompt
+    // back before this flush or finds that it has already reached the child.
+    let batch = {
+        let mut pending = queued.lock().await;
+        take_ready_prompts(&mut pending, turn_completed)
+    };
 
     if batch.is_empty() {
         return;
     }
 
-    for message in batch {
-        // No baseline, and this is the load-bearing half of the queued case:
-        // the changes panel pairs the newest baseline with the newest head
-        // after it, so a snapshot taken here would cut the running turn's
-        // range in two and credit it with only the work that came after this
-        // prompt. `None` makes `changeRange` walk past it to the real prompt.
+    for pending in batch {
+        let after_turn = pending.after_turn;
+        let message = pending.message;
         if let Err(err) = deliver_prompt(
             session_id,
             harness,
             &message.text,
             &message.attachment_paths,
-            None,
-            true,
+            if after_turn { turn_baseline.clone() } else { None },
+            !after_turn,
+            Some(&message.id),
             message.from,
             seq,
             events,
@@ -1450,6 +1491,44 @@ pub async fn flush_queued(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_policy_steers_at_boundaries_and_releases_follow_ups_one_at_a_time() {
+        let pending_prompt = |text: &str, after_turn: bool| PendingPrompt {
+            message: QueuedMessage {
+                id: text.to_string(),
+                session_id: "test-session".to_string(),
+                text: text.to_string(),
+                attachment_paths: Vec::new(),
+                from: None,
+            },
+            after_turn,
+        };
+        let mut pending = vec![
+            pending_prompt("follow-up 1", true),
+            pending_prompt("steer", false),
+            pending_prompt("follow-up 2", true),
+        ];
+
+        let steering = take_ready_prompts(&mut pending, false);
+        assert_eq!(
+            steering
+                .iter()
+                .map(|prompt| prompt.message.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["steer"]
+        );
+        assert_eq!(pending.len(), 2);
+        assert!(take_ready_prompts(&mut pending, false).is_empty());
+
+        let first_follow_up = take_ready_prompts(&mut pending, true);
+        assert_eq!(first_follow_up[0].message.text, "follow-up 1");
+        assert_eq!(pending.len(), 1);
+
+        let second_follow_up = take_ready_prompts(&mut pending, true);
+        assert_eq!(second_follow_up[0].message.text, "follow-up 2");
+        assert!(pending.is_empty());
+    }
 
     #[test]
     fn normalizes_skill_prompts_for_pi() {
