@@ -1,10 +1,16 @@
-import { Archive, CircleAlert, CircleDollarSign, TriangleAlert } from "lucide-react";
+import { useState } from "react";
+import { Archive, ChevronRight, CircleAlert, CircleDollarSign, TriangleAlert } from "lucide-react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import Reasoning from "@/components/chat/Reasoning";
 import ToolCall from "@/components/chat/ToolCall";
 import UserMessage from "@/components/chat/UserMessage";
 import FileEdits from "@/components/chat/FileEdits";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { compactTokens, resetTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { AgentEvent, ToolResult } from "@/types/events";
@@ -41,6 +47,50 @@ function Notice({
   );
 }
 
+function TurnFailure({
+  stopReason,
+  details,
+}: {
+  stopReason: string | null;
+  details: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const hasDetails = Boolean(details?.trim());
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      disabled={!hasDetails}
+      className="flex flex-col gap-1.5"
+    >
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="flex w-fit items-center gap-2 text-left text-chat text-destructive"
+        >
+          <TriangleAlert className="size-3.5 shrink-0" />
+          <span>Turn failed{stopReason ? ` — ${stopReason}` : ""}</span>
+          <ChevronRight
+            className={cn(
+              "size-4 shrink-0 transition-transform",
+              open && "rotate-90",
+              !hasDetails && "invisible",
+            )}
+          />
+        </button>
+      </CollapsibleTrigger>
+      {details && (
+        <CollapsibleContent className="collapsible-smooth">
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap wrap-anywhere rounded-md bg-surface-raised px-3 py-2 font-mono text-tool text-muted-foreground">
+            {details}
+          </pre>
+        </CollapsibleContent>
+      )}
+    </Collapsible>
+  );
+}
+
 /// The one place event payloads become UI. Every variant is handled; the default
 /// arm exists for a payload kind from a newer backend than this build.
 export default function EventRow({
@@ -49,6 +99,7 @@ export default function EventRow({
   openTool = false,
   onOpenSession,
   cwd = null,
+  failureDetails = null,
 }: {
   event: AgentEvent;
   /// Results keyed by call id, so a started call renders its own outcome without
@@ -60,6 +111,8 @@ export default function EventRow({
   /// and only one that carries a sender.
   onOpenSession?: (sessionId: string) => void;
   cwd?: string | null;
+  /// Full assistant error response associated with a failed turn.
+  failureDetails?: string | null;
 }) {
   const { payload } = event;
 
@@ -129,11 +182,7 @@ export default function EventRow({
       // mid-response, `aborted_tools` mid-call), but the user did it on
       // purpose — reporting their own stop back as a failure is noise.
       if (payload.stopReason?.startsWith("aborted")) return null;
-      return (
-        <Notice icon={TriangleAlert} tone="destructive">
-          Turn failed{payload.stopReason ? ` — ${payload.stopReason}` : ""}
-        </Notice>
-      );
+      return <TurnFailure stopReason={payload.stopReason} details={failureDetails} />;
 
     case "rate_limited": {
       // Only actionable reports reach here — the mapper drops the healthy ones

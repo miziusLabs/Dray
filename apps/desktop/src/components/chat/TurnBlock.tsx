@@ -89,6 +89,10 @@ export default function TurnBlock({
 }: TurnBlockProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const running = live && turn.completed === null;
+  const reportableFailure =
+    turn.completed?.payload.type === "turn_completed" &&
+    turn.completed.payload.status === "error" &&
+    !turn.completed.payload.stopReason?.startsWith("aborted");
   const open = running || detailsOpen;
   const duration = useTurnDuration(turn, running);
 
@@ -153,10 +157,15 @@ export default function TurnBlock({
         </Collapsible>
       )}
 
-      {turn.finalText && <AssistantMessage text={turn.finalText} cwd={cwd} />}
+      {turn.finalText && !reportableFailure && <AssistantMessage text={turn.finalText} cwd={cwd} />}
 
       {turn.completed && (
-        <EventRow event={turn.completed} resultByCallId={resultByCallId} cwd={cwd} />
+        <EventRow
+          event={turn.completed}
+          resultByCallId={resultByCallId}
+          cwd={cwd}
+          failureDetails={reportableFailure ? turn.finalText : null}
+        />
       )}
     </div>
   );
