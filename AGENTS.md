@@ -65,7 +65,7 @@ Top-level components in `src/components/`:
 - `ChangesPanel.tsx` — right-panel view of changes made by the selected turn.
 - `PrPanel.tsx` — pull request details, checks, comments/reviews, GitHub links, draft/ready/reopen/merge controls, and merge-method selection.
 - `PrStateIcon.tsx` — compact pull request state iconography.
-- `SettingsDialog.tsx` — settled-session toggle, model-cycle configuration, and title-generation model configuration.
+- `SettingsDialog.tsx` — General, Account, Models, and Updates tabs; account connection controls and profile picture, settled-session toggle, model-cycle configuration, and title-generation model configuration.
 - `NoticeStack.tsx` — transient in-app notices.
 - `UpdateNotice.tsx` — startup update check, background download progress, retry, and install/restart action.
 - `QuitDialog.tsx` — quit confirmation for active work.

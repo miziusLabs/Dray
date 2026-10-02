@@ -38,20 +38,22 @@ import type { UpdateCheckResult } from "@/components/UpdateNotice";
 ///
 /// Mounted in `App` rather than beside the gear that opens it so the dialog's
 /// lifecycle stays independent from the sidebar controls.
-const SETTINGS_CATEGORIES = ["general", "models", "updates"] as const;
+const SETTINGS_CATEGORIES = ["general", "account", "models", "updates"] as const;
 
 type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
 const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
   general: "General",
+  account: "Account",
   models: "Models",
   updates: "Updates",
 };
 
 const SETTINGS_CATEGORY_INDEX: Record<SettingsCategory, number> = {
   general: 0,
-  models: 1,
-  updates: 2,
+  account: 1,
+  models: 2,
+  updates: 3,
 };
 
 export default function SettingsDialog({
@@ -123,7 +125,7 @@ export default function SettingsDialog({
         </DialogHeader>
 
         <div
-          className="relative grid grid-cols-3 rounded-lg bg-muted p-0.5"
+          className="relative grid grid-cols-4 rounded-lg bg-muted p-0.5"
           role="tablist"
           aria-label="Settings categories"
         >
@@ -131,7 +133,7 @@ export default function SettingsDialog({
             aria-hidden
             className="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-md bg-popover shadow-sm transition-transform duration-200 ease-out"
             style={{
-              width: "calc((100% - 0.25rem) / 3)",
+              width: `calc((100% - 0.25rem) / ${SETTINGS_CATEGORIES.length})`,
               transform: `translateX(${SETTINGS_CATEGORY_INDEX[category] * 100}%)`,
             }}
           />
@@ -193,7 +195,6 @@ export default function SettingsDialog({
             aria-hidden={category !== "models"}
             inert={category !== "models"}
           >
-            <ChatGptAccount />
             <ModelSelectionRow
               models={models}
               selectedKeys={visibleModelKeys}
@@ -228,6 +229,16 @@ export default function SettingsDialog({
               effort={titleEffort}
               onChange={onTitleModelChange}
             />
+          </div>
+          <div
+            className={[
+              "col-start-1 row-start-1 flex flex-col gap-6",
+              category !== "account" && "invisible pointer-events-none",
+            ].filter(Boolean).join(" ")}
+            aria-hidden={category !== "account"}
+            inert={category !== "account"}
+          >
+            <ChatGptAccount />
           </div>
           <div
             className={[

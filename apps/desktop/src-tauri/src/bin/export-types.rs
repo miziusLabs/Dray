@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if output.exists() {
         std::fs::remove_file(output)?;
     }
+    ade_lib::account::AccountStatus::export_all(&cfg)?;
     ade_lib::attachments::Attachment::export_all(&cfg)?;
     ade_lib::events::AgentEvent::export_all(&cfg)?;
     ade_lib::events::AgentEventPayload::export_all(&cfg)?;

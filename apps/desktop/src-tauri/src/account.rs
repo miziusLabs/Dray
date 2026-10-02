@@ -47,11 +47,13 @@ struct Tokens {
     scope: Option<String>,
     expires_in: u64,
 }
-#[derive(Serialize, Clone, Default)]
+#[derive(Serialize, Clone, Default, ts_rs::TS)]
+#[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct AccountStatus {
     pub signed_in: bool,
     pub email: Option<String>,
+    pub picture: Option<String>,
     pub error: Option<String>,
 }
 
@@ -147,11 +149,22 @@ pub fn status() -> Result<AccountStatus> {
     Ok(match load()? {
         Some(c) if !c.access_token.is_empty() => AccountStatus {
             signed_in: true,
+            picture: profile_picture(&c.id_token),
             email: c.email,
             error: None,
         },
         _ => AccountStatus::default(),
     })
+}
+
+// The stored identity token was verified during sign-in. Only extract display
+// metadata here; this must never be used to authorize requests.
+fn profile_picture(id_token: &str) -> Option<String> {
+    let payload = URL_SAFE_NO_PAD.decode(id_token.split('.').nth(1)?).ok()?;
+    let claims: Value = serde_json::from_slice(&payload).ok()?;
+    let picture = claims["picture"].as_str()?;
+    let url = reqwest::Url::parse(picture).ok()?;
+    (url.scheme() == "https").then(|| picture.to_owned())
 }
 
 pub async fn access_token() -> Result<String> {
@@ -408,6 +421,32 @@ pub async fn begin(app: AppHandle) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn profile_picture_reads_only_https_display_metadata() {
+        let token = |claims: Value| {
+            format!(
+                "header.{}.signature",
+                URL_SAFE_NO_PAD.encode(claims.to_string())
+            )
+        };
+        assert_eq!(
+            profile_picture(&token(serde_json::json!({
+                "picture": "https://example.com/avatar.png"
+            }))),
+            Some("https://example.com/avatar.png".into())
+        );
+        for claims in [
+            serde_json::json!({}),
+            serde_json::json!({"picture": null}),
+            serde_json::json!({"picture": "http://example.com/avatar.png"}),
+            serde_json::json!({"picture": "file:///avatar.png"}),
+        ] {
+            assert_eq!(profile_picture(&token(claims)), None);
+        }
+        assert_eq!(profile_picture(""), None);
+        assert_eq!(profile_picture("invalid.token"), None);
+    }
+
     #[test]
     fn callback_requires_state_code_and_issued_registration() {
         let url = reqwest::Url::parse(
