@@ -31,6 +31,12 @@ describe("Dray extension tool labels", () => {
     expect(streamingLabel("finder")).toBe("Exploring codebase");
   });
 
+  it("labels user questions instead of showing the raw tool name", () => {
+    expect(toolLabel("ask_user", false)).toBe("Asked user");
+    expect(toolLabel("ask_user", true)).toBe("Asking user");
+    expect(streamingLabel("ask_user")).toBe("Asking a question");
+  });
+
   it("shortens Windows paths without treating the drive as a scheme", () => {
     expect(shortenPath("C:\\Users\\jan\\repo\\src\\App.tsx")).toBe("src/App.tsx");
   });
