@@ -386,6 +386,10 @@ fn title_from_prompt(prompt: &str) -> String {
     const MAX: usize = 60;
     let title = prompt.trim().replace('\n', " ");
 
+    if title.is_empty() {
+        return "Untitled".to_string();
+    }
+
     if title.chars().count() <= MAX {
         return title;
     }
@@ -862,6 +866,12 @@ pub async fn get_session_path(session_id: &str) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use crate::events::{AgentEventPayload, ImageRef, ToolResult};
+
+    #[test]
+    fn an_empty_prompt_uses_the_untitled_fallback() {
+        assert_eq!(title_from_prompt(""), "Untitled");
+        assert_eq!(title_from_prompt(" \n\t "), "Untitled");
+    }
 
     #[test]
     fn index_entries_written_before_these_fields_still_read() {
