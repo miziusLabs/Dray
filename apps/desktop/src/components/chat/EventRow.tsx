@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Archive, ChevronRight, CircleAlert, CircleDollarSign, TriangleAlert } from "lucide-react";
+import {
+  Archive,
+  ChevronRight,
+  CircleAlert,
+  CircleDollarSign,
+  Shrink,
+  TriangleAlert,
+} from "lucide-react";
 
 import AssistantMessage from "@/components/chat/AssistantMessage";
 import Reasoning from "@/components/chat/Reasoning";
@@ -219,6 +226,11 @@ export default function EventRow({
 
       return (
         <div className="flex w-full items-center gap-2 text-chat">
+          <Shrink
+            aria-hidden="true"
+            className="size-[18px] shrink-0 text-muted-foreground"
+            strokeWidth={1.75}
+          />
           <span className="shrink-0 text-foreground/80">Compacted</span>
           {saved != null && saved > 0 && (
             <span className="min-w-0 max-w-fit truncate text-muted-foreground">
