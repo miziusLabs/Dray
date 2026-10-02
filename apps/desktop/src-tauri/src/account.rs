@@ -70,6 +70,15 @@ fn random() -> String {
         uuid::Uuid::new_v4().simple()
     )
 }
+#[cfg(any(windows, target_os = "macos"))]
+fn credential_service() -> &'static str {
+    if std::env::var("DRAY_PROFILE").is_ok_and(|profile| profile == "development") {
+        "com.yogesh.dray.dev.chatgpt"
+    } else {
+        "com.yogesh.dray.chatgpt"
+    }
+}
+
 fn http() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .timeout(Duration::from_secs(30))

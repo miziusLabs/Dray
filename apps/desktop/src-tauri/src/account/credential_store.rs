@@ -20,7 +20,7 @@ pub(super) struct NativeStore;
 #[cfg(windows)]
 impl Store for NativeStore {
     fn read(&self, name: &str) -> Result<Option<String>> {
-        match keyring::Entry::new("com.yogesh.dray.chatgpt", name)?.get_password() {
+        match keyring::Entry::new(super::credential_service(), name)?.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(error.into()),
@@ -28,11 +28,11 @@ impl Store for NativeStore {
     }
 
     fn write(&self, name: &str, value: &str) -> Result<()> {
-        Ok(keyring::Entry::new("com.yogesh.dray.chatgpt", name)?.set_password(value)?)
+        Ok(keyring::Entry::new(super::credential_service(), name)?.set_password(value)?)
     }
 
     fn delete(&self, name: &str) -> Result<()> {
-        match keyring::Entry::new("com.yogesh.dray.chatgpt", name)?.delete_credential() {
+        match keyring::Entry::new(super::credential_service(), name)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(error.into()),
         }

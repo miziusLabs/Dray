@@ -27,6 +27,11 @@ if (process.platform === "win32") {
 // way to start the app. Keep explicit CLI commands (including `--help`) intact.
 if (args.length === 0) args.push("dev");
 
+if (args[0] === "dev") {
+  process.env.DRAY_PROFILE = "development";
+  process.env.DRAY_DATA_DIR ||= join(homedir(), ".dray-dev");
+}
+
 const noWatch = args.includes("--no-watch");
 if (noWatch) process.env.DRAY_NO_WATCH = "1";
 if (args[0] === "dev" && !args.some((a) => a === "-c" || a === "--config")) {

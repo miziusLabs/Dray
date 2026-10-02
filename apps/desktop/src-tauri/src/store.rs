@@ -109,14 +109,33 @@ pub struct SessionIndexByProject {
 
 static INDEX_LOCK: Mutex<()> = Mutex::const_new(());
 
-/// `~/.dray`, creating it if this is the first run. If `~/.automedon` exists
-/// from before the app's rename and `~/.dray` doesn't yet, the old directory
-/// is moved into place so a rename never orphans a user's session history.
-pub async fn get_home_app_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("could not resolve home directory")?;
-    let path = home.join(".dray");
+fn configured_home_app_dir() -> Option<PathBuf> {
+    std::env::var_os("DRAY_DATA_DIR")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
 
-    if !fs::try_exists(&path).await.unwrap_or(false) {
+/// App data root. Development can override this to keep its sessions, projects,
+/// and attachments separate from the installed application.
+pub fn app_home_dir() -> Result<PathBuf> {
+    if let Some(path) = configured_home_app_dir() {
+        return Ok(path);
+    }
+
+    dirs::home_dir()
+        .map(|home| home.join(".dray"))
+        .context("could not resolve home directory")
+}
+
+/// `~/.dray`, creating it if this is the first run. If `~/.automedon` exists
+/// from before the app's rename and `~/.dray` doesn't yet, the old directory is
+/// moved into place. An explicit data directory skips this migration entirely.
+pub async fn get_home_app_dir() -> Result<PathBuf> {
+    let use_default_dir = configured_home_app_dir().is_none();
+    let path = app_home_dir()?;
+
+    if use_default_dir && !fs::try_exists(&path).await.unwrap_or(false) {
+        let home = dirs::home_dir().context("could not resolve home directory")?;
         let legacy = home.join(".automedon");
         if fs::try_exists(&legacy).await.unwrap_or(false) {
             fs::rename(&legacy, &path).await?;
@@ -367,9 +386,8 @@ pub fn session_branch(item: &SessionIndexItem, observed: Option<&str>) -> Option
 /// Empty host-side workspace paths are kept separate from project checkouts.
 /// They are not mounted into Docker; Cloud state lives in Docker volumes.
 pub fn cloud_path(id: &str) -> String {
-    dirs::home_dir()
-        .expect("a home directory is required for Clouds")
-        .join(".dray")
+    app_home_dir()
+        .expect("a Dray data directory is required for Clouds")
         .join("cloud")
         .join(id)
         .to_string_lossy()
