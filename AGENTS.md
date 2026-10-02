@@ -250,6 +250,13 @@ standard SKILL.md files in global and applicable ancestor `.dray/skills`
 directories. The embedded `SYSTEM.md` is the supplied personal Pi system prompt;
 Pi itself and its authentication are no longer dependencies.
 
+Responses output is collected from finalized SSE output items; the terminal
+event may contain usage without repeating those items. Preserve message phases,
+tool namespaces, and encrypted reasoning when saving and replaying history.
+The loop executes tool calls and submits their results until a final answer,
+continuing past commentary-only responses and consuming queued follow-ups.
+Empty or unfinished output is an error rather than a successful completed turn.
+
 Use the documented direct Sign in with ChatGPT token-sharing flow. Models and
 reasoning levels come from the account catalog; never probe private ChatGPT
 quota endpoints or hardcode supported models.

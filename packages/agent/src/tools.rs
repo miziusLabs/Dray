@@ -442,7 +442,7 @@ pub async fn research(
             .iter()
             .filter(|item| item["type"] == "function_call")
             .collect::<Vec<_>>();
-        if calls.is_empty() {
+        if super::response_finished(output) {
             return Ok(output
                 .iter()
                 .flat_map(|item| item["content"].as_array().into_iter().flatten())
