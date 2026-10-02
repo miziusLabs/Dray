@@ -4,9 +4,6 @@ type AppShellProps = {
   sidebar: ReactNode;
   header?: ReactNode;
   footer: ReactNode;
-  /// Right-hand inspector, when open. Sits outside the chat column so the
-  /// composer stays scoped to the conversation rather than spanning both.
-  panel?: ReactNode;
   /// Holds the composer in the upper middle of the window and drops the
   /// transcript pane. The empty state has no transcript to anchor the composer
   /// against, so pinning it to the bottom leaves the one usable control as far
@@ -22,7 +19,6 @@ export default function AppShell({
   sidebar,
   header,
   footer,
-  panel,
   centered = false,
   children,
 }: AppShellProps) {
@@ -51,15 +47,12 @@ export default function AppShell({
           </div>
         ) : (
           <>
-            {/* The main transcript and composer share this column, while the
-                right inspector remains outside it. */}
+            {/* The transcript and composer share the main column. */}
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
             <div className="shrink-0">{footer}</div>
           </>
         )}
       </div>
-
-      {panel}
     </div>
   );
 }

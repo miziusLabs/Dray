@@ -45,11 +45,6 @@ type ChatProps = {
   /// yet. Rendered here rather than built from the log, because a held prompt is
   /// deliberately unpersisted until it is delivered.
   queuedMessages?: QueuedMessage[];
-  /// Both side panes are open, so the pane is at its narrowest and the rail sits
-  /// close to the text. Passed in rather than measured here: the shell owns those
-  /// two toggles, and the rail overlays the transcript at every width anyway — so
-  /// this is about how crowded the pane *is*, not whether the rail fits.
-  crowded?: boolean;
 };
 
 /// How long an answered question card holds its place before going.
@@ -120,7 +115,6 @@ export default function Chat({
   working = null,
   compacting = false,
   queuedMessages = [],
-  crowded = false,
 }: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -404,10 +398,6 @@ export default function Chat({
   if (!session) return null;
 
   return (
-    // What decides whether the rail fits is the width of *this pane*, which the
-    // sidebar and the right panel both take from. On a 1440px window with both
-    // open the chat column fills the pane and the rail would sit on top of the
-    // text, so it goes; open one of them, or run wider, and the gutter is there.
     <div className="relative h-full">
       <div
         ref={scrollRef}
@@ -504,7 +494,6 @@ export default function Chat({
           activeKey={activeTurn}
           onSelect={jumpToTurn}
           onWheel={onRailWheel}
-          dimmed={crowded}
           // Centred vertically and outside the scroller, so it holds still while
           // the transcript moves under it.
           className="absolute left-1.5 top-1/2 -translate-y-1/2"

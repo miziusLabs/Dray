@@ -22,10 +22,6 @@ import { cn } from "@/lib/utils";
 
 type NoticeStackProps = {
   onSelect: (sessionId: string) => void;
-  /// Where the ready-to-merge card goes: the session *and* the pane, open on
-  /// its PR tab. Selecting alone would land the reader on a transcript that
-  /// says nothing about the pull request the card is about.
-  onOpenPr: (sessionId: string) => void;
 };
 
 /// What the button promises. Named for what the reader will do there rather
@@ -34,12 +30,7 @@ type NoticeStackProps = {
 const ACTION: Record<NoticeKind, string> = {
   completed: "View",
   asking: "Answer",
-  // Not "Merge". What the reader does there is merge it, which is what this
-  // label rule asks for — but the app's own merge button arms a confirm before
-  // it lands one, and a card button that skipped straight past that would be
-  // the one irreversible thing in the app reachable by a stray click on a
-  // notice nobody asked for.
-  pr: "Review",
+  pr: "View session",
 };
 
 /// The bar's colour, matching the rail mark the row will be wearing when the
@@ -232,7 +223,6 @@ function NoticeCard({
 /// slightly sooner is a second target competing with the one that matters. The
 export default function NoticeStack({
   onSelect,
-  onOpenPr,
 }: NoticeStackProps) {
   const notices = useNotices();
 
@@ -242,12 +232,10 @@ export default function NoticeStack({
   // reshuffle what the key means every time one lands.
   const next = notices[0] ?? null;
 
-  // Where a card leads, which is the same for the key and for the button. The
-  // The key opens the session or its PR, matching the button on the card.
+  // The key and the button both navigate to the notice's session.
   const take = (notice: Notice) => {
     dismissNotice(notice.sessionId, notice.kind);
-    if (notice.kind === "pr") onOpenPr(notice.sessionId);
-    else onSelect(notice.sessionId);
+    onSelect(notice.sessionId);
   };
 
   // ⌘G takes the navigating kinds — a session, or a session and its PR tab.

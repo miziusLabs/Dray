@@ -17,9 +17,6 @@ type CheckpointRailProps = {
   /// Fires on the rail's own scroll container, so the handler can tell whether
   /// the rail has room to absorb the gesture before forwarding it.
   onWheel?: React.WheelEventHandler<HTMLDivElement>;
-  /// Fades the rail back. Set when the pane is crowded enough that the ticks sit
-  /// close to the text — hovering brings it back, so nothing is lost.
-  dimmed?: boolean;
   className?: string;
 };
 
@@ -35,7 +32,6 @@ export default function CheckpointRail({
   activeKey,
   onSelect,
   onWheel,
-  dimmed = false,
   className,
 }: CheckpointRailProps) {
   const railRef = useRef<HTMLDivElement>(null);
@@ -57,10 +53,7 @@ export default function CheckpointRail({
       // a column of small targets, so there is nowhere between two ticks that
       // answers to neither.
       className={cn(
-        "flex max-h-[70%] flex-col overflow-y-auto [scrollbar-width:none] transition-opacity",
-        // On the container, so the ticks keep their own relative weight — an
-        // active tick still reads brighter than the rest, just quieter overall.
-        dimmed && "opacity-30 hover:opacity-100",
+        "flex max-h-[70%] flex-col overflow-y-auto [scrollbar-width:none]",
         className,
       )}
     >

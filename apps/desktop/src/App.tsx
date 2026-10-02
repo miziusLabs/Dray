@@ -4,7 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 
 import "./App.css";
 import Chat from "@/components/Chat";
-import ChangesPanel from "@/components/ChangesPanel";
 import AnalyticsDialog from "@/components/AnalyticsDialog";
 import ChatInput from "@/components/ChatInput";
 import DeveloperDialog from "@/components/DeveloperDialog";
@@ -12,20 +11,11 @@ import DiffWorkerPool from "@/components/DiffWorkerPool";
 import NoticeStack from "@/components/NoticeStack";
 import QuitDialog from "@/components/QuitDialog";
 import SettingsDialog from "@/components/SettingsDialog";
-import PrPanel from "@/components/PrPanel";
-import { useChanges } from "@/hooks/useChanges";
 import { usePrMarks } from "@/hooks/usePrMarks";
 import { usePrReady } from "@/hooks/usePrReady";
 import { useWorkStatus } from "@/hooks/useWorkStatus";
 import HandoffRow from "@/components/composer/HandoffRow";
 import { handoffActions } from "@/lib/handoff";
-import { prTabVisible, usePullRequest } from "@/hooks/usePullRequest";
-import RightPanel, {
-  PanelToggle,
-  TabBody,
-  tabOrder,
-  type PanelTab,
-} from "@/components/RightPanel";
 import Sidebar, {
   filterSessions,
   sortSessions,
@@ -52,8 +42,7 @@ import { useSessions } from "@/hooks/useSessions";
 import type { Effort, Model, AgentModel } from "@/types/events";
 import type { UsageDisplayMode } from "@/types/usage";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
-import { changeRange, turnChangedTree } from "@/lib/changes";
-import { prBadgeCount, sessionBranch } from "@/lib/pr";
+import { sessionBranch } from "@/lib/pr";
 import { playCelebration } from "@/lib/sound";
 import { DEFAULT_NO_PROJECT_PATH } from "@/lib/projects";
 
@@ -163,12 +152,6 @@ function App() {
     null,
   );
 
-  const [panelOpen, setPanelOpen] = useState(false);
-  // `null` is "never picked", and it is the whole of the default-tab rule.
-  // Storing `"changes"` as the initial value made a fresh install
-  // indistinguishable from a reader who had chosen Changes, so an open PR could
-  // never lead — see `activeTab`.
-  const [panelTab, setPanelTab] = useLocalStorage<PanelTab | null>("ade.panelTab", null);
   // Not persisted: settings are opened to change something and closed again, so
   // reopening the app into them would be the app remembering the wrong half of
   // a session.
@@ -223,103 +206,15 @@ function App() {
   );
   const prMarks = usePrMarks(repoPaths);
 
-  // "This can land now" — raised off the sidebar's marks rather than the
-  // panel's own read, which is the only way it can be noticed at all: the
-  // panel's poll is gated on its tab being on screen, and a tab on screen is
-  // exactly the case with nothing to announce.
+  // Ready-to-merge notices and branch marks remain available in the sidebar.
   usePrReady({ sessions: visibleSessions, prFor: prMarks.prFor });
 
-  // Read here rather than inside the panel: the tab row needs to know whether
-  // there is an open PR before that tab has ever been shown, so ordering it
-  // first can't wait on the panel fetching for itself.
-  //
-  // `workStatus.branch` is git's own reading of HEAD and outranks the name the
-  // index carries, which is only ever a guess made at creation — see
-  // `sessionBranch`. It lands a frame late and the fallback covers that frame.
   const prBranch = selectedSession?.cloudName || !selectedSession?.projectPath
     ? null
     : sessionBranch(selectedSession, workStatus?.branch);
-  // "The PR tab is on screen", read off the *pick* rather than off `activeTab`,
-  // which cannot exist yet — it is derived from this hook's own answer. An
-  // unset pick counts, since the derived default is the PR tab whenever there
-  // is an open one. The one case the two disagree is a session whose only PRs
-  // are merged: the pick is unset, the default resolves to Changes, and this
-  // reads true — harmless, because a merged PR never settles and the poll is
-  // gated on that too.
-  const pullRequests = usePullRequest(
-    selectedSession?.cloudName || !selectedSession?.projectPath
-      ? ""
-      : selectedSession.cwd,
-    prBranch,
-    panelOpen && (panelTab === "pr" || panelTab === null),
-    // A pull request appearing is the moment the session stops being about the
-    // turn and starts being about landing, so the pane opens onto it rather
-    // than waiting to be asked. Fires at most once per PR — see `onOpened`.
-    //
-    // It moves the pick as well as opening the pane, and has to: `activeTab`
-    // honours a standing pick over the derived default, and the pick is written
-    // by the app itself — `handleTogglePanel` stores "changes" every time the
-    // pane is opened onto a turn that touched files. So opening alone landed on
-    // Changes for anyone who had ever used ⌘E, which is everyone.
-    // A fresh closure each render is fine: the hook holds it in a ref.
-    () => {
-      setPanelTab("pr");
-      setPanelOpen(true);
-    },
-    // A merge or a reopen changes what the sidebar's mark should say, and that
-    // mark comes from a different read with a two-minute freshness window — so
-    // without this the row keeps its open-PR glyph until the window expires or
-    // a turn ends.
-    //
-    // `refreshAfterWrite`, not `refresh`: the write can land after the reader
-    // has filtered the mutated repo off screen, and a plain refresh only reads
-    // what is visible then. See the hook.
-    () => prMarks.refreshAfterWrite(),
-  );
-  // A draft counts: GitHub reports one as `OPEN` with `isDraft` set, and a
-  // draft is still the point at which the work stops being about this turn.
-  const openPrsHere = pullRequests.prs.filter((pr) => pr.state === "OPEN");
-  const hasOpenPr = openPrsHere.length > 0;
-  // Only where *every* open one is a draft. A session carrying a draft beside a
-  // real PR has something asking to land, and the mark should say so.
-  const allDrafts = hasOpenPr && openPrsHere.every((pr) => pr.isDraft);
-  // The sidebar already knows whether this branch has a pull request, and the
-  // panel's own read takes the better part of a second to agree — during which
-  // `prs` is empty, the tab is not in the row, and a pane opened onto the PR tab
-  // lands on Changes and jumps a beat later. So the mark stands in, but *only*
-  // while that read is out: once it answers, the panel's own answer governs, so
-  // this can never leave a tab drawn for a branch it found no PR on. The two
-  // can disagree — the mark is looked up by the branch the index remembers and
-  // the panel by the one git reports — and the window closes either way.
   const markHere = selectedSession?.projectPath
     ? prMarks.prFor(selectedSession.projectPath, prBranch)
     : null;
-  const hasPrTab =
-    prTabVisible(pullRequests.prs, pullRequests.error) || (pullRequests.loading && !!markHere);
-
-  // Where the pane lands with nothing picked. An open pull request wins over
-  // anything the last turn did: changes describe one turn and are superseded by
-  // the next, where a PR is the state of the work.
-  const defaultTab: PanelTab = hasOpenPr && hasPrTab ? "pr" : "changes";
-
-  const tabs = tabOrder({ pr: hasPrTab });
-
-  // One rule, read rather than written back: an explicit pick wins wherever it
-  // still names a tab this session draws, and otherwise the derived default
-  // stands in. Not written back, so switching to a session without a PR keeps
-  // the reader's pick for when they switch to one that has it.
-  const activeTab: PanelTab = panelTab && tabs.includes(panelTab) ? panelTab : defaultTab;
-
-  const togglePanel = () => setPanelOpen((prev) => !prev);
-
-  // Moves along the visible row, wrapping. Off `tabs` rather than `PANEL_TABS`,
-  // so a session with no PR tab cycles through two and never lands on one that
-  // isn't drawn.
-  const stepTab = (delta: number) => {
-    if (!panelOpen) return;
-    const from = tabs.indexOf(activeTab);
-    setPanelTab(tabs[(from + delta + tabs.length) % tabs.length]);
-  };
 
   // An open session's own directory, since project- and local-scoped commands
   // differ per repo and a session can be running somewhere the picker isn't
@@ -337,41 +232,15 @@ function App() {
     handleNewSession();
   };
 
-  const { baseline, head } = useMemo(
-    () => changeRange(selectedSession?.events ?? []),
-    [selectedSession?.events],
-  );
-
-  // A pull request appears because something happened, and the thing that
-  // happens is a turn — the agent running `gh pr create`, or the reader opening
-  // one in a browser while a turn was in flight. Nothing else re-reads: the
-  // panel's poll is gated on the PR tab being visible *and* active, and that tab
-  // is hidden exactly while the answer is "no PR", so the one state that needed
-  // rechecking was the only one that could never self-heal.
-  //
-  // The falling edge, not `!busy`, or an idle session re-asks on every unrelated
-  // render — and the session id rides along because `busy` is the *selected*
-  // session's: switching from a running session to an idle one drops it without
-  // any turn having ended.
   const lastTurn = useRef({ sessionId: selectedSessionId, busy });
   useEffect(() => {
     const prev = lastTurn.current;
     lastTurn.current = { sessionId: selectedSessionId, busy };
     if (prev.sessionId !== selectedSessionId || !prev.busy || busy) return;
-    pullRequests.refresh();
     prMarks.refresh();
-  }, [selectedSessionId, busy, pullRequests.refresh, prMarks.refresh]);
+  }, [selectedSessionId, busy, prMarks.refresh]);
 
-  // From the sidebar's own per-repo read, not a fourth git call: once a pull
-  // request exists the panel is where it is acted on, and a Create PR button
-  // beside it would open a duplicate.
-  //
-  // An *open* one, and the check is explicit now that the marks carry merged
-  // ones too: a branch whose PR has landed and is being worked on again wants
-  // Create PR back. Nothing else usually offers it there — a merged branch is
-  // level with its base, which `handoff` reads as nothing to open — but the two
-  // answer different questions and folding them cost the button in the one case
-  // it was wanted.
+  // Do not offer a duplicate Create PR action for a branch with an open PR.
   const sessionHasPr = markHere?.state === "OPEN";
 
   // The one handoff action that runs rather than asks. It reports into no
@@ -393,48 +262,6 @@ function App() {
       setPushing(false);
     }
   };
-
-  // Read off the two tree ids rather than off the panel's file list: the panel
-  // pauses its reads while hidden, which is exactly when the indicator has to
-  // be right.
-  const lastTurnChanged = turnChangedTree({ baseline, head });
-
-  // The click lands on whatever the glyph was drawing. That is all this does:
-  // which tab the pane *defaults* to is `activeTab`'s rule and needs no help
-  // here, and ⌘E
-  // stays a plain toggle because it draws nothing and so promises nothing.
-  const handleTogglePanel = () => {
-    if (!panelOpen) {
-      if (hasOpenPr && hasPrTab) setPanelTab("pr");
-      else if (lastTurnChanged) setPanelTab("changes");
-    }
-    togglePanel();
-  };
-
-  // What tells the panel to re-read — a cache key, not a count. The event total
-  // moves as a turn's writes land, and `busy` covers the turn ending, where the
-  // final file write and the closing event can arrive in either order.
-  const revision = `${selectedSession?.events.length ?? 0}:${busy}`;
-
-  // Both panel bodies are presentational, and their hooks live here for the
-  // same reason: the tab row needs what they know before either tab is opened —
-  // whether a PR tab exists at all, and which refresh the one shared button
-  // should run.
-  const changesData = useChanges(
-    selectedSession?.cwd ?? "",
-    baseline,
-    head,
-    revision,
-    panelOpen && activeTab === "changes",
-  );
-
-  // One button, so the tab decides what it re-reads.
-  const panelRefresh =
-    activeTab === "changes"
-      ? { onRefresh: changesData.refresh, loading: changesData.loading }
-      : activeTab === "pr"
-        ? { onRefresh: pullRequests.refresh, loading: pullRequests.loading }
-        : null;
 
   // Same order the sidebar draws, so the walk matches the list — project list
   // included, since that is what orders the groups it steps through.
@@ -475,26 +302,6 @@ function App() {
   // ⌘↑/↓ is the webview's own jump-to-start/end of the input.
   useHotkey("ArrowUp", () => stepSession(-1), { shift: true });
   useHotkey("ArrowDown", () => stepSession(1), { shift: true });
-  useHotkey("e", togglePanel);
-  // ⌘⇧[ / ⌘⇧] — the browser and editor chord for stepping through tabs, so it
-  // arrives already known. The shift layout reaches `key`, so the character is
-  // `{` rather than `[`; the physical key rides along for the engines that
-  // report the unshifted one — see `code`.
-  useHotkey("{", () => stepTab(-1), { shift: true, code: "BracketLeft" });
-  useHotkey("}", () => stepTab(1), { shift: true, code: "BracketRight" });
-  // ⌘R re-reads whatever the panel is showing — the same one button in the tab
-  // row, so the chord means "refresh this" and never "refresh a specific
-  // thing".
-  // and the pane being closed is a no-op: refreshing something invisible is
-  // work with no way to see it land, and both panel hooks pause their reads
-  // there anyway.
-  //
-  // Safe to take despite being the webview's reload, because `useHotkey` claims
-  // every chord it matches — and the app has no Reload menu item, which on
-  // macOS would swallow the key before the webview ever saw it.
-  useHotkey("r", () => {
-    if (panelOpen) panelRefresh?.onRefresh();
-  });
   // By position in the sidebar, so the shortcut follows the same order the
   // reader sees, including the current search and project grouping. The first
   // nine rows are reachable without leaving the composer.
@@ -608,40 +415,7 @@ function App() {
             branch={prBranch}
             className="flex-1"
           />
-
-          {selectedSession && (
-            <PanelToggle
-              onToggle={handleTogglePanel}
-              open={panelOpen}
-              changes={lastTurnChanged}
-              pr={hasOpenPr && hasPrTab}
-              draft={allDrafts}
-            />
-          )}
         </header>
-      }
-      panel={
-        // Mounted whenever a session is, open or not — closing or switching
-        // tabs only hides, so reopening shows what was already there instead of
-        // refetching and re-highlighting it. `active` is what stops the hidden
-        // changes tab from snapshotting the working tree in the background.
-        selectedSession ? (
-          <RightPanel
-            open={panelOpen}
-            tab={activeTab}
-            onTabChange={setPanelTab}
-            counts={{ pr: prBadgeCount(pullRequests.prs) }}
-            pr={hasPrTab}
-            refresh={panelRefresh}
-          >
-            <TabBody active={activeTab === "changes"}>
-              <ChangesPanel cwd={selectedSession.cwd} baseline={baseline} {...changesData} />
-            </TabBody>
-            <TabBody active={hasPrTab && activeTab === "pr"}>
-              <PrPanel branch={prBranch} {...pullRequests} />
-            </TabBody>
-          </RightPanel>
-        ) : null
       }
       footer={
         <ChatInput
@@ -724,22 +498,12 @@ function App() {
         compacting={compacting}
         queuedMessages={queuedMessages}
         working={working}
-        crowded={panelOpen}
       />
     </AppShell>
     {/* Outside `AppShell` on purpose: it is fixed to the window rather than
         placed in the layout, and the shell has no slot that isn't a pane. */}
     <NoticeStack
       onSelect={(id) => void handleSelectSessionIndexItem(id)}
-      // The session and the pane both, since the card is about something the
-      // transcript does not show. The pick is written the same way
-      // `usePullRequest`'s `onOpened` writes it — `activeTab` honours a
-      // standing pick, and opening the pane stores "changes" on its own.
-      onOpenPr={(id) => {
-        void handleSelectSessionIndexItem(id);
-        setPanelTab("pr");
-        setPanelOpen(true);
-      }}
     />
     <QuitDialog />
     {/* Mounted here rather than in the sidebar, which unmounts whole when it

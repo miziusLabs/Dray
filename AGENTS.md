@@ -36,10 +36,9 @@ This file is the implementation map for agents working in this repository. Keep 
 - Per-session draft preservation and focus restoration.
 - Desktop notifications, in-app notices, dock/taskbar badge state, attention indicators, and notification/celebration sounds.
 - Signed automatic updates from GitHub Releases, with background download and an install/restart notice.
-- Right inspector with turn-scoped Changes and Pull Request tabs.
 - Turn-scoped Git snapshots so a completed turn's diff remains stable even if the checkout changes afterward.
 - Git status handoff actions for Commit, Commit & push, Push, Create PR, and Draft PR.
-- GitHub pull request discovery through `gh`, including draft/open/merged/closed state, checks, comments/reviews, changed-file counts, reopen, mark-ready, and merge actions/methods.
+- GitHub pull request markers and ready-to-merge notifications through `gh`; detailed PR viewing and mutations are not exposed in the UI.
 - Sidebar PR markers and ready-to-merge notifications with polling/caching per repository.
 - Syntax-highlighted Markdown/code and worker-backed diff rendering.
 - Light/dark/system-aware theming helpers, code themes, macOS vibrancy/titlebar integration, and cross-platform hotkeys.
@@ -48,7 +47,7 @@ This file is the implementation map for agents working in this repository. Keep 
 ## Frontend entry points
 
 - `src/main.tsx` — React bootstrap.
-- `src/App.tsx` — top-level orchestration. Connects sessions, repository state, pull requests, notices, panels, settings, hotkeys, themes, and the composer.
+- `src/App.tsx` — top-level orchestration. Connects sessions, repository state, pull request marks, notices, settings, hotkeys, themes, and the composer.
 - `src/App.css` — application-level layout and visual tokens.
 - `src/styles/attention-glow.css` — attention/notification glow treatment.
 
@@ -61,9 +60,6 @@ Top-level components in `src/components/`:
 - `Chat.tsx` — transcript list, follow-to-bottom behavior, streaming placement, and turn rendering.
 - `ChatInput.tsx` — composer text input, send/stop behavior, command/file menus, queued-send behavior, error state, and attachment integration.
 - `Sidebar.tsx` — task/session navigation, project grouping, search, nesting, session status, PR markers, pin/settle actions, row menus, and settings entry point.
-- `RightPanel.tsx` — shared inspector frame and tabs for PR, Changes, and Pull Request.
-- `ChangesPanel.tsx` — right-panel view of changes made by the selected turn.
-- `PrPanel.tsx` — pull request details, checks, comments/reviews, GitHub links, draft/ready/reopen/merge controls, and merge-method selection.
 - `PrStateIcon.tsx` — compact pull request state iconography.
 - `SettingsDialog.tsx` — General, Account, Models, and Updates tabs; account connection controls and profile picture, settled-session toggle, model-cycle configuration, and title-generation model configuration.
 - `NoticeStack.tsx` — transient in-app notices.
@@ -115,21 +111,11 @@ Files in `src/components/chat/`:
 - `CompactingIndicator.tsx` — context-compaction state.
 - `WorkingIndicator.tsx` — active turn indicator.
 
-### Repository Changes components
-
-Files in `src/components/changes/`:
-
-- `FileList.tsx` — reusable changed-file list.
-- `DiffPane.tsx` — selected-file diff pane.
-- `HistoryList.tsx` — paginated commit history with expandable file lists.
-- `CommitMessage.tsx` — selected commit subject/body/short SHA.
-- `Counts.tsx` — additions/deletions counters.
-
 ### Layout and icon components
 
-- `layout/AppShell.tsx` — three-column/window shell.
+- `layout/AppShell.tsx` — sidebar and conversation/window shell.
 - `layout/SessionHeader.tsx` — selected session title and branch context.
-- `icons/PanelLeftIcon.tsx`, `PanelRightIcon.tsx`, `GitBranchIcon.tsx` — custom chrome icons.
+- `icons/PanelLeftIcon.tsx`, `GitBranchIcon.tsx` — custom chrome icons.
 
 ### Shared UI primitives
 
@@ -140,10 +126,7 @@ Files in `src/components/changes/`:
 Files in `src/hooks/`:
 
 - `useSessions.ts` — central frontend session state: session index/snapshots, model/project/branch/cloud controls, send/queue/interrupt/stop/respond/fork/detach/delete operations, backend event subscriptions, status/unread state, notices, and context/background-task derivation.
-- `useChanges.ts` — fetches and caches turn/revision change sets and individual file versions.
-- `useRepo.ts` — repository tree, history, and sync status helpers.
 - `useWorkStatus.ts` — working tree, branch, upstream, default branch, and ahead/dirty state for handoff actions.
-- `usePullRequest.ts` — selected branch PR loading/polling and PR mutations.
 - `usePrMarks.ts` — per-repository cached PR markers for sidebar sessions.
 - `usePrReady.ts` — announces PRs that become ready to merge.
 - `useAttachments.ts` — composer attachment state and Tauri attachment reads.
@@ -155,7 +138,6 @@ Files in `src/hooks/`:
 - `useDraft.ts` — per-session unsent composer drafts.
 - `useNotices.ts` — in-app notice state.
 - `useDockBadge.ts` — dock/taskbar badge integration.
-- `useAvatar.ts` — commit-author avatar lookup/cache.
 - `useTheme.ts` and `useCodeTheme.ts` — app/code theme selection.
 - `useHighlighter.ts` — shared syntax highlighter lifecycle.
 - `useVibrancy.ts` — native window vibrancy behavior.
@@ -170,11 +152,8 @@ Files in `src/lib/`:
 - `transcript.ts` — converts raw backend events into renderable turns and result maps.
 - `streaming.ts` — parses incremental stream payloads and reconstructs streamable content/tool data.
 - `tools.ts` — tool-call classification/grouping helpers.
-- `changes.ts` — turn-to-Git-baseline/change-range helpers.
 - `diff.ts` — edit/read extraction, diff sides, filenames, ranges, and line counts.
-- `commit.ts` — commit baseline and file-selection reconciliation helpers.
-- `pr.ts` — pull-request state/label/session-branch helpers.
-- `prSync.ts` — PR/check synchronization helpers.
+- `pr.ts` — sidebar pull-request selection, session-branch helpers, and ready-notice derivation.
 - `handoff.ts` — derives available Commit/Push/PR handoff actions from Git state.
 - `slash.ts` — command/skill invocation detection, ranking, grouping, parsing, and insertion.
 - `mention.ts` and `highlight.ts` — `@file`, `$skill`, and command text segmentation/highlighting.
@@ -183,7 +162,6 @@ Files in `src/lib/`:
 - `relay.ts` — frontend event relay helpers.
 - `attention.ts` — session attention/unread presentation rules.
 - `sessionOrder.test.ts` covers ordering behavior implemented alongside sidebar helpers.
-- `avatar.ts` — avatar lookup helpers.
 - `format.ts` — relative time, token/byte counts, and path formatting.
 - `models.ts` — model selection keys, supported reasoning resolution, and effort-preference migration.
 - `focus.ts` — focus utilities.
@@ -283,7 +261,6 @@ with `cargo test --manifest-path packages/agent/Cargo.toml`.
 
 - A local session is tied to a project/checkout; a Cloud Session has no local repository view.
 - Completed-turn changes use Git tree snapshots. Do not replace them with a live `git diff` or the UI will drift after later edits.
-- The right-panel Changes tab is turn-scoped and backed by Git snapshots.
 - GitHub integration intentionally uses the user's installed/authenticated `gh` CLI rather than owning GitHub authentication.
 - Session status distinguishes active work, waiting-for-user requests, completed-but-unread work, and idle/read work. Sidebar indicators and OS notices depend on that distinction.
 - Parent/child session nesting represents forks/subsessions. Detach changes hierarchy; delete removes the session and its persisted data/resources.
@@ -297,9 +274,6 @@ with `cargo test --manifest-path packages/agent/Cargo.toml`.
 
 - `Cmd/Ctrl+N` — new session.
 - `Cmd/Ctrl+Shift+Up/Down` — move through sessions.
-- `Cmd/Ctrl+E` — toggle right inspector.
-- `Cmd/Ctrl+Shift+[` / `]` — move through right-panel tabs.
-- `Cmd/Ctrl+R` — refresh the active right-panel tab when supported.
 - `Cmd/Ctrl+,` — Settings.
 - `Shift+Tab` — cycle effort/reasoning level for the current model.
 - `Cmd/Ctrl+M` — cycle the configured model subset.
@@ -339,7 +313,7 @@ Prefer the smallest verification that covers a change. Documentation-only edits 
 
 - Preserve existing user changes in a dirty worktree.
 - Keep stateful Tauri I/O in hooks/backend modules and pure derivation in `src/lib/` when practical; this repository already tests that split heavily.
-- Reuse the shared panel, picker, UI primitive, diff, transcript, and formatting components instead of adding parallel one-off surfaces.
+- Reuse the shared picker, UI primitive, diff, transcript, and formatting components instead of adding parallel one-off surfaces.
 - Keep platform-specific behavior behind `platform.ts`, Tauri APIs, or Rust `cfg` branches.
 - Update tests beside pure logic when behavior changes.
 - Keep README feature claims aligned with the actual UI and backend; keep implementation detail here instead.
