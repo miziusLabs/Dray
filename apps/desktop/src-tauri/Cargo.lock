@@ -1038,16 +1038,13 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "dirs 6.0.0",
- "globset",
  "libc",
- "regex",
  "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",
  "tokio",
  "uuid",
- "walkdir",
  "windows-sys 0.61.2",
 ]
 

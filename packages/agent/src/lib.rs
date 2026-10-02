@@ -325,7 +325,7 @@ pub async fn execute(name: &str, args: &Value, cwd: &Path) -> Result<String> {
             tokio::fs::write(path, content).await?;
             Ok("File saved.".into())
         }
-        "ls" | "find" | "grep" => tools::search(name, args, cwd).await,
+        "ls" => tools::ls(args, cwd).await,
         "background_command" => tools::background(args, cwd).await,
         "github" => tools::github(args, cwd).await,
         "ask_user" => tools::question(args).await,
@@ -817,7 +817,12 @@ mod tests {
         assert_eq!(body["store"], false);
         assert_eq!(body["stream"], true);
         assert_eq!(body["tools"][0]["type"], "namespace");
-        assert_eq!(body["tools"][0]["tools"].as_array().unwrap().len(), 13);
+        assert_eq!(body["tools"][0]["tools"].as_array().unwrap().len(), 11);
+        let definitions = body["tools"][0]["tools"].as_array().unwrap();
+        assert!(definitions.iter().any(|tool| tool["name"] == "bash"));
+        assert!(!definitions
+            .iter()
+            .any(|tool| tool["name"] == "find" || tool["name"] == "grep"));
         assert_eq!(body["prompt_cache_key"], "stable-session");
         assert!(body.get("previous_response_id").is_none());
         assert!(body.get("prompt_cache_retention").is_none());
@@ -834,6 +839,16 @@ mod tests {
         assert!(output.contains("dray-tool-output"));
         assert!(output.contains("Exit status:"));
     }
+    #[tokio::test]
+    async fn removed_search_tools_are_not_executable() {
+        for name in ["find", "grep"] {
+            let error = execute(name, &json!({"pattern":"anything"}), &std::env::temp_dir())
+                .await
+                .unwrap_err();
+            assert_eq!(error.to_string(), format!("unknown tool {name}"));
+        }
+    }
+
     #[test]
     fn stream_handles_split_unicode_and_crlf() {
         let data =

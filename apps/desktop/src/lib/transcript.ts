@@ -174,6 +174,11 @@ function groupTurns(events: AgentEvent[]): Turn[] {
     // letting it open a synthetic head turn would duplicate the Worked-for row.
     if (event.payload.type === "usage_update") continue;
 
+    // Older native-agent logs include empty text placeholders between model
+    // requests. They are not output, and must not split tools or hide the last
+    // real assistant message when a completed turn needs a final-text fallback.
+    if (event.payload.type === "assistant_text" && !event.payload.text.trim()) continue;
+
     // A queued prompt does not open a turn: it was typed into one already
     // running, and the CLI answers both inside it and emits a single
     // `turn_completed` for the pair. Cutting here would leave the first turn

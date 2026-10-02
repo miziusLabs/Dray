@@ -244,8 +244,10 @@ Use `DRAY_CLOUD_IMAGE` to override the Docker image tag. `GITHUB_TOKEN` or an au
 
 `packages/agent/src/lib.rs` owns the persistent request/tool loop, SSE parsing,
 queued follow-ups, interruption checkpoints, prompt caching, and compaction.
-`tools.rs` provides search, processes, questions, read-only research, and GitHub
-retrieval; `process.rs` cleans up shell descendants. `skills.rs` discovers
+`tools.rs` provides directory listing, processes, questions, read-only research,
+and GitHub retrieval; file discovery and text searches use the terminal (including
+in the finder subagent), not dedicated find/grep tools. `process.rs` cleans up
+shell descendants. `skills.rs` discovers
 standard SKILL.md files in global and applicable ancestor `.dray/skills`
 directories. The embedded `SYSTEM.md` is the supplied personal Pi system prompt;
 Pi itself and its authentication are no longer dependencies.
@@ -256,6 +258,8 @@ tool namespaces, and encrypted reasoning when saving and replaying history.
 The loop executes tool calls and submits their results until a final answer,
 continuing past commentary-only responses and consuming queued follow-ups.
 Empty or unfinished output is an error rather than a successful completed turn.
+Empty assistant text blocks are not transcript boundaries; consecutive tools stay
+grouped across model requests until visible non-tool output appears.
 
 Use the documented direct Sign in with ChatGPT token-sharing flow. Models and
 reasoning levels come from the account catalog; never probe private ChatGPT

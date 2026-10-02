@@ -513,7 +513,7 @@ impl Mapper {
             .and_then(|value| serde_json::from_value::<AgentRpcUsage>(value.clone()).ok())
             .map(|usage| map_usage(&usage, message.get("model").and_then(Value::as_str)));
         let text = content_text(message.get("content"));
-        if !text.is_empty() {
+        if !text.trim().is_empty() {
             self.last_text = Some(text);
         }
         self.last_usage = usage;
@@ -538,17 +538,24 @@ impl Mapper {
                     index,
                 };
                 match block.get("type").and_then(Value::as_str) {
-                    Some("text") => Some(AgentEventPayload::AssistantText {
-                        block: self
-                            .streamed_blocks
-                            .contains(&(message_id.clone(), index))
-                            .then_some(block_ref),
-                        text: block
+                    Some("text") => {
+                        let text = block
                             .get("text")
                             .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string(),
-                    }),
+                            .unwrap_or_default();
+                        // Tool-only responses reserve index zero for streamed text.
+                        // An empty placeholder is not assistant output or a tool-group boundary.
+                        if text.trim().is_empty() {
+                            return None;
+                        }
+                        Some(AgentEventPayload::AssistantText {
+                            block: self
+                                .streamed_blocks
+                                .contains(&(message_id.clone(), index))
+                                .then_some(block_ref),
+                            text: text.to_string(),
+                        })
+                    }
                     Some("thinking") => Some(AgentEventPayload::Reasoning {
                         block: self
                             .streamed_blocks
@@ -713,7 +720,6 @@ fn tool_type(name: &str) -> ToolType {
         "bash" | "background_command" => ToolType::Shell,
         "read" => ToolType::FileRead,
         "write" | "edit" => ToolType::FileEdit,
-        "grep" | "find" => ToolType::Search,
         "web_search" => ToolType::Web,
         _ => ToolType::Other,
     }
@@ -814,6 +820,31 @@ mod tests {
             AgentEventPayload::TurnCompleted { usage: Some(usage), final_text: Some(text), .. }
                 if usage.cost_usd == Some(0.25) && text == "hello"
         )));
+    }
+
+    #[test]
+    fn tool_only_messages_do_not_emit_assistant_text_boundaries() {
+        let events = map_lines(&[
+            r#"{"type":"message_start","message":{"role":"assistant"}}"#,
+            r#"{"type":"message_update","assistantMessageEvent":{"type":"thinking_start","contentIndex":1}}"#,
+            r#"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":""},{"type":"thinking","thinking":"Inspect next file"}],"stopReason":"toolUse"}}"#,
+            r#"{"type":"tool_execution_start","toolCallId":"call-1","toolName":"read","args":{"path":"a.rs"}}"#,
+            r#"{"type":"tool_execution_end","toolCallId":"call-1","toolName":"read","result":{"content":[]},"isError":false}"#,
+            r#"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"  "}],"stopReason":"toolUse"}}"#,
+            r#"{"type":"tool_execution_start","toolCallId":"call-2","toolName":"bash","args":{"command":"git status"}}"#,
+        ]);
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event.payload, AgentEventPayload::AssistantText { .. })));
+        assert!(events.iter().any(|event| matches!(&event.payload,
+                AgentEventPayload::Reasoning { block: Some(block), .. } if block.index == 1)));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.payload, AgentEventPayload::ToolCallStarted { .. }))
+                .count(),
+            2
+        );
     }
 
     #[test]

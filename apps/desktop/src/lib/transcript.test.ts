@@ -218,6 +218,31 @@ describe("tool groups", () => {
     expect(group?.calls.map((call) => call.id)).toEqual(["e-1", "e-2"]);
   });
 
+  it.each([true, false])("keeps tools across empty model responses grouped (live=%s)", (live) => {
+    const { turns } = buildTranscript(
+      [
+        prompt(0, "go", false),
+        text(1, "Inspecting the files."),
+        callStarted(2, "c1", "read", "file_read"),
+        text(3, ""),
+        contextUsage(4),
+        callStarted(5, "c2", "bash", "shell"),
+        text(6, "  "),
+        callStarted(7, "c3", "finder"),
+        ...(live ? [] : [completed(8)]),
+      ],
+      live,
+    );
+
+    const groups = turns[0].work.filter(isToolGroup);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].calls.map((call) => call.id)).toEqual(["e-2", "e-5", "e-7"]);
+    expect(turns[0].finalText).toBe(live ? null : "Inspecting the files.");
+    expect(turns[0].work.some((item) =>
+      !isToolGroup(item) && item.payload.type === "assistant_text" && !item.payload.text.trim(),
+    )).toBe(false);
+  });
+
   it("ends a group when the agent outputs text", () => {
     const { turns } = buildTranscript(
       [

@@ -1,4 +1,4 @@
-//! Native read-only search, GitHub retrieval, and background processes.
+//! Native directory listing, research, GitHub retrieval, and background processes.
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::{
@@ -40,8 +40,6 @@ fn schema(name: &str, description: &str, properties: Value, required: Value) -> 
 pub fn definitions() -> Vec<Value> {
     vec![
         schema("ls","List files in a directory.",json!({"path":{"type":"string"}}),json!(["path"])),
-        schema("find","Find files matching a glob. Skips .git, node_modules, and target directories.",json!({"pattern":{"type":"string"},"path":{"type":"string"}}),json!(["pattern"])),
-        schema("grep","Search UTF-8 files using a regex, returning file paths and line numbers. Results are bounded.",json!({"pattern":{"type":"string"},"path":{"type":"string"},"ignoreCase":{"type":"boolean"}}),json!(["pattern"])),
         schema("background_command","Manage long-running shell commands with start, check, input, or stop. Check drains new output. Commands are stopped when the session stops.",json!({"action":{"type":"string","enum":["start","check","input","stop"]},"command":{"type":"string"},"id":{"type":"string"},"input":{"type":"string"}}),json!(["action"])),
         schema("finder","Explore the current codebase with a dedicated read-only agent. Use for complex searches by functionality or concept.",json!({"query":{"type":"string"}}),json!(["query"])),
         schema("libarian","Research GitHub repositories with a dedicated read-only agent using the authenticated gh CLI.",json!({"query":{"type":"string"}}),json!(["query"])),
@@ -92,85 +90,24 @@ pub fn cancel_questions() {
         .clear();
 }
 
-fn files(path: &Path) -> impl Iterator<Item = walkdir::DirEntry> {
-    walkdir::WalkDir::new(path)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| {
-            ![".git", "node_modules", "target"]
-                .contains(&entry.file_name().to_string_lossy().as_ref())
-        })
+pub async fn ls(args: &Value, cwd: &Path) -> Result<String> {
+    let path = cwd.join(super::text(args, "path")?);
+    let mut names = std::fs::read_dir(path)?
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file())
-        .take(20000)
-}
-pub async fn search(name: &str, args: &Value, cwd: &Path) -> Result<String> {
-    let path = cwd.join(args["path"].as_str().unwrap_or("."));
-    match name {
-        "ls" => {
-            let mut names = std::fs::read_dir(path)?
-                .filter_map(Result::ok)
-                .map(|entry| {
-                    format!(
-                        "{}{}",
-                        entry.file_name().to_string_lossy(),
-                        if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                            "/"
-                        } else {
-                            ""
-                        }
-                    )
-                })
-                .collect::<Vec<_>>();
-            names.sort();
-            Ok(names.into_iter().take(1000).collect::<Vec<_>>().join("\n"))
-        }
-        "find" => {
-            let glob = globset::Glob::new(super::text(args, "pattern")?)?.compile_matcher();
-            Ok(files(&path)
-                .filter(|entry| {
-                    glob.is_match(entry.path().strip_prefix(&path).unwrap_or(entry.path()))
-                        || glob.is_match(entry.file_name())
-                })
-                .take(1000)
-                .map(|entry| entry.path().display().to_string())
-                .collect::<Vec<_>>()
-                .join("\n"))
-        }
-        "grep" => {
-            let regex = regex::RegexBuilder::new(super::text(args, "pattern")?)
-                .case_insensitive(args["ignoreCase"].as_bool().unwrap_or(false))
-                .build()?;
-            let mut output = String::new();
-            let mut matches = 0;
-            for file in files(&path) {
-                if file.metadata().is_ok_and(|m| m.len() > 1024 * 1024) {
-                    continue;
+        .map(|entry| {
+            format!(
+                "{}{}",
+                entry.file_name().to_string_lossy(),
+                if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    "/"
+                } else {
+                    ""
                 }
-                let Ok(text) = std::fs::read_to_string(file.path()) else {
-                    continue;
-                };
-                for (line, text) in text
-                    .lines()
-                    .enumerate()
-                    .filter(|(_, line)| regex.is_match(line))
-                {
-                    output.push_str(&format!(
-                        "{}:{}:{}\n",
-                        file.path().display(),
-                        line + 1,
-                        text.chars().take(500).collect::<String>()
-                    ));
-                    matches += 1;
-                    if matches >= 200 || output.len() > 40000 {
-                        return Ok(output);
-                    }
-                }
-            }
-            Ok(output)
-        }
-        _ => bail!("unknown search tool"),
-    }
+            )
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    Ok(names.into_iter().take(1000).collect::<Vec<_>>().join("\n"))
 }
 
 pub async fn github(args: &Value, cwd: &Path) -> Result<String> {
@@ -353,6 +290,18 @@ pub async fn stop_background() {
 mod tests {
     use super::*;
 
+    #[test]
+    fn finder_uses_terminal_search_and_librarian_keeps_github_only() {
+        let names = |name| {
+            research_tools(name)
+                .into_iter()
+                .map(|tool| tool["name"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names("finder"), ["read", "bash", "ls"]);
+        assert_eq!(names("libarian"), ["github"]);
+    }
+
     #[tokio::test]
     async fn stopping_background_work_terminates_the_process() {
         let command = if cfg!(windows) {
@@ -389,6 +338,24 @@ mod tests {
     }
 }
 
+fn research_tools(name: &str) -> Vec<Value> {
+    super::tools()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|tool| {
+            if name == "finder" {
+                ["read", "ls", "bash"]
+                    .iter()
+                    .any(|allowed| tool["name"] == *allowed)
+            } else {
+                tool["name"] == "github"
+            }
+        })
+        .cloned()
+        .collect()
+}
+
 pub async fn research(
     name: &str,
     query: &str,
@@ -405,26 +372,7 @@ pub async fn research(
         .await?;
         return Ok(result["output"].to_string());
     }
-    let definitions = if name == "finder" {
-        let mut definitions = super::tools()
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|tool| tool["name"] == "read")
-            .cloned()
-            .collect::<Vec<_>>();
-        definitions.extend(self::definitions().into_iter().filter(|tool| {
-            ["ls", "find", "grep"]
-                .iter()
-                .any(|allowed| tool["name"] == *allowed)
-        }));
-        definitions
-    } else {
-        self::definitions()
-            .into_iter()
-            .filter(|tool| tool["name"] == "github")
-            .collect()
-    };
+    let definitions = research_tools(name);
     let base_prompt = if name == "finder" {
         include_str!("../FINDER.md")
     } else {
@@ -455,11 +403,10 @@ pub async fn research(
                 .as_str()
                 .context("Missing research tool name")?;
             let args = serde_json::from_str(call["arguments"].as_str().unwrap_or("{}"))?;
-            let result = match name {
-                "github" => github(&args, cwd).await,
-                "read" => super::execute(name, &args, cwd).await,
-                "ls" | "find" | "grep" => search(name, &args, cwd).await,
-                _ => Err(anyhow::anyhow!("Read-only research does not allow {name}")),
+            let result = if definitions.iter().any(|tool| tool["name"] == name) {
+                super::execute(name, &args, cwd).await
+            } else {
+                Err(anyhow::anyhow!("Read-only research does not allow {name}"))
             };
             input.push(json!({"type":"function_call_output","call_id":call["call_id"],"output":result.unwrap_or_else(|e|e.to_string())}));
         }
