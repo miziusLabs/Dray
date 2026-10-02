@@ -31,6 +31,7 @@ pub mod harness;
 pub mod models;
 pub mod notifications;
 pub mod projects;
+pub mod profile;
 pub mod quit;
 pub mod sandbox;
 pub mod session;
@@ -46,6 +47,18 @@ async fn get_agent_usage() -> Result<usage::AgentUsage, String> {
 #[tauri::command]
 fn get_account_status() -> Result<account::AccountStatus, String> {
     account::status().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_local_profile_picture() -> Result<Option<String>, String> {
+    profile::picture_path().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_local_profile_picture(source_path: &str) -> Result<String, String> {
+    profile::save_picture(source_path)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -528,6 +541,8 @@ pub fn run() {
             cloud_availability,
             get_agent_usage,
             get_account_status,
+            get_local_profile_picture,
+            save_local_profile_picture,
             sign_in_chatgpt,
             sign_out_chatgpt,
             cancel_chatgpt_sign_in,
