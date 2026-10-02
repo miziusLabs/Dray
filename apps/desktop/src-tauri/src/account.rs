@@ -32,6 +32,8 @@ mod credential_store;
 struct Credentials {
     client_id: String,
     subject: String,
+    #[serde(default)]
+    account_id: Option<String>,
     email: Option<String>,
     id_token: String,
     access_token: String,
@@ -44,6 +46,7 @@ struct Tokens {
     access_token: String,
     refresh_token: Option<String>,
     id_token: Option<String>,
+    account_id: Option<String>,
     scope: Option<String>,
     expires_in: u64,
 }
@@ -53,7 +56,6 @@ struct Tokens {
 pub struct AccountStatus {
     pub signed_in: bool,
     pub email: Option<String>,
-    pub picture: Option<String>,
     pub error: Option<String>,
 }
 
@@ -80,6 +82,7 @@ fn credential_service() -> &'static str {
 }
 
 fn http() -> Result<reqwest::Client> {
+    crate::tls::initialize();
     Ok(reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()?)
@@ -100,7 +103,7 @@ fn store(value: Option<&Credentials>) -> Result<()> {
 }
 #[cfg(target_os = "macos")]
 fn load() -> Result<Option<Credentials>> {
-    match keyring::Entry::new("com.yogesh.dray.chatgpt", "account")?.get_password() {
+    match keyring::Entry::new(credential_service(), "account")?.get_password() {
         Ok(json) => Ok(Some(serde_json::from_str(&json)?)),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(e.into()),
@@ -108,7 +111,7 @@ fn load() -> Result<Option<Credentials>> {
 }
 #[cfg(target_os = "macos")]
 fn store(value: Option<&Credentials>) -> Result<()> {
-    let entry = keyring::Entry::new("com.yogesh.dray.chatgpt", "account")?;
+    let entry = keyring::Entry::new(credential_service(), "account")?;
     match value {
         Some(value) => entry.set_password(&serde_json::to_string(value)?)?,
         None => match entry.delete_credential() {
@@ -120,9 +123,7 @@ fn store(value: Option<&Credentials>) -> Result<()> {
 }
 #[cfg(not(any(windows, target_os = "macos")))]
 fn load() -> Result<Option<Credentials>> {
-    let path = dirs::home_dir()
-        .context("home directory unavailable")?
-        .join(".dray/chatgpt.json");
+    let path = crate::store::app_home_dir()?.join("chatgpt.json");
     match std::fs::read(path) {
         Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -133,9 +134,7 @@ fn load() -> Result<Option<Credentials>> {
 fn store(value: Option<&Credentials>) -> Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    let dir = dirs::home_dir()
-        .context("home directory unavailable")?
-        .join(".dray");
+    let dir = crate::store::app_home_dir()?;
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("chatgpt.json");
     if let Some(value) = value {
@@ -158,7 +157,6 @@ pub fn status() -> Result<AccountStatus> {
     Ok(match load()? {
         Some(c) if !c.access_token.is_empty() => AccountStatus {
             signed_in: true,
-            picture: profile_picture(&c.id_token),
             email: c.email,
             error: None,
         },
@@ -166,14 +164,52 @@ pub fn status() -> Result<AccountStatus> {
     })
 }
 
-// The stored identity token was verified during sign-in. Only extract display
-// metadata here; this must never be used to authorize requests.
-fn profile_picture(id_token: &str) -> Option<String> {
+fn account_id_from_claims(claims: &Value) -> Option<String> {
+    claims["https://api.openai.com/auth"]["chatgpt_account_id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+}
+
+fn verified_claims(id_token: &str) -> Option<Value> {
     let payload = URL_SAFE_NO_PAD.decode(id_token.split('.').nth(1)?).ok()?;
-    let claims: Value = serde_json::from_slice(&payload).ok()?;
-    let picture = claims["picture"].as_str()?;
-    let url = reqwest::Url::parse(picture).ok()?;
-    (url.scheme() == "https").then(|| picture.to_owned())
+    serde_json::from_slice(&payload).ok()
+}
+
+// The stored ID token was verified during sign-in. These claims are used only
+// for request routing, never as authorization.
+fn verified_account_id(id_token: &str) -> Option<String> {
+    account_id_from_claims(&verified_claims(id_token)?)
+}
+
+fn verified_is_fedramp_account(id_token: &str) -> bool {
+    verified_claims(id_token)
+        .and_then(|claims| {
+            claims["https://api.openai.com/auth"]["chatgpt_account_is_fedramp"].as_bool()
+        })
+        .unwrap_or(false)
+}
+
+fn account_id_from_credentials(credentials: &Credentials) -> Option<String> {
+    if credentials.access_token.is_empty() {
+        return None;
+    }
+    credentials
+        .account_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .or_else(|| verified_account_id(&credentials.id_token))
+}
+
+pub fn account_id() -> Result<Option<String>> {
+    Ok(load()?.as_ref().and_then(account_id_from_credentials))
+}
+
+pub fn is_fedramp_account() -> Result<bool> {
+    Ok(load()?
+        .filter(|credentials| !credentials.access_token.is_empty())
+        .is_some_and(|credentials| verified_is_fedramp_account(&credentials.id_token)))
 }
 
 pub async fn access_token() -> Result<String> {
@@ -202,6 +238,9 @@ pub async fn access_token() -> Result<String> {
             .refresh_token
             .context("OpenAI did not return a replacement refresh token")?;
         c.scope = tokens.scope.unwrap_or(c.scope);
+        if let Some(account_id) = tokens.account_id.filter(|id| !id.is_empty()) {
+            c.account_id = Some(account_id);
+        }
         c.expires_at = now() + tokens.expires_in;
         store(Some(&c))?;
     }
@@ -229,6 +268,7 @@ pub async fn sign_out(app: &AppHandle) -> Result<()> {
         let refresh_token = std::mem::take(&mut credentials.refresh_token);
         credentials.access_token.clear();
         credentials.id_token.clear();
+        credentials.account_id = None;
         store(Some(&credentials))?;
         crate::harness::dray::commands::invalidate_model_catalog();
         let revoked = async {
@@ -396,7 +436,8 @@ pub async fn begin(app: AppHandle) -> Result<()> {
                     if returning.as_ref().is_some_and(|c|c.subject!=subject) { bail!("ChatGPT account changed. Sign out before connecting another account."); }
                     let scope=tokens.scope.context("Missing ChatGPT permissions")?;
                     if !scope.split_whitespace().any(|s|s=="chatgpt.tokens.use.direct") { bail!("Allow ChatGPT plan usage to use Dray's agent."); }
-                    let credentials=Credentials { client_id,subject,email:claims["email"].as_str().map(str::to_string),id_token,access_token:tokens.access_token,refresh_token:tokens.refresh_token.context("Missing ChatGPT refresh token")?,scope,expires_at:now()+tokens.expires_in };
+                    let account_id=tokens.account_id.or_else(||account_id_from_claims(&claims));
+                    let credentials=Credentials { client_id,subject,account_id,email:claims["email"].as_str().map(str::to_string),id_token,access_token:tokens.access_token,refresh_token:tokens.refresh_token.context("Missing ChatGPT refresh token")?,scope,expires_at:now()+tokens.expires_in };
                     let _guard=LOCK.get_or_init(||Mutex::new(())).lock().await;
                     store(Some(&credentials))?;
                     crate::harness::dray::commands::invalidate_model_catalog();
@@ -433,29 +474,70 @@ pub async fn begin(app: AppHandle) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn profile_picture_reads_only_https_display_metadata() {
-        let token = |claims: Value| {
-            format!(
-                "header.{}.signature",
-                URL_SAFE_NO_PAD.encode(claims.to_string())
+    fn account_id_comes_from_oauth_response_or_verified_identity_claim() {
+        let response: Tokens = serde_json::from_value(serde_json::json!({
+            "access_token": "access", "expires_in": 3600, "account_id": "response-account"
+        }))
+        .unwrap();
+        assert_eq!(response.account_id.as_deref(), Some("response-account"));
+
+        let id_token = format!(
+            "header.{}.signature",
+            URL_SAFE_NO_PAD.encode(
+                serde_json::json!({
+                    "https://api.openai.com/auth": {
+                        "chatgpt_account_id": "claim-account",
+                        "chatgpt_account_is_fedramp": true
+                    }
+                })
+                .to_string()
             )
-        };
-        assert_eq!(
-            profile_picture(&token(serde_json::json!({
-                "picture": "https://example.com/avatar.png"
-            }))),
-            Some("https://example.com/avatar.png".into())
         );
-        for claims in [
-            serde_json::json!({}),
-            serde_json::json!({"picture": null}),
-            serde_json::json!({"picture": "http://example.com/avatar.png"}),
-            serde_json::json!({"picture": "file:///avatar.png"}),
-        ] {
-            assert_eq!(profile_picture(&token(claims)), None);
-        }
-        assert_eq!(profile_picture(""), None);
-        assert_eq!(profile_picture("invalid.token"), None);
+        assert_eq!(
+            verified_account_id(&id_token).as_deref(),
+            Some("claim-account")
+        );
+        assert!(verified_is_fedramp_account(&id_token));
+        assert_eq!(verified_account_id("invalid.token"), None);
+        assert!(!verified_is_fedramp_account("invalid.token"));
+        assert_eq!(account_id_from_claims(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn existing_credentials_ignore_retired_oauth_picture_metadata() {
+        let credentials: Credentials = serde_json::from_value(serde_json::json!({
+            "client_id": "oaiapp_dray", "subject": "account-1", "email": null,
+            "picture": "https://example.com/avatar.png",
+            "id_token": "identity", "access_token": "access", "refresh_token": "refresh",
+            "scope": "openid profile", "expires_at": 0
+        }))
+        .unwrap();
+        assert!(credentials.account_id.is_none());
+    }
+
+    #[test]
+    fn account_id_requires_nonempty_explicit_metadata_or_verified_claim() {
+        let mut credentials: Credentials = serde_json::from_value(serde_json::json!({
+            "client_id": "oaiapp_dray",
+            "subject": "account-1",
+            "account_id": "",
+            "email": null,
+            "id_token": "invalid.token",
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "scope": "openid profile",
+            "expires_at": 0
+        }))
+        .unwrap();
+        assert_eq!(account_id_from_credentials(&credentials), None);
+
+        credentials.account_id = Some("explicit-account-id".into());
+        assert_eq!(
+            account_id_from_credentials(&credentials).as_deref(),
+            Some("explicit-account-id")
+        );
+        credentials.access_token.clear();
+        assert_eq!(account_id_from_credentials(&credentials), None);
     }
 
     #[test]

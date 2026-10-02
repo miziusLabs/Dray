@@ -37,7 +37,7 @@ import { useVibrancy } from "@/hooks/useVibrancy";
 import { warmHighlighter } from "@/hooks/useHighlighter";
 import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
-import { titleModels, useTitlePrefs } from "@/hooks/useTitlePrefs";
+import { titleDefaultEffort, titleModels, useTitlePrefs } from "@/hooks/useTitlePrefs";
 import { useSessions } from "@/hooks/useSessions";
 import type { Effort, Model, AgentModel } from "@/types/events";
 import type { UsageDisplayMode } from "@/types/usage";
@@ -123,7 +123,7 @@ function App() {
     );
     setTitlePrefs(
       nextModelId,
-      nextEffort ?? nextModel?.defaultEffort ?? "off",
+      nextEffort ?? titleDefaultEffort(nextModel),
       nextAgentModel,
     );
   };

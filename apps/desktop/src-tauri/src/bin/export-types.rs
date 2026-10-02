@@ -68,6 +68,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ade_lib::store::SessionIndexItem::export_all(&cfg)?;
     ade_lib::store::SessionSnapshot::export_all(&cfg)?;
     ade_lib::title::SessionTitleEvent::export_all(&cfg)?;
-    ade_lib::usage::AgentUsage::export_all(&cfg)?;
+    ade_lib::usage::PlanUsage::export_all(&cfg)?;
     Ok(())
 }

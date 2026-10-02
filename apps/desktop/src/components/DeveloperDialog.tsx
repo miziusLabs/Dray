@@ -18,7 +18,7 @@ export default function DeveloperDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-120">
         <DialogHeader>
           <DialogTitle>Developer</DialogTitle>
           <DialogDescription>Development-only tools for testing Dray.</DialogDescription>

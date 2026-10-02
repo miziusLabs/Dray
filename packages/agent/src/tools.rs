@@ -15,7 +15,10 @@ use tokio::{
 pub fn shell(command: &str) -> Command {
     #[cfg(windows)]
     let mut c = {
-        let mut c = Command::new("powershell.exe");
+        let system_root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        let powershell = Path::new(&system_root)
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+        let mut c = Command::new(powershell);
         c.args(["-NoProfile", "-NonInteractive", "-Command", command]);
         c.creation_flags(0x08000000);
         c
@@ -413,14 +416,19 @@ pub async fn research(
             let args = serde_json::from_str(call["arguments"].as_str().unwrap_or("{}"))?;
             let result = if definitions.iter().any(|tool| tool["name"] == name) {
                 if name == "github" {
-                    github(&args, cwd).await
+                    github(&args, cwd)
+                        .await
+                        .map(|text| super::ToolOutput::text(text))
                 } else {
                     super::execute(name, &args, cwd).await
                 }
             } else {
                 Err(anyhow::anyhow!("Read-only research does not allow {name}"))
             };
-            input.push(json!({"type":"function_call_output","call_id":call["call_id"],"output":result.unwrap_or_else(|e|e.to_string())}));
+            let output = result
+                .map(|result| result.api_output)
+                .unwrap_or_else(|error| json!(error.to_string()));
+            input.push(json!({"type":"function_call_output","call_id":call["call_id"],"output":output}));
         }
     }
     bail!("Research reached its 12-request limit; use a more focused query")

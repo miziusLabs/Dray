@@ -97,6 +97,7 @@ pub async fn list_models(_cwd: Option<&str>) -> Result<Vec<Model>> {
     cache
         .get_or_fetch(generation, || async {
             let token = crate::account::access_token().await?;
+            crate::tls::initialize();
             let client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(20))
                 .build()?;
@@ -239,6 +240,7 @@ mod tests {
 
     #[test]
     fn catalog_request_includes_model_catalog_compatibility_version() {
+        crate::tls::initialize();
         let request = catalog_request(&reqwest::Client::new(), "test-token")
             .build()
             .unwrap();

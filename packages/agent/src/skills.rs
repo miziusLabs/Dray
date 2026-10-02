@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
-const BUILTIN_SKILLS: &[&str] = &[include_str!("../skills/github/SKILL.md")];
+const BUILTIN_SKILLS: &[&str] = &[
+    include_str!("../skills/github/SKILL.md"),
+    include_str!("../skills/commit-and-push/SKILL.md"),
+];
 
 pub struct Skill {
     pub name: String,
@@ -114,6 +117,19 @@ mod tests {
         assert_eq!(metadata("---\r\nname: review-code\r\ndescription: >-\r\n  Review changes\r\n  for bugs.\r\n---\r\nInstructions"),Some(("review-code".into(),"Review changes for bugs.".into())));
         assert!(metadata("---\nname: ../escape\ndescription: bad\n---\n").is_none());
         assert!(metadata("# Missing frontmatter").is_none());
+    }
+
+    #[test]
+    fn discovers_bundled_commit_and_push_skill_with_requested_format() {
+        let skill = bundled_skills()
+            .find(|skill| skill.name == "commit-and-push")
+            .expect("the commit-and-push skill is bundled with the agent");
+        assert!(skill.path.is_none());
+        assert!(skill.contents.contains("non-technical description"));
+        assert!(skill.contents.contains("detailed description"));
+        assert!(discover(Path::new("."))
+            .iter()
+            .any(|skill| skill.name == "commit-and-push"));
     }
 
     #[test]

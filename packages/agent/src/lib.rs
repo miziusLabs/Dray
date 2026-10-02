@@ -1,17 +1,30 @@
 //! Dray's standalone coding agent. No external agent or JavaScript runtime.
 //! The JSON-line transport preserves the desktop's established event envelopes.
 use anyhow::{bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     io::{BufRead, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 use tokio::sync::mpsc;
 
 pub const API: &str = "https://api.openai.com/v1";
+
+fn initialize_tls_provider() {
+    static INITIALIZED: OnceLock<()> = OnceLock::new();
+    INITIALIZED.get_or_init(|| {
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            // Another concurrent caller may install it first; in that case the
+            // provider is already available to reqwest.
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        }
+    });
+}
+
 mod process;
 pub mod skills;
 mod tools;
@@ -73,6 +86,7 @@ fn prepare_request(mut body: Value) -> Value {
 }
 async fn response_impl(token: &str, body: Value, preview: bool, record: bool) -> Result<Value> {
     let body = prepare_request(body);
+    initialize_tls_provider();
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .build()?;
@@ -251,7 +265,7 @@ impl SseDecoder {
 
 fn tools() -> Value {
     let mut definitions = json!([
-        {"type":"function","name":"read","description":"Read a UTF-8 file. Paths are relative to the workspace unless absolute.","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false},"strict":true},
+        {"type":"function","name":"read","description":"Read UTF-8 text files and inspect PNG, JPEG, GIF, or WebP images up to 5 MiB. Paths are relative to the workspace unless absolute.","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false},"strict":true},
         {"type":"function","name":"write","description":"Create or replace a UTF-8 file in the workspace.","parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false},"strict":true},
         {"type":"function","name":"edit","description":"Replace one unique occurrence of oldText with newText in a workspace file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"}},"required":["path","oldText","newText"],"additionalProperties":false},"strict":true},
         {"type":"function","name":"bash","description":"Run a shell command in the workspace (PowerShell on Windows, sh elsewhere). Use for search, builds, tests, and Git. Commands have a 120-second deadline.","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"],"additionalProperties":false},"strict":true}
@@ -296,19 +310,79 @@ fn write_path(cwd: &Path, input: &str) -> Result<PathBuf> {
     Ok(resolved)
 }
 
-pub async fn execute(name: &str, args: &Value, cwd: &Path) -> Result<String> {
-    match name {
-        "read" => {
-            let path = cwd.join(text(args, "path")?);
-            if tokio::fs::metadata(&path).await?.len() > 1024 * 1024 {
-                bail!("file exceeds 1 MiB; read a smaller range using the shell");
-            }
-            let bytes = tokio::fs::read(path).await?;
-            if bytes.len() > 1024 * 1024 {
-                bail!("file exceeds 1 MiB; read a smaller range using the shell");
-            }
-            Ok(String::from_utf8(bytes)?)
+const MAX_TEXT_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_IMAGE_FILE_BYTES: u64 = 5 * 1024 * 1024;
+
+pub(crate) struct ToolOutput {
+    pub(crate) content: Vec<Value>,
+    pub(crate) api_output: Value,
+}
+
+impl ToolOutput {
+    pub(crate) fn text(text: impl Into<String>) -> Self {
+        let text = text.into();
+        Self {
+            content: vec![json!({"type":"text","text":text})],
+            api_output: json!(text),
         }
+    }
+
+    fn image(path: &Path, mime_type: &str, data: String) -> Self {
+        let description = format!("Read image file {}.", path.display());
+        let image_url = format!("data:{mime_type};base64,{data}");
+        Self {
+            content: vec![
+                json!({"type":"text","text":description}),
+                json!({"type":"image","data":data,"mimeType":mime_type}),
+            ],
+            api_output: json!([
+                {"type":"input_text","text":description},
+                {"type":"input_image","image_url":image_url}
+            ]),
+        }
+    }
+}
+
+fn image_mime(path: &Path) -> Option<&'static str> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+fn check_read_size(size: u64, mime_type: Option<&str>) -> Result<()> {
+    if mime_type.is_some() && size > MAX_IMAGE_FILE_BYTES {
+        bail!("image exceeds 5 MiB; resize it before reading");
+    }
+    if mime_type.is_none() && size > MAX_TEXT_FILE_BYTES {
+        bail!("file exceeds 1 MiB; read a smaller range using the shell");
+    }
+    Ok(())
+}
+
+async fn read_file(args: &Value, cwd: &Path) -> Result<ToolOutput> {
+    let path = cwd.join(text(args, "path")?);
+    let mime_type = image_mime(&path);
+    check_read_size(tokio::fs::metadata(&path).await?.len(), mime_type)?;
+    let bytes = tokio::fs::read(&path).await?;
+    check_read_size(bytes.len() as u64, mime_type)?;
+
+    match mime_type {
+        Some(mime_type) => Ok(ToolOutput::image(
+            &path,
+            mime_type,
+            STANDARD.encode(bytes),
+        )),
+        None => Ok(ToolOutput::text(String::from_utf8(bytes)?)),
+    }
+}
+
+pub(crate) async fn execute(name: &str, args: &Value, cwd: &Path) -> Result<ToolOutput> {
+    match name {
+        "read" => read_file(args, cwd).await,
         "write" | "edit" => {
             let path = write_path(cwd, text(args, "path")?)?;
             let content = if name == "edit" {
@@ -323,12 +397,14 @@ pub async fn execute(name: &str, args: &Value, cwd: &Path) -> Result<String> {
             };
             tokio::fs::create_dir_all(path.parent().context("missing parent")?).await?;
             tokio::fs::write(path, content).await?;
-            Ok("File saved.".into())
+            Ok(ToolOutput::text("File saved."))
         }
-        "ls" => tools::ls(args, cwd).await,
-        "background_command" => tools::background(args, cwd).await,
-        "ask_user" => tools::question(args).await,
-        "bash" => tools::foreground(text(args, "command")?, cwd).await,
+        "ls" => Ok(ToolOutput::text(tools::ls(args, cwd).await?)),
+        "background_command" => Ok(ToolOutput::text(tools::background(args, cwd).await?)),
+        "ask_user" => Ok(ToolOutput::text(tools::question(args).await?)),
+        "bash" => Ok(ToolOutput::text(
+            tools::foreground(text(args, "command")?, cwd).await?,
+        )),
         _ => bail!("unknown tool {name}"),
     }
 }
@@ -403,7 +479,7 @@ where
         cwd.display(),
         std::env::consts::OS
     ));
-    instructions.push_str("\nYou are Dray's built-in coding agent. Bash runs PowerShell on Windows and sh on other platforms. Follow workspace instructions and inspect AGENTS.md files in subdirectories before editing. Read file attachments mentioned with @path using the read tool.\n");
+    instructions.push_str("\nYou are Dray's built-in coding agent. Bash runs PowerShell on Windows and sh on other platforms. Follow workspace instructions and inspect AGENTS.md files in subdirectories before editing. Read file attachments mentioned with @path using the read tool. For images, use read on PNG, JPEG, GIF, or WebP files; their pixels are provided as visual input.\n");
     for skill in skills::discover(&cwd) {
         let location = skill
             .path
@@ -567,17 +643,22 @@ where
                 json!({"type":"tool_execution_start","toolCallId":call["call_id"],"toolName":name,"args":args}),
             );
             let result = if matches!(name, "finder" | "libarian" | "web_search") {
-                tools::research(name, text(&args, "query")?, &token, &model, &cwd).await
+                tools::research(name, text(&args, "query")?, &token, &model, &cwd)
+                    .await
+                    .map(|text| ToolOutput::text(text))
             } else {
                 execute(name, &args, &cwd).await
             };
             let is_error = result.is_err();
-            let text = result.unwrap_or_else(|e| e.to_string());
+            let ToolOutput {
+                content,
+                api_output,
+            } = result.unwrap_or_else(|error| ToolOutput::text(error.to_string()));
             emit(
-                json!({"type":"tool_execution_end","toolCallId":call["call_id"],"toolName":name,"isError":is_error,"result":{"content":[{"type":"text","text":text}]}}),
+                json!({"type":"tool_execution_end","toolCallId":call["call_id"],"toolName":name,"isError":is_error,"result":{"content":content}}),
             );
             input.push(
-                json!({"type":"function_call_output","call_id":call["call_id"],"output":text}),
+                json!({"type":"function_call_output","call_id":call["call_id"],"output":api_output}),
             );
             let mut checkpoint = input.clone();
             for pending in calls.iter().skip(index + 1) {
@@ -833,6 +914,36 @@ mod tests {
         assert!(body.get("prompt_cache_retention").is_none());
     }
     #[tokio::test]
+    async fn read_images_provides_pixels_to_the_model_and_transcript() {
+        const GIF: &str = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+        let dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = dir.join("tiny.gif");
+        let bytes = STANDARD.decode(GIF).unwrap();
+        tokio::fs::write(&path, bytes).await.unwrap();
+
+        let output = execute("read", &json!({"path":"tiny.gif"}), &dir)
+            .await
+            .unwrap();
+        assert_eq!(
+            output.content[0]["text"],
+            format!("Read image file {}.", path.display())
+        );
+        assert_eq!(
+            output.content[1],
+            json!({"type":"image","data":GIF,"mimeType":"image/gif"})
+        );
+        assert_eq!(
+            output.api_output,
+            json!([
+                {"type":"input_text","text":format!("Read image file {}.", path.display())},
+                {"type":"input_image","image_url":format!("data:image/gif;base64,{GIF}")}
+            ])
+        );
+        tokio::fs::remove_dir_all(dir).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn shell_reports_exit_and_captures_output() {
         let output = execute(
             "bash",
@@ -841,8 +952,9 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(output.contains("dray-tool-output"));
-        assert!(output.contains("Exit status:"));
+        let text = output.content[0]["text"].as_str().unwrap();
+        assert!(text.contains("dray-tool-output"));
+        assert!(text.contains("Exit status:"));
     }
     #[tokio::test]
     async fn removed_search_tools_are_not_executable() {

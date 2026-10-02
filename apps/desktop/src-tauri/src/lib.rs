@@ -38,9 +38,10 @@ pub mod session;
 pub mod store;
 pub mod title;
 pub mod usage;
+pub(crate) mod tls;
 
 #[tauri::command]
-async fn get_agent_usage() -> Result<usage::AgentUsage, String> {
+async fn get_plan_usage() -> Result<usage::PlanUsage, String> {
     usage::fetch().await.map_err(|error| error.to_string())
 }
 
@@ -501,6 +502,7 @@ async fn mark_session_idle(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    tls::initialize();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -541,7 +543,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             cloud_availability,
-            get_agent_usage,
+            get_plan_usage,
             get_account_status,
             get_local_profile_picture,
             save_local_profile_picture,

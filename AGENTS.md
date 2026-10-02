@@ -201,7 +201,7 @@ Files in `src-tauri/src/`:
 - `harness/dray/mapper.rs` — maps native runtime events into the normalized event model.
 - `harness/dray/commands.rs` — account model catalog and `.dray/skills` discovery.
 - `account.rs` — loopback OAuth, PKCE, identity verification, serialized refresh, credential storage, cancellation, and revocation. `account/credential_store.rs` splits Windows credentials into bounded OS credential entries, publishing each complete generation through a manifest while retaining compatibility with older single-entry credentials.
-- `usage.rs` — recorded request tokens/cache usage, deduplicated across forks.
+- `usage.rs` — account-wide Codex plan limits from `/backend-api/wham/usage`, following the official Codex client with backend-only ChatGPT OAuth credentials; exposes five-hour and weekly windows.
 
 The frontend-facing Tauri command surface covers session send/read/control, attachments, models, commands/skills, file search, projects, branches, Git diffs/history/status, session flags/forks/deletion, notifications, PR operations, and quit confirmation. Add new native capabilities through a narrow command in `lib.rs` and keep implementation in the owning module.
 
@@ -240,8 +240,9 @@ Empty assistant text blocks are not transcript boundaries; consecutive tools sta
 grouped across model requests until visible non-tool output appears.
 
 Use the documented direct Sign in with ChatGPT token-sharing flow. Models and
-reasoning levels come from the account catalog; never probe private ChatGPT
-quota endpoints or hardcode supported models.
+reasoning levels come from the account catalog; do not hardcode supported models.
+Plan usage follows the official Codex client's usage GET; do not probe unrelated
+private quota endpoints. Missing or denied plan limits must remain unavailable.
 Model discovery sends a catalog compatibility `client_version` independently
 of the app version, so newer account models are included. Reasoning preferences
 are keyed by provider and model, and unsupported choices resolve to each model's

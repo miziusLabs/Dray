@@ -120,7 +120,7 @@ export default function SettingsDialog({
           dialog is described *by* — left unset, Radix warns about the missing
           `aria-describedby` and pointing it at a row would read that row's copy
           out as the dialog's purpose. */}
-      <DialogContent aria-describedby={undefined}>
+      <DialogContent className="grid-cols-1 max-w-120" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
         </DialogHeader>
@@ -165,7 +165,7 @@ export default function SettingsDialog({
           id="settings-panel"
           role="tabpanel"
           aria-label={SETTINGS_CATEGORY_LABELS[category]}
-          className="grid items-start"
+          className="grid min-w-0 grid-cols-1 items-start"
         >
           <div
             className={[
@@ -233,7 +233,7 @@ export default function SettingsDialog({
           </div>
           <div
             className={[
-              "col-start-1 row-start-1 flex flex-col gap-6",
+              "col-start-1 row-start-1 flex min-w-0 flex-col gap-6",
               category !== "account" && "invisible pointer-events-none",
             ].filter(Boolean).join(" ")}
             aria-hidden={category !== "account"}
@@ -280,13 +280,13 @@ function UsageDisplayRow({
   return (
     <SettingRow
       id={id}
-      label="Cache indicator"
-      description="Choose whether the usage bar shows cached or uncached input tokens."
+      label="Plan usage indicator"
+      description="Choose whether the plan usage bars show remaining or consumed usage."
     >
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button id={id} type="button" variant="outline" size="sm" className="text-ui">
-            {mode === "left" ? "Uncached" : "Cached"}
+            {mode === "left" ? "Remaining" : "Consumed"}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-24">
@@ -297,10 +297,10 @@ function UsageDisplayRow({
             }}
           >
             <DropdownMenuRadioItem value="left" className="text-ui">
-              Uncached
+              Remaining
             </DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="used" className="text-ui">
-              Cached
+              Consumed
             </DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>

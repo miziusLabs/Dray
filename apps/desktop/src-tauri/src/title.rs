@@ -1,7 +1,7 @@
 //! Session titles use the connected account's supported OpenAI models.
 //! Generation runs independently; the prompt-derived title remains on failure.
 
-use crate::models::{resolve_effort, AgentModel, Effort};
+use crate::models::{resolve_effort, AgentModel, Effort, Model};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -34,6 +34,49 @@ const DEADLINE: Duration = Duration::from_secs(45);
 /// regardless — so this caps the request size and the tokens
 /// spent, without changing the answer.
 const MAX_PROMPT_CHARS: usize = 500;
+
+const DEFAULT_TITLE_MODEL_ID: &str = "gpt-6-luna";
+
+/// True when this model is the title-generation default from the account catalog.
+fn is_default_title_model(model: &Model) -> bool {
+    model.agent_model.as_ref().is_some_and(|agent_model| {
+        agent_model.provider == "openai" && agent_model.id == DEFAULT_TITLE_MODEL_ID
+    })
+}
+
+/// A valid configured choice wins; otherwise prefer Luna, then the first
+/// available account model so accounts without Luna can still generate titles.
+fn select_title_model<'a>(
+    catalog: &'a [Model],
+    requested: Option<&AgentModel>,
+) -> Option<(&'a Model, bool)> {
+    let requested = requested.and_then(|wanted| {
+        catalog
+            .iter()
+            .find(|model| model.agent_model.as_ref() == Some(wanted))
+    });
+    requested
+        .map(|model| (model, true))
+        .or_else(|| {
+            catalog
+                .iter()
+                .find(|model| is_default_title_model(model))
+                .map(|model| (model, false))
+        })
+        .or_else(|| catalog.first().map(|model| (model, false)))
+}
+
+/// Luna's catalog default may change independently. Keep the title-specific
+/// default at low while honoring any supported explicit choice.
+fn resolve_title_effort(model: &Model, requested: Option<Effort>) -> Option<Effort> {
+    if let Some(effort) = requested.filter(|effort| model.efforts.contains(effort)) {
+        return Some(effort);
+    }
+    if is_default_title_model(model) && model.efforts.contains(&Effort::Low) {
+        return Some(Effort::Low);
+    }
+    resolve_effort(model, None)
+}
 
 /// The instructions and user text for a title-only request.
 ///
@@ -78,15 +121,9 @@ pub async fn generate_title(
     }
 
     let catalog = crate::harness::dray::commands::list_models(None).await?;
-    let selected = model
-        .and_then(|wanted| {
-            catalog
-                .iter()
-                .find(|m| m.agent_model.as_ref() == Some(wanted))
-        })
-        .or_else(|| catalog.first())
-        .context("No supported OpenAI models available")?;
-    let effort = resolve_effort(selected, effort);
+    let (selected, was_requested) =
+        select_title_model(&catalog, model).context("No supported OpenAI models available")?;
+    let effort = resolve_title_effort(selected, if was_requested { effort } else { None });
     let selected = selected
         .agent_model
         .as_ref()
@@ -204,6 +241,81 @@ fn clean_title(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_model(id: &str, default_effort: Effort) -> Model {
+        Model {
+            id: crate::models::ModelId::Dray,
+            agent_model: Some(AgentModel {
+                provider: "openai".into(),
+                id: id.into(),
+            }),
+            label: id.into(),
+            efforts: vec![Effort::Low, Effort::Medium, Effort::High],
+            default_effort: Some(default_effort),
+            context_window: None,
+        }
+    }
+
+    #[test]
+    fn default_title_model_is_luna_at_low_effort() {
+        let catalog = vec![
+            test_model("gpt-6-astra", Effort::Medium),
+            test_model(DEFAULT_TITLE_MODEL_ID, Effort::Medium),
+        ];
+
+        let (selected, was_requested) = select_title_model(&catalog, None).unwrap();
+        assert!(!was_requested);
+        assert_eq!(
+            selected.agent_model.as_ref().unwrap().id,
+            DEFAULT_TITLE_MODEL_ID
+        );
+        assert_eq!(resolve_title_effort(selected, None), Some(Effort::Low));
+    }
+
+    #[test]
+    fn missing_title_model_falls_back_to_luna_and_ignores_its_old_effort() {
+        let catalog = vec![
+            test_model("gpt-6-astra", Effort::Medium),
+            test_model(DEFAULT_TITLE_MODEL_ID, Effort::Medium),
+        ];
+        let missing = AgentModel {
+            provider: "openai".into(),
+            id: "retired-model".into(),
+        };
+
+        let (selected, was_requested) = select_title_model(&catalog, Some(&missing)).unwrap();
+        let effort = resolve_title_effort(
+            selected,
+            if was_requested {
+                Some(Effort::High)
+            } else {
+                None
+            },
+        );
+        assert!(!was_requested);
+        assert_eq!(
+            selected.agent_model.as_ref().unwrap().id,
+            DEFAULT_TITLE_MODEL_ID
+        );
+        assert_eq!(effort, Some(Effort::Low));
+    }
+
+    #[test]
+    fn requested_supported_title_model_and_effort_are_preserved() {
+        let catalog = vec![
+            test_model("gpt-6-astra", Effort::Medium),
+            test_model(DEFAULT_TITLE_MODEL_ID, Effort::Medium),
+        ];
+        let requested = catalog[0].agent_model.as_ref().unwrap();
+
+        let (selected, was_requested) = select_title_model(&catalog, Some(requested)).unwrap();
+        assert!(was_requested);
+        assert_eq!(selected.agent_model.as_ref().unwrap().id, "gpt-6-astra");
+        assert_eq!(
+            resolve_title_effort(selected, Some(Effort::High)),
+            Some(Effort::High)
+        );
+    }
 
     #[test]
     fn strips_the_wrapping_a_model_adds() {
