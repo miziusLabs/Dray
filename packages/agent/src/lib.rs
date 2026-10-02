@@ -327,7 +327,6 @@ pub async fn execute(name: &str, args: &Value, cwd: &Path) -> Result<String> {
         }
         "ls" => tools::ls(args, cwd).await,
         "background_command" => tools::background(args, cwd).await,
-        "github" => tools::github(args, cwd).await,
         "ask_user" => tools::question(args).await,
         "bash" => tools::foreground(text(args, "command")?, cwd).await,
         _ => bail!("unknown tool {name}"),
@@ -406,11 +405,14 @@ where
     ));
     instructions.push_str("\nYou are Dray's built-in coding agent. Bash runs PowerShell on Windows and sh on other platforms. Follow workspace instructions and inspect AGENTS.md files in subdirectories before editing. Read file attachments mentioned with @path using the read tool.\n");
     for skill in skills::discover(&cwd) {
+        let location = skill
+            .path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "bundled with Dray".into());
         instructions.push_str(&format!(
             "\nAvailable skill: ${} — {} ({})",
-            skill.name,
-            skill.description,
-            skill.path.display()
+            skill.name, skill.description, location
         ));
     }
     let mut ancestors: Vec<_> = cwd.ancestors().collect();
@@ -817,9 +819,12 @@ mod tests {
         assert_eq!(body["store"], false);
         assert_eq!(body["stream"], true);
         assert_eq!(body["tools"][0]["type"], "namespace");
-        assert_eq!(body["tools"][0]["tools"].as_array().unwrap().len(), 11);
+        assert_eq!(body["tools"][0]["tools"].as_array().unwrap().len(), 10);
         let definitions = body["tools"][0]["tools"].as_array().unwrap();
         assert!(definitions.iter().any(|tool| tool["name"] == "bash"));
+        assert!(!definitions
+            .iter()
+            .any(|tool| tool["name"] == "github"));
         assert!(!definitions
             .iter()
             .any(|tool| tool["name"] == "find" || tool["name"] == "grep"));
@@ -841,7 +846,7 @@ mod tests {
     }
     #[tokio::test]
     async fn removed_search_tools_are_not_executable() {
-        for name in ["find", "grep"] {
+        for name in ["find", "grep", "github"] {
             let error = execute(name, &json!({"pattern":"anything"}), &std::env::temp_dir())
                 .await
                 .unwrap_err();

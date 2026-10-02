@@ -44,7 +44,6 @@ pub fn definitions() -> Vec<Value> {
         schema("finder","Explore the current codebase with a dedicated read-only agent. Use for complex searches by functionality or concept.",json!({"query":{"type":"string"}}),json!(["query"])),
         schema("libarian","Research GitHub repositories with a dedicated read-only agent using the authenticated gh CLI.",json!({"query":{"type":"string"}}),json!(["query"])),
         schema("web_search","Search the web for current information using OpenAI web search. Returns source links.",json!({"query":{"type":"string"}}),json!(["query"])),
-        schema("github","Read GitHub API resources with the authenticated gh CLI. Only GET is supported. Use repos/owner/repo/contents/path, repos/owner/repo/git/trees/ref?recursive=1, search/code?q=..., search/repositories?q=..., or repos/owner/repo/compare/base...head. For content responses, base64 file content is decoded automatically.",json!({"endpoint":{"type":"string"}}),json!(["endpoint"])),
         schema("ask_user","Ask the user an essential question and wait for their answer. Provide options for a choice or omit options for free text.",json!({"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}}}),json!(["question"])),
     ]
 }
@@ -110,7 +109,7 @@ pub async fn ls(args: &Value, cwd: &Path) -> Result<String> {
     Ok(names.into_iter().take(1000).collect::<Vec<_>>().join("\n"))
 }
 
-pub async fn github(args: &Value, cwd: &Path) -> Result<String> {
+async fn github(args: &Value, cwd: &Path) -> Result<String> {
     let endpoint = super::text(args, "endpoint")?;
     if !endpoint.starts_with("repos/")
         && !endpoint.starts_with("search/")
@@ -338,19 +337,28 @@ mod tests {
     }
 }
 
+fn github_definition() -> Value {
+    schema(
+        "github",
+        "Read GitHub API resources with the authenticated gh CLI. Only GET is supported. Use repos/owner/repo/contents/path, repos/owner/repo/git/trees/ref?recursive=1, search/code?q=..., search/repositories?q=..., or repos/owner/repo/compare/base...head. For content responses, base64 file content is decoded automatically.",
+        json!({"endpoint":{"type":"string"}}),
+        json!(["endpoint"]),
+    )
+}
+
 fn research_tools(name: &str) -> Vec<Value> {
+    if name == "libarian" {
+        return vec![github_definition()];
+    }
+
     super::tools()
         .as_array()
         .unwrap()
         .iter()
         .filter(|tool| {
-            if name == "finder" {
-                ["read", "ls", "bash"]
-                    .iter()
-                    .any(|allowed| tool["name"] == *allowed)
-            } else {
-                tool["name"] == "github"
-            }
+            ["read", "ls", "bash"]
+                .iter()
+                .any(|allowed| tool["name"] == *allowed)
         })
         .cloned()
         .collect()
@@ -404,7 +412,11 @@ pub async fn research(
                 .context("Missing research tool name")?;
             let args = serde_json::from_str(call["arguments"].as_str().unwrap_or("{}"))?;
             let result = if definitions.iter().any(|tool| tool["name"] == name) {
-                super::execute(name, &args, cwd).await
+                if name == "github" {
+                    github(&args, cwd).await
+                } else {
+                    super::execute(name, &args, cwd).await
+                }
             } else {
                 Err(anyhow::anyhow!("Read-only research does not allow {name}"))
             };
