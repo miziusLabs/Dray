@@ -739,8 +739,8 @@ function RowAction({
           // `button { cursor: default }` wins over an inherited value.
           className={cn(
             "cursor-pointer",
-            className,
             active ? "text-foreground" : "text-muted-foreground",
+            className,
           )}
         >
           {children}
@@ -1236,7 +1236,7 @@ function SessionRow({
 
             <RowAction
               label={item.archived ? "Unsettle" : "Settle"}
-              className="-mr-1.5"
+              className="-mr-1.5 text-sidebar-foreground/80"
               active={item.archived}
               onClick={() =>
                 onSetFlags(item.sessionId, { archived: !item.archived })
