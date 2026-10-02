@@ -25,6 +25,9 @@ const RESOURCE: &str = "https://api.openai.com/v1";
 static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static PENDING: OnceLock<Mutex<Option<tokio::task::JoinHandle<()>>>> = OnceLock::new();
 
+#[cfg(any(windows, test))]
+mod credential_store;
+
 #[derive(Clone, Serialize, Deserialize)]
 struct Credentials {
     client_id: String,
@@ -71,7 +74,20 @@ fn http() -> Result<reqwest::Client> {
         .build()?)
 }
 
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(windows)]
+fn load() -> Result<Option<Credentials>> {
+    credential_store::load(&credential_store::NativeStore)?
+        .map(|json| serde_json::from_str(&json).map_err(Into::into))
+        .transpose()
+}
+#[cfg(windows)]
+fn store(value: Option<&Credentials>) -> Result<()> {
+    credential_store::store(
+        &credential_store::NativeStore,
+        value.map(serde_json::to_string).transpose()?.as_deref(),
+    )
+}
+#[cfg(target_os = "macos")]
 fn load() -> Result<Option<Credentials>> {
     match keyring::Entry::new("com.yogesh.dray.chatgpt", "account")?.get_password() {
         Ok(json) => Ok(Some(serde_json::from_str(&json)?)),
@@ -79,7 +95,7 @@ fn load() -> Result<Option<Credentials>> {
         Err(e) => Err(e.into()),
     }
 }
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(target_os = "macos")]
 fn store(value: Option<&Credentials>) -> Result<()> {
     let entry = keyring::Entry::new("com.yogesh.dray.chatgpt", "account")?;
     match value {
