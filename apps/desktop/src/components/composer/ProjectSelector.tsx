@@ -193,7 +193,7 @@ export default function ProjectSelector({
                 className="max-w-40 px-1.5 text-ui text-muted-foreground"
               >
                 <span className="truncate">
-                  {selectedProject?.name ?? (value === null ? "No Project" : "Attach project")}
+                  {selectedProject?.name ?? (value === null ? "No Project" : "Create Project")}
                 </span>
               </Button>
             </DropdownMenuTrigger>
@@ -356,7 +356,7 @@ export default function ProjectSelector({
 
           <DropdownMenuItem onSelect={onAttach} className="text-ui">
             <Plus />
-            Attach project…
+            Create Project
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
