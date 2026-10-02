@@ -75,7 +75,7 @@ function useTurnDuration(turn: Turn, running: boolean): number {
   return Math.max(0, (Number.isNaN(end) ? start : end) - start);
 }
 
-/// One turn: the prompt, a “Worked for …” disclosure containing every
+/// One turn: the prompt, a “Working for …” or “Worked for …” disclosure containing every
 /// intermediate step, a divider, then the final answer. Live work is forced
 /// open; the same section closes automatically as soon as the turn completes.
 export default function TurnBlock({
@@ -129,7 +129,7 @@ export default function TurnBlock({
                   running ? "cursor-default" : "cursor-pointer",
                 )}
               >
-                <span>Worked for {formatDuration(duration)}</span>
+                <span>{running ? "Working for" : "Worked for"} {formatDuration(duration)}</span>
                 <ChevronRight
                   className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")}
                 />
