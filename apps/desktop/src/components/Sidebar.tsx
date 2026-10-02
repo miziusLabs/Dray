@@ -297,7 +297,13 @@ export function AnalyticsButton({ onOpen }: { onOpen: () => void }) {
           <BarChart3 className="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="right">Analytics</TooltipContent>
+      <TooltipContent side="right">
+        Analytics
+        <KbdGroup>
+          <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+          <Kbd>T</Kbd>
+        </KbdGroup>
+      </TooltipContent>
     </Tooltip>
   );
 }

@@ -511,6 +511,7 @@ function App() {
   // `useHotkey`'s usual pair of reasons: it claims the chord, and the app's
   // custom menu carries no Settings item to swallow the key first.
   useHotkey(",", () => setSettingsOpen(true));
+  useHotkey("t", () => setAnalyticsOpen(true));
   // No accelerator: Shift+Tab cycles the effort setting for the current model.
   useHotkey(
     "Tab",
