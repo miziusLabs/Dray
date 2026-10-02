@@ -155,7 +155,10 @@ pub fn resolve_effort(model: &Model, requested: Option<Effort>) -> Option<Effort
 
     match requested {
         Some(e) if model.efforts.contains(&e) => Some(e),
-        _ => model.default_effort,
+        _ => model
+            .default_effort
+            .filter(|e| model.efforts.contains(e))
+            .or_else(|| model.efforts.first().copied()),
     }
 }
 

@@ -185,6 +185,7 @@ Files in `src/lib/`:
 - `sessionOrder.test.ts` covers ordering behavior implemented alongside sidebar helpers.
 - `avatar.ts` — avatar lookup helpers.
 - `format.ts` — relative time, token/byte counts, and path formatting.
+- `models.ts` — model selection keys, supported reasoning resolution, and effort-preference migration.
 - `focus.ts` — focus utilities.
 - `notify.ts` — invokes native notification delivery.
 - `sound.ts` — notification/celebration audio.
@@ -251,8 +252,13 @@ Pi itself and its authentication are no longer dependencies.
 
 Use the documented direct Sign in with ChatGPT token-sharing flow. Models and
 reasoning levels come from the account catalog; never probe private ChatGPT
-quota endpoints or hardcode supported models. Responses input is an array,
-function tools use the `dray` namespace, and requests set `store: false`.
+quota endpoints or hardcode supported models.
+Model discovery sends a catalog compatibility `client_version` independently
+of the app version, so newer account models are included. Reasoning preferences
+are keyed by provider and model, and unsupported choices resolve to each model's
+catalog default. Codex's `ultra` delegation mode is not a native reasoning effort.
+Responses input is an array, function tools use the `dray` namespace, and requests
+set `store: false`.
 Retain encrypted reasoning between requests. Stable instructions, tool schemas,
 history prefixes, and a session cache key support server caching. Record
 per-request tokens including research and compaction. Cached input and reasoning

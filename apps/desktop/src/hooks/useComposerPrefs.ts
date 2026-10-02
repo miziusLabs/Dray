@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 
 import { useLocalStorage } from "@/hooks/useLocalStorage";
+import { migrateEffortPreferences } from "@/lib/models";
 import type { Effort, Harness, ModelId, AgentModel } from "@/types/events";
 
 /// Seeds for a first run with nothing stored. Once the user picks anything, their
@@ -13,9 +14,9 @@ const SEED: ComposerPrefs = {
   useCloud: false,
 };
 
-/// Effort is a property of the model, not of the picker: switching to Sonnet must
-/// not inherit the Max you last chose on Opus. Absent key = use the model default.
-export type EffortByModel = Partial<Record<ModelId, Effort>>;
+/// Key by provider/model so Luna does not inherit a choice made for Astra.
+/// An absent entry uses the model's catalog default.
+export type EffortByModel = Partial<Record<string, Effort>>;
 
 /// What a new session starts with. Deliberately not the whole composer: `branch`
 /// seeds from whatever the repo is checked out to, since restoring a name without
@@ -47,10 +48,16 @@ export function useComposerPrefs() {
     ...prefs,
     harness: "dray",
     modelId: "dray",
+    effortByModel: migrateEffortPreferences(prefs.effortByModel ?? {}, "dray", prefs.agentModel ?? null),
   };
 
   const patch = useCallback(
-    (next: Partial<ComposerPrefs>) => setPrefs((prev) => ({ ...SEED, ...prev, ...next })),
+    (next: Partial<ComposerPrefs>) => setPrefs((prev) => ({
+      ...SEED,
+      ...prev,
+      effortByModel: migrateEffortPreferences(prev.effortByModel ?? {}, "dray", prev.agentModel ?? null),
+      ...next,
+    })),
     [setPrefs],
   );
 

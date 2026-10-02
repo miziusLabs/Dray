@@ -5,6 +5,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
+// The catalog is gated by client compatibility, independently of Dray's app
+// version. Omitting this returns a legacy catalog that excludes newer models.
+const CATALOG_CLIENT_VERSION: &str = "0.159.0";
+
+fn catalog_request(client: &reqwest::Client, token: &str) -> reqwest::RequestBuilder {
+    client
+        .get(format!(
+            "{}/models?client_version={CATALOG_CLIENT_VERSION}",
+            dray_agent::API
+        ))
+        .bearer_auth(token)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
@@ -34,11 +47,10 @@ pub async fn list_models(_cwd: Option<&str>) -> Result<Vec<Model>> {
         return Ok(Vec::new());
     }
     let token = crate::account::access_token().await?;
-    let response = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
-        .build()?
-        .get("https://api.openai.com/v1/models")
-        .bearer_auth(token)
+        .build()?;
+    let response = catalog_request(&client, &token)
         .send()
         .await?
         .error_for_status()?;
@@ -61,13 +73,16 @@ pub fn models_from_response(body: &Value) -> Result<Vec<Model>> {
                 .flatten()
                 .filter_map(|level| {
                     let value = level.as_str().or_else(|| level["effort"].as_str())?;
+                    // `ultra` is Codex's automatic delegation mode, not a
+                    // Responses reasoning effort supported by our runtime.
                     Effort::from_arg(value)
                 })
                 .collect::<Vec<_>>();
             let default_effort = model["default_reasoning_level"]
                 .as_str()
                 .and_then(Effort::from_arg)
-                .filter(|e| efforts.contains(e));
+                .filter(|e| efforts.contains(e))
+                .or_else(|| efforts.first().copied());
             Some(Model {
                 id: ModelId::Dray,
                 agent_model: Some(AgentModel {
@@ -86,6 +101,64 @@ pub fn models_from_response(body: &Value) -> Result<Vec<Model>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_request_includes_model_catalog_compatibility_version() {
+        let request = catalog_request(&reqwest::Client::new(), "test-token")
+            .build()
+            .unwrap();
+        assert_eq!(
+            request.url().as_str(),
+            "https://api.openai.com/v1/models?client_version=0.159.0"
+        );
+    }
+
+    #[test]
+    fn new_models_keep_their_own_reasoning_options_and_defaults() {
+        let models = models_from_response(&serde_json::json!({"models": [
+            {"slug":"gpt-6.1-sol","visibility":"list","supported_reasoning_levels":["low","medium","high","xhigh","max","ultra"],"default_reasoning_level":"low"},
+            {"slug":"gpt-6-astra","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}],"default_reasoning_level":"low"},
+            {"slug":"gpt-6-luna","visibility":"list","supported_reasoning_levels":["low","medium","high","xhigh","max"],"default_reasoning_level":"medium"},
+            {"slug":"hidden-model","visibility":"hide"}
+        ]})).unwrap();
+        assert_eq!(
+            models
+                .iter()
+                .map(|m| m.agent_model.as_ref().unwrap().id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"]
+        );
+        assert_eq!(
+            models[1].efforts,
+            vec![
+                Effort::Low,
+                Effort::Medium,
+                Effort::High,
+                Effort::Xhigh,
+                Effort::Max
+            ]
+        );
+        assert_eq!(models[0].default_effort, Some(Effort::Low));
+        assert_eq!(models[2].default_effort, Some(Effort::Medium));
+        assert_eq!(
+            crate::models::resolve_effort(&models[1], Some(Effort::None)),
+            Some(Effort::Low)
+        );
+        assert_eq!(
+            crate::models::resolve_effort(&models[1], Some(Effort::Minimal)),
+            Some(Effort::Low)
+        );
+    }
+
+    #[test]
+    fn missing_or_unsupported_defaults_use_the_first_supported_effort() {
+        let models = models_from_response(&serde_json::json!({"models": [
+            {"slug":"future-model","visibility":"list","supported_reasoning_levels":["high","unrecognized"],"default_reasoning_level":"unrecognized"},
+            {"slug":"no-default","visibility":"list","supported_reasoning_levels":["medium"]}
+        ]})).unwrap();
+        assert_eq!(models[0].default_effort, Some(Effort::High));
+        assert_eq!(models[1].default_effort, Some(Effort::Medium));
+    }
     #[test]
     fn catalog_uses_visible_account_models_and_server_reasoning_levels() {
         let models=models_from_response(&serde_json::json!({"models":[

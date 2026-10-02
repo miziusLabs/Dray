@@ -16,6 +16,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { IS_MAC } from "@/lib/platform";
+import { modelKey, resolveEffort } from "@/lib/models";
 import type { Effort, Model, ModelId, AgentModel } from "@/types/events";
 
 export const EFFORT_LABELS: Record<Effort, string> = {
@@ -36,8 +37,7 @@ export const EFFORTS: Effort[] = ["off", "none", "minimal", "low", "medium", "hi
 // cycle levels.
 export const DEFAULT_CYCLE_EFFORTS: Effort[] = ["medium", "high", "xhigh", "max"];
 
-export const modelKey = (model: Model) =>
-  model.agentModel ? `dray:${model.agentModel.provider}/${model.agentModel.id}` : model.id;
+export { modelKey } from "@/lib/models";
 
 export const modelLabel = (model: Model) => model.label || model.agentModel?.id || model.id;
 
@@ -118,11 +118,12 @@ export default function ModelSelector({
       (m.id !== "dray" ||
         (m.agentModel?.provider === agentModel?.provider && m.agentModel?.id === agentModel?.id)),
   ) ?? null;
+  const selectedEffort = resolveEffort(selected, effort);
   /// What a row would resolve to if clicked: the live effort for the model
   /// already selected, each other model's own default. Mirrors the resolution
   /// in `useSessions`, so the menu can't advertise an effort the send wouldn't use.
   const rowEffort = (model: Model): Effort | null =>
-    selected && modelKey(model) === modelKey(selected) ? effort : model.defaultEffort ?? model.efforts[0] ?? null;
+    resolveEffort(model, selected && modelKey(model) === modelKey(selected) ? effort : null);
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -143,8 +144,8 @@ export default function ModelSelector({
               <span>
                 {selected ? modelLabel(selected) : modelId === "dray" && agentModel ? agentModel.id : modelId}
               </span>
-              {effort && (
-                <span className="text-muted-foreground/60">{EFFORT_LABELS[effort]}</span>
+              {selectedEffort && (
+                <span className="text-muted-foreground/60">{EFFORT_LABELS[selectedEffort]}</span>
               )}
             </Button>
           </DropdownMenuTrigger>

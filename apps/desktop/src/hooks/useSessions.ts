@@ -19,6 +19,7 @@ import { isWindowFocused, onFocusChange } from "@/lib/focus";
 import { notifyOS } from "@/lib/notify";
 import { playNotification } from "@/lib/sound";
 import { DEFAULT_NO_PROJECT_PATH } from "@/lib/projects";
+import { resolveEffort, selectionKey } from "@/lib/models";
 import { AgentEvent, BranchList, Effort, Harness, Model, ModelId, AgentModel, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
@@ -139,13 +140,7 @@ const model = models.find(
     (m.id !== "dray" ||
       (m.agentModel?.provider === agentModel?.provider && m.agentModel?.id === agentModel?.id)),
 ) ?? null;
-const effort: Effort | null = model
-  ? model.efforts.length
-    ? [effortByModel[modelId], model.defaultEffort, model.efforts[0]].find(
-        (value): value is Effort => value != null && model.efforts.includes(value),
-      ) ?? null
-    : null
-  : effortByModel[modelId] ?? null;
+const effort = resolveEffort(model, effortByModel[selectionKey(modelId, agentModel)] ?? null);
 
 const handleModelChange = (
   nextModelId: ModelId,
@@ -155,7 +150,7 @@ const handleModelChange = (
   setModelId(nextModelId);
   setAgentModel(nextAgentModel);
   if (nextEffort) {
-    const next = { ...effortByModel, [nextModelId]: nextEffort };
+    const next = { ...effortByModel, [selectionKey(nextModelId, nextAgentModel)]: nextEffort };
     setEffortByModel(next);
     setPrefs({ modelId: nextModelId, agentModel: nextAgentModel, effortByModel: next });
     return;
@@ -538,7 +533,7 @@ const restoreSessionControls = (item: SessionIndexItem) => {
   // The index stores one model/effort pair, so it can only seed that model's
   // entry; the rest of the map falls back to per-model defaults.
   if (item.effort) {
-    setEffortByModel((prev) => ({ ...prev, [restored]: item.effort! }));
+    setEffortByModel((prev) => ({ ...prev, [selectionKey(restored, item.agentModel ?? null)]: item.effort! }));
   }
 };
 

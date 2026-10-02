@@ -1,7 +1,7 @@
 //! Session titles use the connected account's supported OpenAI models.
 //! Generation runs independently; the prompt-derived title remains on failure.
 
-use crate::models::{AgentModel, Effort};
+use crate::models::{resolve_effort, AgentModel, Effort};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -86,7 +86,7 @@ pub async fn generate_title(
         })
         .or_else(|| catalog.first())
         .context("No supported OpenAI models available")?;
-    let effort = effort.filter(|level| selected.efforts.contains(level));
+    let effort = resolve_effort(selected, effort);
     let selected = selected
         .agent_model
         .as_ref()
