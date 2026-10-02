@@ -1173,7 +1173,7 @@ function SessionRow({
           </span>
         )}
 
-        <span className="min-w-0 flex-1 truncate whitespace-nowrap text-ui">{title}</span>
+        <span className="min-w-0 flex-1 line-clamp-1 text-ui">{title}</span>
 
         {/* Stable trailing slot for the title boundary and row metadata. The
             long title truncates before either one and nothing reflows on hover.
