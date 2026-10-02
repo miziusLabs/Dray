@@ -49,7 +49,7 @@ import { useHotkey } from "@/hooks/useHotkey";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { titleModels, useTitlePrefs } from "@/hooks/useTitlePrefs";
 import { useSessions } from "@/hooks/useSessions";
-import type { Effort, Model, PiModel } from "@/types/events";
+import type { Effort, Model, AgentModel } from "@/types/events";
 import type { UsageDisplayMode } from "@/types/usage";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
 import { changeRange, turnChangedTree } from "@/lib/changes";
@@ -80,7 +80,7 @@ function App() {
     harness,
     models,
     modelId,
-    piModel,
+    agentModel,
     effort,
     projects,
     projectPath,
@@ -123,19 +123,19 @@ function App() {
   const handleTitleModelChange = (
     nextModelId: Model["id"],
     nextEffort: Effort | null,
-    nextPiModel: PiModel | null,
+    nextAgentModel: AgentModel | null,
   ) => {
     const nextModel = titleModelOptions.find(
       (model) =>
         model.id === nextModelId &&
-        (model.id !== "pi" ||
-          (model.piModel?.provider === nextPiModel?.provider &&
-            model.piModel?.id === nextPiModel?.id)),
+        (model.id !== "dray" ||
+          (model.agentModel?.provider === nextAgentModel?.provider &&
+            model.agentModel?.id === nextAgentModel?.id)),
     );
     setTitlePrefs(
       nextModelId,
       nextEffort ?? nextModel?.defaultEffort ?? "off",
-      nextPiModel,
+      nextAgentModel,
     );
   };
 
@@ -519,13 +519,13 @@ function App() {
         models.find(
           (m) =>
             m.id === modelId &&
-            (m.id !== "pi" ||
-              (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
+            (m.id !== "dray" ||
+              (m.agentModel?.provider === agentModel?.provider && m.agentModel?.id === agentModel?.id)),
         ),
         effort,
         cycleEfforts ?? DEFAULT_CYCLE_EFFORTS,
       );
-      if (next) handleModelChange(modelId, next, piModel);
+      if (next) handleModelChange(modelId, next, agentModel);
     },
     { meta: false, shift: true },
   );
@@ -536,14 +536,14 @@ function App() {
     const index = cycleModels.findIndex(
       (m) =>
         m.id === modelId &&
-        (m.id !== "pi" ||
-          (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
+        (m.id !== "dray" ||
+          (m.agentModel?.provider === agentModel?.provider && m.agentModel?.id === agentModel?.id)),
     );
     // A one-model cycle can still bring an excluded current model back into the
     // configured set; once it is selected, there is nowhere else to move.
     if (cycleModels.length === 1 && index === 0) return;
     const next = cycleModels[(index + 1) % cycleModels.length];
-    handleModelChange(next.id, null, next.piModel);
+    handleModelChange(next.id, null, next.agentModel);
   });
   const fullscreen = useFullscreen();
   useVibrancy(fullscreen);
@@ -648,7 +648,7 @@ function App() {
           commands={slashSkills}
           models={visibleModels}
           modelId={modelId}
-          piModel={piModel}
+          agentModel={agentModel}
           effort={effort}
           onModelChange={handleModelChange}
           onNewSession={handleNewSession}
@@ -682,7 +682,7 @@ function App() {
             <ComposerToolbar
               models={visibleModels}
               modelId={modelId}
-              piModel={piModel}
+              agentModel={agentModel}
               effort={effort}
               onModelChange={handleModelChange}
               projects={projects}
@@ -775,7 +775,7 @@ function App() {
       onAutoDownloadUpdatesChange={setAutoDownloadUpdates}
       titleModels={titleModelOptions}
       titleModelId={titlePrefs.modelId}
-      titlePiModel={titlePrefs.piModel}
+      titleAgentModel={titlePrefs.agentModel}
       titleEffort={titlePrefs.effort}
       onTitleModelChange={handleTitleModelChange}
       checkingForUpdates={update.checking}

@@ -14,16 +14,16 @@ import type {
   Effort,
   Model,
   ModelId,
-  PiModel,
+  AgentModel,
   Project,
 } from "@/types/events";
 
 export type ComposerToolbarProps = {
   models: Model[];
   modelId: ModelId;
-  piModel: PiModel | null;
+  agentModel: AgentModel | null;
   effort: Effort | null;
-  onModelChange: (modelId: ModelId, effort: Effort | null, piModel: PiModel | null) => void;
+  onModelChange: (modelId: ModelId, effort: Effort | null, agentModel: AgentModel | null) => void;
 
   projects: Project[];
   projectPath: string | null;
@@ -70,7 +70,7 @@ export type ComposerToolbarProps = {
 export default function ComposerToolbar({
   models,
   modelId,
-  piModel,
+  agentModel,
   effort,
   onModelChange,
   projects,
@@ -124,7 +124,7 @@ export default function ComposerToolbar({
       <ModelSelector
         models={models}
         modelId={modelId}
-        piModel={piModel}
+        agentModel={agentModel}
         effort={effort}
         onChange={onModelChange}
       />

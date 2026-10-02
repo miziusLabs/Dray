@@ -1,11 +1,11 @@
-//! Pi Coding Agent process integration.
+//! Dray Coding Agent process integration.
 //!
-//! Pi's RPC mode keeps one child alive, loads the user's normal global and
-//! project extensions, and sends every event as one JSON line. The app keeps its
-//! own normalized log while Pi keeps the model-context session file.
+//! Dray keeps one native child alive, discovers global and
+//! project skills, and sends every event as one JSON line. The app keeps its
+//! own normalized log while Dray keeps the model-context session file.
 
 use crate::events::{AgentEvent, AgentEventPayload};
-use crate::harness::Harness::Pi;
+use crate::harness::Harness::Dray;
 use crate::models::{Effort, Model};
 use crate::session::{
     flush_queued, publish_status, write_line, QueuedMessages, Session, StatusTracker,
@@ -25,36 +25,27 @@ use tokio::{
 pub mod commands;
 pub mod mapper;
 pub mod parser;
-pub use parser::PiEvent;
+pub use parser::AgentRpcEvent;
 
 const CONTEXT_STATS_REQUEST_ID: &str = "dray-context-stats";
 
-/// Removes the Pi context transcript owned by a deleted Dray session.
-///
-/// Pi's filename includes its creation timestamp, so cleanup matches the exact
-/// session-id suffix rather than guessing or deleting another session's file.
+/// Remove only the native history file belonging to this session.
 pub async fn delete_session_data(session_id: &str) -> Result<()> {
-    let dir = store::get_home_app_dir().await?.join("pi-sessions");
-    let suffix = format!("_{session_id}.jsonl");
-    let mut entries = match tokio::fs::read_dir(&dir).await {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-
-    while let Some(entry) = entries.next_entry().await? {
-        let name = entry.file_name();
-        if name.to_string_lossy().ends_with(&suffix) {
-            tokio::fs::remove_file(entry.path()).await?;
-        }
+    uuid::Uuid::parse_str(session_id).context("invalid session ID")?;
+    let path = store::get_home_app_dir()
+        .await?
+        .join("agent-sessions")
+        .join(format!("{session_id}.json"));
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
     }
-    Ok(())
 }
-
-/// Starts one persistent Pi RPC child for a Dray session.
+/// Starts one persistent Dray RPC child for a Dray session.
 ///
-/// Local Pi sessions use a stable Dray-owned directory. Cloud sessions use a
-/// private Docker volume, seeded from the host `~/.pi/agent` setup.
+/// Local Dray sessions use a stable Dray-owned directory. Cloud sessions use a
+/// private Docker volume with host skills mounted read-only.
 pub async fn init(
     session_id: &str,
     model: &Model,
@@ -68,14 +59,14 @@ pub async fn init(
 ) -> Result<Session> {
     let cloud = cloud_name.is_some();
     let session_dir = if cloud {
-        "/home/agent/.pi/agent/sessions".to_string()
+        "/home/agent/.dray/agent-sessions".to_string()
     } else {
         let app_dir = store::get_home_app_dir().await?;
-        let session_dir = app_dir.join("pi-sessions");
+        let session_dir = app_dir.join("agent-sessions");
         tokio::fs::create_dir_all(&session_dir).await?;
         session_dir
             .to_str()
-            .context("Pi session directory is not valid UTF-8")?
+            .context("Dray session directory is not valid UTF-8")?
             .to_string()
     };
     let mut args = vec![
@@ -84,18 +75,21 @@ pub async fn init(
         "--session-dir".to_string(),
         session_dir,
     ];
-    if let Some(pi_model) = &model.pi_model {
+    if let Some(agent_model) = &model.agent_model {
         args.push("--provider".to_string());
-        args.push(pi_model.provider.clone());
+        args.push(agent_model.provider.clone());
         args.push("--model".to_string());
-        args.push(pi_model.id.clone());
+        args.push(agent_model.id.clone());
     }
     if let Some(effort) = effort {
         args.push("--thinking".to_string());
         args.push(effort.as_arg().to_string());
     }
+    if let Some(context) = model.context_window {
+        args.extend(["--context-window".into(), context.to_string()]);
+    }
     if let Some(parent) = fork_from {
-        // Pi performs the lazy fork while opening RPC mode and keeps the new
+        // Dray performs the lazy fork while opening RPC mode and keeps the new
         // transcript under the id Dray already assigned to this session.
         args.extend([
             "--fork".to_string(),
@@ -109,19 +103,16 @@ pub async fn init(
     }
 
     let mut command = if let Some(name) = cloud_name {
-        crate::sandbox::pi_command(session_id, name, &args).await?
+        crate::sandbox::agent_command(session_id, name, &args).await?
     } else {
-        let mut command = crate::binpath::pi_command().await;
-        if let Some(home) = dirs::home_dir() {
-            command.env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
-        }
+        let mut command = crate::binpath::agent_command().await;
         command.args(&args);
         command
     };
 
     // The Docker command's host working directory is unrelated to the
     // container. Cloud sessions must start in the persistent workspace inside
-    // the container, which is set by sandbox::pi_command; do not apply the
+    // the container, which is set by sandbox::agent_command; do not apply the
     // host-side marker directory here.
     if !cloud {
         command.current_dir(cwd);
@@ -135,7 +126,7 @@ pub async fn init(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .context("couldn't start pi")?;
+        .context("couldn't start dray")?;
 
     #[cfg(windows)]
     let process_job = crate::session::ProcessJob::attach(&child);
@@ -143,6 +134,24 @@ pub async fn init(
     let stdin = Arc::new(Mutex::new(
         child.stdin.take().context("failed to take stdin")?,
     ));
+    // Seed older sessions from Dray's transcript without touching their logs.
+    // The runtime ignores this command when its own context already exists.
+    let history = store::list_session_events(session_id).await?;
+    let input = history
+        .iter()
+        .filter_map(|event| match &event.payload {
+            AgentEventPayload::UserMessage { text, .. } => {
+                Some(serde_json::json!({"role":"user","content":text}))
+            }
+            AgentEventPayload::AssistantText { text, .. } => {
+                Some(serde_json::json!({"role":"assistant","content":text}))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if !input.is_empty() {
+        write_line(&stdin, &serde_json::json!({"type":"history","input":input})).await?;
+    }
     let stdout = child.stdout.take().context("failed to take stdout")?;
     let stderr = child.stderr.take().context("failed to take stderr")?;
 
@@ -151,6 +160,28 @@ pub async fn init(
     let status: Arc<Mutex<StatusTracker>> = Arc::new(Mutex::new(StatusTracker::default()));
     let stdout_status = status.clone();
     let stopped = Arc::new(AtomicBool::new(false));
+    let refresh_stopped = stopped.clone();
+    let refresh_stdin = stdin.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            if refresh_stopped.load(Relaxed) {
+                break;
+            }
+            if let Ok(token) = crate::account::access_token().await {
+                if write_line(
+                    &refresh_stdin,
+                    &serde_json::json!({"type":"auth","accessToken":token}),
+                )
+                .await
+                .is_err()
+                {
+                    break;
+                }
+            }
+        }
+    });
     let stdout_stopped = stopped.clone();
     let seq_start = if is_new_session {
         0
@@ -188,13 +219,13 @@ pub async fn init(
         )
         .await
         {
-            eprintln!("Failed to read Pi stdout: {error}");
+            eprintln!("Failed to read Dray stdout: {error}");
         }
     });
 
     tokio::spawn(async move {
         if let Err(error) = read_stderr(stderr).await {
-            eprintln!("Failed to read Pi stderr: {error}");
+            eprintln!("Failed to read Dray stderr: {error}");
         }
     });
 
@@ -202,11 +233,11 @@ pub async fn init(
         id: session_id.to_string(),
         child,
         stdin,
-        harness: Pi,
+        harness: Dray,
         cloud,
         cwd: session_cwd.to_string(),
         model: model.id,
-        pi_model: model.pi_model.clone(),
+        agent_model: model.agent_model.clone(),
         effort,
         events,
         seq,
@@ -214,12 +245,12 @@ pub async fn init(
         stopped,
         #[cfg(windows)]
         process_job,
-        pi_ui_requests: pending_ui,
+        agent_ui_requests: pending_ui,
         queued,
     })
 }
 
-/// Reads and persists Pi's normalized events one RPC line at a time.
+/// Reads and persists Dray's normalized events one RPC line at a time.
 async fn read_stdout(
     stdout: ChildStdout,
     session_id: &str,
@@ -247,7 +278,7 @@ async fn read_stdout(
             continue;
         }
 
-        let pi_event = match parser::parse_line(&line) {
+        let runtime_event = match parser::parse_line(&line) {
             Ok(event) => event,
             Err(error) => {
                 record_failure(session_id, "parse", &error.to_string(), &line).await;
@@ -255,16 +286,16 @@ async fn read_stdout(
             }
         };
 
-        if matches!(pi_event, PiEvent::Unrecognized) {
-            record_failure(session_id, "unknown_subtype", "unmodeled Pi event", &line).await;
+        if matches!(runtime_event, AgentRpcEvent::Unrecognized) {
+            record_failure(session_id, "unknown_subtype", "unmodeled Dray event", &line).await;
         }
 
-        let is_session = matches!(&pi_event, PiEvent::Session { .. });
-        // A Pi turn is one model response plus its tool calls. Requesting stats
+        let is_session = matches!(&runtime_event, AgentRpcEvent::Session { .. });
+        // A Dray turn is one model response plus its tool calls. Requesting stats
         // here updates the context meter between model turns instead of making
         // it wait for the whole agent operation to settle.
-        let is_turn_end = matches!(&pi_event, PiEvent::TurnEnd { .. });
-        let mapped = match mapper.map(pi_event) {
+        let is_turn_end = matches!(&runtime_event, AgentRpcEvent::TurnEnd { .. });
+        let mapped = match mapper.map(runtime_event) {
             Ok(events) => events,
             Err(error) => {
                 record_failure(session_id, "map", &error.to_string(), &line).await;
@@ -272,13 +303,13 @@ async fn read_stdout(
             }
         };
 
-        // Pi can answer a stats request sent immediately after spawn with the
+        // Dray can answer a stats request sent immediately after spawn with the
         // empty pre-session value. Wait until its session event has been read so
         // a resumed session's initial reading cannot race with the first turn
         // and overwrite the real context usage with zero.
         if is_session {
             if let Err(error) = request_context_stats(&flush_stdin).await {
-                eprintln!("[pi context stats request err] {error}");
+                eprintln!("[dray context stats request err] {error}");
             }
         }
 
@@ -310,7 +341,7 @@ async fn read_stdout(
                 return Ok(());
             }
             if let Err(error) = app.emit("agent_event", &agent_event) {
-                eprintln!("[pi emit err] {error}");
+                eprintln!("[dray emit err] {error}");
             }
 
             let next_status = {
@@ -329,17 +360,17 @@ async fn read_stdout(
                 return Ok(());
             }
 
-            // Deltas and ordinary usage are previews/live counters. Their
+            // Deltas are streaming previews. Their
             // committed counterparts are the assistant message and settled
             // event, so they do not belong in Dray's append-only transcript.
-            // Context-window stats are different: they are the only persisted
-            // source for the composer's reading and have no transcript row.
+            // Request usage and context stats are persisted; they are the
+            // source for usage indicators and the composer context meter.
             let transient = match &agent_event.payload {
                 AgentEventPayload::Delta(_)
                 | AgentEventPayload::ModelRequestStarted
                 | AgentEventPayload::QuestionsAsked { .. }
                 | AgentEventPayload::ExtensionNotification { .. } => true,
-                AgentEventPayload::UsageUpdate(usage) => usage.context_window.is_none(),
+                AgentEventPayload::UsageUpdate(_) => false,
                 _ => false,
             };
             if transient {
@@ -353,7 +384,7 @@ async fn read_stdout(
 
             events.lock().await.push(agent_event.clone());
             if let Err(error) = append_session_event(session_id, agent_event).await {
-                eprintln!("[pi write err] {error}");
+                eprintln!("[dray write err] {error}");
             }
 
             if stopped.load(Relaxed) {
@@ -363,7 +394,7 @@ async fn read_stdout(
             if at_boundary {
                 flush_queued(
                     session_id,
-                    Pi,
+                    Dray,
                     &queued,
                     &flush_seq,
                     &flush_events,
@@ -376,22 +407,37 @@ async fn read_stdout(
 
             if turn_completed {
                 if let Err(error) = request_context_stats(&flush_stdin).await {
-                    eprintln!("[pi context stats request err] {error}");
+                    eprintln!("[dray context stats request err] {error}");
                 }
             }
         }
 
         if is_turn_end {
             if let Err(error) = request_context_stats(&flush_stdin).await {
-                eprintln!("[pi context stats request err] {error}");
+                eprintln!("[dray context stats request err] {error}");
             }
         }
     }
 
+    if !stopped.swap(true, Relaxed) && status.lock().await.turn_in_flight() {
+        let mut terminal = mapper.map(AgentRpcEvent::MessageEnd {
+            message: serde_json::json!({"role":"assistant","content":[],"stopReason":"error","errorMessage":"Dray's agent process exited unexpectedly. Send a follow-up to resume."}),
+        })?;
+        terminal.extend(mapper.map(AgentRpcEvent::AgentSettled)?);
+        for event in terminal {
+            app.emit("agent_event", &event).ok();
+            let next = status.lock().await.on_event(&event.payload);
+            events.lock().await.push(event.clone());
+            append_session_event(session_id, event).await?;
+            if let Some(next) = next {
+                publish_status(session_id, next, app).await;
+            }
+        }
+    }
     Ok(())
 }
 
-/// Requests Pi's current context estimate. The response is handled by the
+/// Requests Dray's current context estimate. The response is handled by the
 /// same stdout mapper as every other RPC record.
 async fn request_context_stats(stdin: &Arc<Mutex<ChildStdin>>) -> Result<()> {
     write_line(
@@ -404,19 +450,19 @@ async fn request_context_stats(stdin: &Arc<Mutex<ChildStdin>>) -> Result<()> {
     .await
 }
 
-/// Logs a malformed or unsupported Pi record without stopping the read loop.
+/// Logs a malformed or unsupported Dray record without stopping the read loop.
 async fn record_failure(session_id: &str, stage: &str, detail: &str, raw: &str) {
-    eprintln!("[pi {stage} err] {detail}\n[{stage} err] raw line: {raw}");
+    eprintln!("[dray {stage} err] {detail}\n[{stage} err] raw line: {raw}");
     if let Err(error) = store::record_parse_failure(session_id, stage, detail, raw).await {
-        eprintln!("[pi failure log err] {error}");
+        eprintln!("[dray failure log err] {error}");
     }
 }
 
-/// Copies Pi's stderr to the app process for diagnostics.
+/// Copies Dray's stderr to the app process for diagnostics.
 async fn read_stderr(stderr: ChildStderr) -> Result<()> {
     let mut lines = BufReader::new(stderr).lines();
     while let Some(line) = lines.next_line().await? {
-        eprintln!("Pi stderr: {line}");
+        eprintln!("Dray stderr: {line}");
     }
     Ok(())
 }

@@ -59,7 +59,7 @@ type ChatInputProps = {
   /// re-reads each one — nothing but paths crosses the bridge, so a pinned
   /// screenshot is never uploaded twice.
   onSend: (message: string, attachmentPaths: string[]) => void;
-  /// Pi-provided skills for the `$` picker. Empty until the backend's probe
+  /// Dray-provided skills for the `$` picker. Empty until the backend's probe
   /// lands, and empty forever if it failed — Dray commands remain available and
   /// text typed by hand still works.
   commands?: SlashCommand[];
@@ -68,9 +68,9 @@ type ChatInputProps = {
   /// second picker path.
   models: Model[];
   modelId: Model["id"];
-  piModel: Model["piModel"];
+  agentModel: Model["agentModel"];
   effort: Effort | null;
-  onModelChange: (modelId: Model["id"], effort: Effort | null, piModel: Model["piModel"]) => void;
+  onModelChange: (modelId: Model["id"], effort: Effort | null, agentModel: Model["agentModel"]) => void;
   onNewSession: () => void;
   onSettle: () => void | Promise<void>;
   /// Where the `@` picker searches for files. Cloud sessions expose an empty
@@ -171,7 +171,7 @@ export default function ChatInput({
   commands = [],
   models,
   modelId,
-  piModel,
+  agentModel,
   effort,
   onModelChange,
   onNewSession,
@@ -231,8 +231,8 @@ export default function ChatInput({
   const segments = useMemo(() => highlightSegments(message), [message]);
   const highlighted = segments.some((segment) => segment.kind !== "text");
 
-  // Dray owns slash commands. Pi only supplies skills, which remain useful as
-  // `$` prompt completions without allowing Pi's command registry to shape the
+  // Dray owns slash commands. Dray only supplies skills, which remain useful as
+  // `$` prompt completions without allowing Dray's command registry to shape the
   // command surface.
   const availableCommands = useMemo(
     () => [...drayCommands(isNewTask), ...commands],
@@ -256,8 +256,8 @@ export default function ChatInput({
   const selectedModel = models.find(
     (model) =>
       model.id === modelId &&
-      (model.id !== "pi" ||
-        (model.piModel?.provider === piModel?.provider && model.piModel?.id === piModel?.id)),
+      (model.id !== "dray" ||
+        (model.agentModel?.provider === agentModel?.provider && model.agentModel?.id === agentModel?.id)),
   );
   const modelMatches = useMemo(
     () =>
@@ -606,11 +606,11 @@ export default function ChatInput({
     if (name === "model" || name === "models") {
       const requested = invocation.args.toLowerCase();
       const next = models.find((model) =>
-        [modelLabel(model), model.piModel?.id, modelKey(model)]
+        [modelLabel(model), model.agentModel?.id, modelKey(model)]
           .filter((value): value is string => Boolean(value))
           .some((value) => value.toLowerCase() === requested),
       );
-      if (next) onModelChange(next.id, null, next.piModel);
+      if (next) onModelChange(next.id, null, next.agentModel);
       return true;
     }
 
@@ -619,7 +619,7 @@ export default function ChatInput({
       const next = selectedModel?.efforts.find(
         (level) => level === requested || EFFORT_LABELS[level].toLowerCase() === requested,
       );
-      if (next) onModelChange(modelId, next, piModel);
+      if (next) onModelChange(modelId, next, agentModel);
       return true;
     }
 
@@ -642,7 +642,7 @@ export default function ChatInput({
     // pressing Enter is asking about the screenshot.
     if (!trimmed && !attachments.length) return;
 
-    // Internal commands change Dray state and must never become Pi prompts.
+    // Internal commands change Dray state and must never become Dray prompts.
     // Skills and unknown slash text retain the ordinary send path.
     if (runInternalCommand(trimmed)) {
       setMessage("");
@@ -835,17 +835,17 @@ export default function ChatInput({
                   <>
                     <span className="shrink-0 font-medium">{modelLabel(model)}</span>
                     {model.id === modelId &&
-                      (model.id !== "pi" ||
-                        (model.piModel?.provider === piModel?.provider &&
-                          model.piModel?.id === piModel?.id)) &&
+                      (model.id !== "dray" ||
+                        (model.agentModel?.provider === agentModel?.provider &&
+                          model.agentModel?.id === agentModel?.id)) &&
                       effort && (
                         <span className="shrink-0 text-muted-foreground/60">
                           {EFFORT_LABELS[effort]}
                         </span>
                       )}
-                    {model.piModel && (
+                    {model.agentModel && (
                       <span className="min-w-0 truncate text-muted-foreground">
-                        {model.piModel.provider}/{model.piModel.id}
+                        {model.agentModel.provider}/{model.agentModel.id}
                       </span>
                     )}
                   </>

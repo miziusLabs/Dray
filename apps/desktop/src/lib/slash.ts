@@ -8,7 +8,7 @@
 /// [streaming.ts]: ./streaming.ts
 import type { SlashCommand } from "@/types/events";
 
-/// Commands owned by Dray. Pi's command registry is intentionally not exposed
+/// Commands owned by Dray. Dray's command registry is intentionally not exposed
 /// in the composer; only its skills are useful prompt completions here.
 export const DRAY_COMMANDS: SlashCommand[] = [
   {

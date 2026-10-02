@@ -141,21 +141,21 @@ Hover delay symmetric (150ms): keep cursor merely passing through from popping r
 
 ## Cloud sandbox
 
-Cloud is the only isolated-session mode. A Cloud Session starts Pi through
+Cloud is the only isolated-session mode. A Cloud Session starts the native Dray agent through
 Docker with a private named volume and an empty `/home/agent/workspace`. The
 selected project is retained only as grouping and branch metadata; it is never
 cloned, mounted, or used as the container's working tree.
 
 The image is built by `scripts/build-sandbox.ps1` and includes Java 21, Java 25,
-Node.js 24, Git, GitHub CLI, and Pi. The host `~/.pi/agent` directory is a
-read-only seed copied into the volume on first start, excluding host session
-transcripts. This keeps extensions, settings, and authentication available
-without sharing mutable Pi state between Cloud Sessions.
+Node.js 24, Git, GitHub CLI, and Dray. The host `~/.dray/skills` directory is a
+read-only mount for standard SKILL.md files. Agent history remains private to
+the volume. The desktop delivers short-lived OpenAI access tokens through stdin;
+OAuth credentials stay on the host.
 
 GitHub authentication follows Agentsmith. The host resolves `GITHUB_TOKEN`,
 `GH_TOKEN`, or the local `gh auth token`; only the environment variable name is
 passed to Docker. The entrypoint exports `GH_TOKEN`, runs `gh auth setup-git`,
-and rewrites SSH GitHub URLs to HTTPS. The token is never written to the Pi
+and rewrites SSH GitHub URLs to HTTPS. The token is never written to the agent
 seed or the Cloud volume.
 
 ## Settings dialog

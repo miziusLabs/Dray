@@ -2,11 +2,22 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// A Pi RPC event. The protocol is intentionally modeled with `Value` for
+/// A Dray RPC event. The protocol is intentionally modeled with `Value` for
 /// message and tool payloads because extensions can register arbitrary schemas.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum PiEvent {
+pub enum AgentRpcEvent {
+    RequestUsage {
+        usage: AgentRpcUsage,
+        model: String,
+    },
+    RequestError {
+        status: u16,
+        code: String,
+        message: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
     Session {
         version: u32,
         id: String,
@@ -35,7 +46,7 @@ pub enum PiEvent {
     },
     MessageUpdate {
         #[serde(default)]
-        usage: PiUsage,
+        usage: AgentRpcUsage,
         #[serde(rename = "assistantMessageEvent")]
         assistant_message_event: AssistantMessageEvent,
     },
@@ -168,22 +179,22 @@ pub enum PiEvent {
     Unrecognized,
 }
 
-/// Usage attached to Pi's streaming assistant updates and final messages.
+/// Usage attached to Dray's streaming assistant updates and final messages.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct PiUsage {
+pub struct AgentRpcUsage {
     pub input: Option<u64>,
     pub output: Option<u64>,
     pub cache_read: Option<u64>,
     pub cache_write: Option<u64>,
     pub reasoning: Option<u64>,
     pub total_tokens: Option<u64>,
-    pub cost: Option<PiCost>,
+    pub cost: Option<AgentRpcCost>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct PiCost {
+pub struct AgentRpcCost {
     pub input: Option<f64>,
     pub output: Option<f64>,
     pub cache_read: Option<f64>,
@@ -191,7 +202,7 @@ pub struct PiCost {
     pub total: Option<f64>,
 }
 
-/// Delta events nested inside Pi's `message_update` record.
+/// Delta events nested inside Dray's `message_update` record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AssistantMessageEvent {
@@ -257,8 +268,8 @@ pub enum AssistantMessageEvent {
     Unrecognized,
 }
 
-/// Parses one newline-delimited Pi RPC record.
-pub fn parse_line(line: &str) -> Result<PiEvent> {
+/// Parses one newline-delimited Dray RPC record.
+pub fn parse_line(line: &str) -> Result<AgentRpcEvent> {
     Ok(serde_json::from_str(line)?)
 }
 
@@ -274,7 +285,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             start,
-            PiEvent::ToolExecutionStart {
+            AgentRpcEvent::ToolExecutionStart {
                 tool_call_id,
                 tool_name,
                 args
@@ -289,7 +300,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             end,
-            PiEvent::ToolExecutionEnd { is_error: false, result, .. }
+            AgentRpcEvent::ToolExecutionEnd { is_error: false, result, .. }
                 if result["content"][0]["text"] == "found it"
         ));
     }
@@ -303,8 +314,8 @@ mod tests {
 
         assert!(matches!(
             event,
-            PiEvent::MessageUpdate {
-                usage: PiUsage { input: Some(12), reasoning: Some(2), .. },
+            AgentRpcEvent::MessageUpdate {
+                usage: AgentRpcUsage { input: Some(12), reasoning: Some(2), .. },
                 assistant_message_event: AssistantMessageEvent::ToolcallStart {
                     content_index: 1,
                     id: Some(id),
@@ -317,8 +328,8 @@ mod tests {
     #[test]
     fn unknown_records_do_not_break_the_stream() {
         assert!(matches!(
-            parse_line(r#"{"type":"future_pi_event","value":42}"#).unwrap(),
-            PiEvent::Unrecognized
+            parse_line(r#"{"type":"future_dray_event","value":42}"#).unwrap(),
+            AgentRpcEvent::Unrecognized
         ));
     }
 
@@ -331,7 +342,7 @@ mod tests {
 
         assert!(matches!(
             event,
-            PiEvent::ExtensionUiRequest { id, method, options, .. }
+            AgentRpcEvent::ExtensionUiRequest { id, method, options, .. }
                 if id == "ui-1" && method == "select" && options == ["a", "b"]
         ));
     }

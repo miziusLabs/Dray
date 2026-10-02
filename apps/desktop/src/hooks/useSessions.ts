@@ -19,15 +19,14 @@ import { isWindowFocused, onFocusChange } from "@/lib/focus";
 import { notifyOS } from "@/lib/notify";
 import { playNotification } from "@/lib/sound";
 import { DEFAULT_NO_PROJECT_PATH } from "@/lib/projects";
-import { AgentEvent, BranchList, Effort, Harness, Model, ModelId, PiModel, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
+import { AgentEvent, BranchList, Effort, Harness, Model, ModelId, AgentModel, Project, QueuedMessage, SendOutcome, SessionIndexItem, SessionSnapshot, SessionStatus, SessionStatusEvent, SessionTitleEvent } from "../types/events";
 
 // Only for a session indexed before the model was recorded, which reads back as
 // "unknown". Everything else seeds from the user's stored prefs.
-const DEFAULT_MODEL: ModelId = "pi";
-const DEFAULT_EFFORT: Effort = "high";
+const DEFAULT_MODEL: ModelId = "dray";
 
 /// A stretch where the agent is busy and the transcript has nothing to show —
-/// a request in flight, or a thinking block, which Pi streams as an
+/// a request in flight, or a thinking block, which Dray streams as an
 /// *empty* string with only a token estimate and so renders nothing at all from
 /// open to commit.
 ///
@@ -75,7 +74,7 @@ export function useSessions(titlePrefs: TitlePrefs, noProjectPath: string) {
     // Seeded once from prefs, then free to diverge: selecting a session overwrites
     // these with what that session was started with, which must not feed back.
     const [modelId, setModelId] = useState<ModelId>(() => prefs.modelId);
-    const [piModel, setPiModel] = useState<PiModel | null>(() => prefs.piModel);
+    const [agentModel, setAgentModel] = useState<AgentModel | null>(() => prefs.agentModel);
     const [effortByModel, setEffortByModel] = useState<EffortByModel>(() => prefs.effortByModel);
     const [projects, setProjects] = useState<Project[]>([]);
     const [noProjectSelected, setNoProjectSelected] = useLocalStorage<boolean>(
@@ -137,29 +136,31 @@ const cloudEnabled = useCloud && cloudAvailability?.available === true;
 const model = models.find(
   (m) =>
     m.id === modelId &&
-    (m.id !== "pi" ||
-      (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
+    (m.id !== "dray" ||
+      (m.agentModel?.provider === agentModel?.provider && m.agentModel?.id === agentModel?.id)),
 ) ?? null;
 const effort: Effort | null = model
   ? model.efforts.length
-    ? effortByModel[modelId] ?? model.defaultEffort ?? DEFAULT_EFFORT
+    ? [effortByModel[modelId], model.defaultEffort, model.efforts[0]].find(
+        (value): value is Effort => value != null && model.efforts.includes(value),
+      ) ?? null
     : null
   : effortByModel[modelId] ?? null;
 
 const handleModelChange = (
   nextModelId: ModelId,
   nextEffort: Effort | null,
-  nextPiModel: PiModel | null,
+  nextAgentModel: AgentModel | null,
 ) => {
   setModelId(nextModelId);
-  setPiModel(nextPiModel);
+  setAgentModel(nextAgentModel);
   if (nextEffort) {
     const next = { ...effortByModel, [nextModelId]: nextEffort };
     setEffortByModel(next);
-    setPrefs({ modelId: nextModelId, piModel: nextPiModel, effortByModel: next });
+    setPrefs({ modelId: nextModelId, agentModel: nextAgentModel, effortByModel: next });
     return;
   }
-  setPrefs({ modelId: nextModelId, piModel: nextPiModel });
+  setPrefs({ modelId: nextModelId, agentModel: nextAgentModel });
 };
 
 // Wrapped rather than exported raw: picking a mode is a preference, and the
@@ -315,21 +316,21 @@ const upsertSessionIndexItem = (item: SessionIndexItem) =>
 const mirrorSessionModel = (
   sessionId: string,
   modelId: ModelId,
-  piModel: PiModel | null,
+  agentModel: AgentModel | null,
   effort: Effort | null,
 ) => {
   const modified = new Date().toISOString();
   setSessionIndexItems((prev) =>
     prev.map((i) =>
       i.sessionId === sessionId
-        ? { ...i, model: modelId, piModel, effort, modified }
+        ? { ...i, model: modelId, agentModel, effort, modified }
         : i,
     ),
   );
   setSessions((prev) =>
     prev.map((s) =>
       s.sessionId === sessionId
-        ? { ...s, model: modelId, piModel, effort, modified }
+        ? { ...s, model: modelId, agentModel, effort, modified }
         : s,
     ),
   );
@@ -387,9 +388,9 @@ const handleSendMsg = async (
       attachmentPaths,
       harness,
       model: modelId,
-      piModel,
+      agentModel,
       effort,
-      titleModel: titlePrefs.piModel,
+      titleModel: titlePrefs.agentModel,
       titleEffort: titlePrefs.effort,
       cwd,
       projectPath,
@@ -412,7 +413,7 @@ const handleSendMsg = async (
         ...prev,
         [sessionId]: [...(prev[sessionId] ?? []), queued],
       }));
-      mirrorSessionModel(sessionId, modelId, piModel, effort);
+      mirrorSessionModel(sessionId, modelId, agentModel, effort);
       return;
     }
 
@@ -434,7 +435,7 @@ const handleSendMsg = async (
     // index entry; mirror it so the sidebar doesn't need a refetch. Keep the
     // loaded snapshot in step too: a session opened from a filtered row may not
     // have an index item for the local update to replace.
-    mirrorSessionModel(sessionId, modelId, piModel, effort);
+    mirrorSessionModel(sessionId, modelId, agentModel, effort);
   } catch (e) {
     // A rejected invoke means the turn never started, so nothing will arrive to
     // clear the status — release it here rather than leaving the composer stuck.
@@ -472,7 +473,7 @@ const handleCancelQueued = async (): Promise<QueuedMessage | null> => {
 };
 
 // Stops the session's process tree. The backend removes the live child before
-// returning, and the next send resumes the persisted Pi session in a new child.
+// returning, and the next send resumes the persisted Dray session in a new child.
 const handleInterrupt = async () => {
   if (!selectedSessionId) return;
   try {
@@ -511,7 +512,7 @@ const handleNewSession = () => {
   setSelectedSessionId(null);
   setHarnessState(prefs.harness);
   setModelId(prefs.modelId);
-  setPiModel(prefs.piModel);
+  setAgentModel(prefs.agentModel);
   setEffortByModel(prefs.effortByModel);
   setUseCloudState(prefs.useCloud);
   setBranch(branches?.current ?? null);
@@ -533,7 +534,7 @@ const restoreSessionControls = (item: SessionIndexItem) => {
   // Sessions indexed before the model was recorded read back as "unknown".
   const restored = item.model === "unknown" ? DEFAULT_MODEL : item.model;
   setModelId(restored);
-  setPiModel(item.piModel ?? null);
+  setAgentModel(item.agentModel ?? null);
   // The index stores one model/effort pair, so it can only seed that model's
   // entry; the rest of the map falls back to per-model defaults.
   if (item.effort) {
@@ -767,6 +768,12 @@ useEffect(() => {
     .catch((e) => setError(String(e)));
 }, [showArchived])
 
+const [accountRevision, setAccountRevision] = useState(0);
+useEffect(() => {
+  const subscription = listen("account_changed", () => setAccountRevision((value) => value + 1));
+  return () => { void subscription.then((unlisten) => unlisten()); };
+}, []);
+
 useEffect(() => {
   let cancelled = false;
   invoke<Model[]>("list_models", { harness, cwd: projectPath })
@@ -779,7 +786,7 @@ useEffect(() => {
       // the one exception: seed it from the first available model on first
       // load, preserving the existing default without overwriting a choice.
       setModels(next);
-      setPiModel((current) => current ?? next[0]?.piModel ?? null);
+      setAgentModel((current) => next.some((model) => model.agentModel?.id === current?.id && model.agentModel?.provider === current?.provider) ? current : next[0]?.agentModel ?? null);
     })
     .catch((e) => {
       if (!cancelled) setError(String(e));
@@ -787,7 +794,7 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [harness, projectPath])
+}, [harness, projectPath, accountRevision])
 
 useEffect(() => {
   let cancelled = false;
@@ -1362,7 +1369,7 @@ const contextUsage: { used: number; max: number } | null = (() => {
 
     if (p.type === "usage_update" && p.contextWindow) {
       // `get_session_stats` is emitted as a context-only usage update. It is
-      // authoritative for both values and is persisted by the Pi reader, so a
+      // authoritative for both values and is persisted by the Dray reader, so a
       // resumed session can restore the meter without waiting for a new turn.
       if (!usedSettled) {
         used = p.contextWindow.usedTokens;
@@ -1390,6 +1397,6 @@ const contextUsage: { used: number; max: number } | null = (() => {
   return used !== null && max !== null ? { used, max } : null;
 })();
 
-return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, piModel, effort, projects, projectPath, branches, branch, useCloud: cloudEnabled, cloudAvailable: cloudAvailability?.available === true, cloudUnavailableReason: cloudAvailability?.reason ?? "Checking Cloud availability…", busy, working, compacting, contextUsage, error, setError, handleModelChange, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleReorderProjects, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
+return {sessions, selectedSessionId, selectedSession, streamingContentBlock, sessionIndexItems, statusBySession, askingSessions, showArchived, setShowArchived, harness, models, modelId, agentModel, effort, projects, projectPath, branches, branch, useCloud: cloudEnabled, cloudAvailable: cloudAvailability?.available === true, cloudUnavailableReason: cloudAvailability?.reason ?? "Checking Cloud availability…", busy, working, compacting, contextUsage, error, setError, handleModelChange, handleAttachProject, handleSelectProject, handleRenameProject, handleDeleteProject, handleReorderProjects, handleSelectBranch, pendingBranch, setPendingBranch, runCheckout, setUseCloud, handleSendMsg, handleInterrupt, queuedMessages, handleCancelQueued, handleAnswerQuestions, handleSelectSessionIndexItem, handleNewSession, setSessionFlags, forkSession, detachSession, deleteSession};
 
 }

@@ -1,6 +1,6 @@
 # Dray repository guide
 
-Dray is a Tauri 2 desktop application for running coding-agent sessions through a native chat UI. The current agent harness is Pi. The frontend is React 19 + Vite 7 + Tailwind CSS 4; the backend is Rust and owns process/session management, persistence, Git/GitHub integration, file indexing, attachments, notifications, and Docker-backed Cloud Sessions.
+Dray is a Tauri 2 desktop application for running coding-agent sessions through a native chat UI. The agent is implemented in Rust in `packages/agent`, embedded in the desktop binary and built separately for Docker. ChatGPT OAuth provides access to the account-specific OpenAI model catalog. The frontend is React 19 + Vite 7 + Tailwind CSS 4; the backend is Rust and owns process/session management, persistence, Git/GitHub integration, file indexing, attachments, notifications, and Docker-backed Cloud Sessions.
 
 This file is the implementation map for agents working in this repository. Keep the user-facing overview in `README.md` concise; update this file when components, major behavior, or repository structure change.
 
@@ -16,22 +16,22 @@ This file is the implementation map for agents working in this repository. Keep 
 - `apps/desktop/sandbox/` — Docker image used by Cloud Sessions.
 - `apps/desktop/scripts/` — Tauri launcher, sandbox builder, Windows installer, and icon tooling.
 - `apps/desktop/public/` — app assets, sounds, and logos.
-- `packages/` — reserved by the pnpm workspace for code genuinely shared by more than one app; currently empty.
+- `packages/agent/` — standalone Rust runtime, streaming Responses transport, tools, process cleanup, skill discovery, and embedded prompts.
 
 ## Main product features
 
-- Native desktop chat UI for Pi coding-agent sessions.
+- Native desktop chat UI for Dray coding-agent sessions.
 - Multiple persistent sessions with search, unread/waiting/working state, pinning, settling/archiving, deletion, forking, and parent/child nesting.
-- Local Sessions that run in a selected project checkout and Cloud Sessions that run Pi inside an isolated Docker container and persistent Docker volume.
+- Local Sessions that run in a selected project checkout and Cloud Sessions that run the native Dray agent inside an isolated Docker container and persistent Docker volume.
 - Project picker with attach, rename, delete-from-picker, manual ordering, and remembered selection.
 - Git branch discovery and switching, including dirty-worktree handling before checkout.
-- Dynamic Pi model catalog with model selection, reasoning/effort selection, configurable model cycling, and separate model/effort preferences for generated session titles.
+- Account-specific OpenAI model catalog with model selection, reasoning/effort selection, configurable model cycling, and separate model/effort preferences for generated session titles.
 - Rich transcript rendering for assistant text, user text, reasoning, tool calls, grouped tool calls, file edits, diffs, images, checkpoints, compaction, and structured question requests.
 - Streaming assistant/tool output and live work indicators.
 - Prompt queuing while a turn is already running, with cancellation/restoration of a queued prompt when still retractable.
 - File attachments via picker or drag/drop, image previews, persistent archived result images, transcript thumbnails, and a keyboard-navigable image lightbox.
 - `@file` fuzzy search backed by a warmed Rust file index.
-- `/commands` and `$skills` discovered from Pi, with search, source-aware grouping, aliases, and recent-command ranking.
+- `/commands` and `$skills` discovered from `.dray/skills`, with search, source-aware grouping, aliases, and recent-command ranking.
 - Context-window meter in the composer.
 - Per-session draft preservation and focus restoration.
 - Desktop notifications, in-app notices, dock/taskbar badge state, attention indicators, and notification/celebration sounds.
@@ -148,7 +148,7 @@ Files in `src/hooks/`:
 - `usePrReady.ts` — announces PRs that become ready to merge.
 - `useAttachments.ts` — composer attachment state and Tauri attachment reads.
 - `useFileSearch.ts` — warms and queries the Rust fuzzy file index.
-- `useSlashCommands.ts` — loads/caches Pi commands and skills per working directory.
+- `useSlashCommands.ts` — loads/caches native skills per working directory.
 - `useRecentCommands.ts` — persists recent command/skill usage.
 - `useComposerPrefs.ts` — persisted composer model/effort/cloud preferences.
 - `useTitlePrefs.ts` — persisted title-generation model and effort.
@@ -201,7 +201,7 @@ Files in `src-tauri/src/`:
 
 - `main.rs` — native executable entry point.
 - `lib.rs` — Tauri builder, window lifecycle, command registration, and frontend-facing command wrappers.
-- `session.rs` — core process/session manager: spawn/resume Pi, local/cloud execution, stdin protocol, event streaming, prompt queuing, model changes, background-task control, forks, interrupt/kill, deletion, and status publication.
+- `session.rs` — core process/session manager: spawn/resume the native agent, local/cloud execution, stdin protocol, event streaming, prompt queuing, model changes, background-task control, forks, interrupt/kill, deletion, and status publication.
 - `store.rs` — persistent session logs/index/snapshots, status flags, nesting metadata, and archive/pin state.
 - `projects.rs` — persistent attached-project list, names, and recent selection ordering.
 - `git.rs` — branch operations, tree snapshots, turn/revision diffs, file-version reads, commit log, work/sync status, commit, and push operations.
@@ -213,14 +213,16 @@ Files in `src-tauri/src/`:
 - `quit.rs` — active-work quit interception and confirmation.
 - `title.rs` — generated session-title behavior.
 - `binpath.rs` — CLI executable discovery/path handling.
-- `models/models.rs` — model IDs, Pi model metadata, effort levels, and configured fallback model.
+- `models/models.rs` — model IDs, OpenAI account model metadata, effort levels, and configured fallback model.
 - `events/events.rs` — shared serializable event/domain model exported to TypeScript.
 - `events/usage.rs` — token/context usage normalization.
-- `harness/harness.rs` — harness abstraction and selection; currently Pi only.
-- `harness/pi/pi.rs` — Pi process command/protocol integration.
-- `harness/pi/parser.rs` — Pi JSON/event stream parsing.
-- `harness/pi/mapper.rs` — maps Pi protocol events into Dray's normalized event model.
-- `harness/pi/commands.rs` — Pi model and command/skill discovery.
+- `harness/harness.rs` — harness abstraction and selection; Dray native agent only.
+- `harness/dray/dray.rs` — native process/Docker transport, auth delivery, persistence, and snapshots.
+- `harness/dray/parser.rs` — native JSON-line event parsing.
+- `harness/dray/mapper.rs` — maps native runtime events into the normalized event model.
+- `harness/dray/commands.rs` — account model catalog and `.dray/skills` discovery.
+- `account.rs` — loopback OAuth, PKCE, identity verification, serialized refresh, credential storage, cancellation, and revocation.
+- `usage.rs` — recorded request tokens/cache usage, deduplicated across forks.
 
 The frontend-facing Tauri command surface covers session send/read/control, attachments, models, commands/skills, file search, projects, branches, Git diffs/history/status, session flags/forks/deletion, notifications, PR operations, and quit confirmation. Add new native capabilities through a narrow command in `lib.rs` and keep implementation in the owning module.
 
@@ -228,9 +230,37 @@ The frontend-facing Tauri command surface covers session send/read/control, atta
 
 Cloud mode is local Docker isolation, not a hosted service. `src-tauri/src/sandbox.rs` creates one container per live session and one persistent volume per cloud workspace. The selected project is not bind-mounted or cloned automatically; the agent starts in the sandbox and performs any repository setup it needs.
 
-The image is defined by `apps/desktop/sandbox/Dockerfile` and launched through `sandbox-entrypoint.sh`. The current image includes Java 21, Java 25, Node.js 24, GitHub CLI, Git, and Pi. `~/.pi/agent` is seeded read-only from the host for Pi configuration/extensions/auth without sharing host session history. GitHub credentials are exposed only to the container, converted to `GH_TOKEN`, and used to configure authenticated HTTPS Git access.
-
+The image is defined by `apps/desktop/sandbox/Dockerfile` and launched through
+`sandbox-entrypoint.sh`. A Rust build stage creates `dray-agent`; the runtime
+includes Java 21, Java 25, Node.js 24, GitHub CLI, and Git. Host `~/.dray/skills`
+is mounted read-only. History lives in the persistent workspace volume.
+OAuth credentials remain on the host; short-lived access tokens travel through
+stdin. GitHub credentials are exposed only to the container and converted to
+`GH_TOKEN` for authenticated HTTPS Git access.
 Use `DRAY_CLOUD_IMAGE` to override the Docker image tag. `GITHUB_TOKEN` or an authenticated host `gh` can provide the token forwarded to a Cloud Session.
+
+## Built-in agent
+
+`packages/agent/src/lib.rs` owns the persistent request/tool loop, SSE parsing,
+queued follow-ups, interruption checkpoints, prompt caching, and compaction.
+`tools.rs` provides search, processes, questions, read-only research, and GitHub
+retrieval; `process_tree.rs` cleans up shell descendants. `skills.rs` discovers
+standard SKILL.md files in global and applicable ancestor `.dray/skills`
+directories. The embedded `SYSTEM.md` is the supplied personal Pi system prompt;
+Pi itself and its authentication are no longer dependencies.
+
+Use the documented direct Sign in with ChatGPT token-sharing flow. Models and
+reasoning levels come from the account catalog; never probe private ChatGPT
+quota endpoints or hardcode supported models. Responses input is an array,
+function tools use the `dray` namespace, and requests set `store: false`.
+Retain encrypted reasoning between requests. Stable instructions, tool schemas,
+history prefixes, and a session cache key support server caching. Record
+per-request tokens including research and compaction. Cached input and reasoning
+are subsets of input/output, not additional consumption.
+
+Regenerate frontend types with `cargo test` or `cargo run --bin export-types`
+from `apps/desktop/src-tauri`. Run standalone checks from the repository root
+with `cargo test --manifest-path packages/agent/Cargo.toml`.
 
 ## Important interaction rules
 
@@ -302,4 +332,3 @@ Prefer the smallest verification that covers a change. Documentation-only edits 
 
 - After completing each requested change or task, create a Git commit and push it to the configured remote.
 - Every commit must have a concise title and a descriptive body explaining what changed and why.
-

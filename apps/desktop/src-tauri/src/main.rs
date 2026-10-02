@@ -3,5 +3,12 @@
 
 #[tokio::main]
 async fn main() {
+    if std::env::args().any(|arg| arg == "--agent") {
+        if let Err(error) = dray_agent::run().await {
+            eprintln!("Dray agent: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     ade_lib::run()
 }

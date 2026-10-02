@@ -16,7 +16,7 @@
 
 ## Overview
 
-Dray wraps coding-agent CLIs in a native chat UI, giving you a desktop home for running and managing coding-agent sessions. The current harness integrates with [Pi](https://github.com/badlogic/pi-mono).
+Dray is a desktop app with its own Rust coding agent. Connect your ChatGPT account in Settings to use the OpenAI models available to your account. Pi and Node.js are not required to run the agent.
 
 > This project is a fork of [monorepo-labs/dray](https://github.com/monorepo-labs/dray).
 
@@ -28,14 +28,31 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 
 - Persistent multi-session workspace with search, pinning, settling, forks, nested sessions, unread/waiting state, and desktop notifications.
 - Local Sessions inside attached projects, with project and Git branch switching.
-- Isolated Cloud Sessions that run Pi in Docker with their own persistent workspace volume.
-- Model and reasoning/effort controls, context usage, queued follow-ups, and generated session titles.
+- Isolated Cloud Sessions that run Dray's agent in Docker with their own persistent workspace volume.
+- ChatGPT sign-in, account-specific model and effort controls, context usage, queued follow-ups, and generated session titles.
+- Native file editing, search, shell and background commands, questions, codebase/GitHub research, and web search.
+- Automatic OpenAI prompt caching with recorded token and cache-hit indicators.
 - Rich chat transcripts with Markdown, syntax highlighting, reasoning, tool calls, file edits, diffs, images, and structured questions.
-- File/image attachments, drag and drop, `@file` fuzzy search, `/commands`, and `$skills` discovered from Pi.
+- File/image attachments, drag and drop, `@file` fuzzy search, `/commands`, and `$skills` discovered from `.dray/skills`.
 - Turn-scoped change tracking backed by Git snapshots, so completed-turn diffs stay stable after later edits.
 - Git handoff actions for commit, push, and pull-request workflows.
 - GitHub pull request panel through `gh`, including checks, comments/reviews, draft/ready state, reopen, and merge controls.
 - Themes, native window integration, keyboard shortcuts, sounds, notices, and safe quit handling while work is active.
+
+## Agent setup
+
+Open **Settings > Models > Continue with ChatGPT** and complete browser sign-in.
+Model and reasoning choices come from the account's OpenAI catalog. Credentials
+stay in the native backend and operating system credential store on Windows
+and macOS. Dray never imports Pi authentication.
+
+Skills live in `~/.dray/skills/<name>/SKILL.md` or a project's
+`.dray/skills/<name>/SKILL.md`. Use YAML frontmatter with `name` and `description`,
+followed by the skill instructions. Select a skill in the composer or invoke it
+with `$name`. Project skills override global skills with the same name.
+
+The embedded system prompt is `packages/agent/SYSTEM.md`. Usage shows tokens
+recorded by Dray; follow the ChatGPT usage link for subscription limits.
 
 ## Tech stack
 
@@ -49,7 +66,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 | Path           | What                                                          |
 | -------------- | ------------------------------------------------------------- |
 | `apps/desktop` | The Tauri app. React 19 + Vite frontend, Rust backend.        |
-| `packages`     | Shared code. Empty until something is genuinely wanted twice. |
+| `packages/agent` | Standalone Rust coding agent and embedded system prompt. |
 | `AGENTS.md`    | Detailed architecture, component, feature, and agent guide.   |
 
 ## Development
@@ -78,14 +95,12 @@ cd apps/desktop/src-tauri && cargo test
 
 ## Cloud sandbox
 
-Cloud Sessions run Pi in Docker without mounting or cloning the selected project.
-The sandbox image includes Java 21, Java 25, Node.js 24, GitHub CLI, and Pi.
-Pi's host `~/.pi/agent` directory is mounted read-only as a seed so extensions,
-settings, and authentication are available without sharing session history.
-GitHub authentication follows Agentsmith: `GITHUB_TOKEN` is passed only to the
-container and the entrypoint exports it as `GH_TOKEN`, runs `gh auth setup-git`,
-and rewrites SSH GitHub URLs to HTTPS.
-
+Cloud Sessions run the standalone Dray agent in Docker without mounting or
+cloning the selected project. The image includes Java 21, Java 25, Node.js 24,
+GitHub CLI, Git, and Dray. Host `~/.dray/skills` is mounted read-only. Each
+workspace has its own persistent history. Short-lived OpenAI access tokens
+travel through stdin; credentials remain on the host. GitHub authentication
+uses `GITHUB_TOKEN` or an authenticated host `gh`.
 Build the image locally (Docker Desktop must be running):
 
 ```sh

@@ -16,10 +16,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { IS_MAC } from "@/lib/platform";
-import type { Effort, Model, ModelId, PiModel } from "@/types/events";
+import type { Effort, Model, ModelId, AgentModel } from "@/types/events";
 
 export const EFFORT_LABELS: Record<Effort, string> = {
   off: "Off",
+  none: "None",
+  minimal: "Minimal",
   low: "Low",
   medium: "Medium",
   high: "High",
@@ -27,7 +29,7 @@ export const EFFORT_LABELS: Record<Effort, string> = {
   max: "Max",
 };
 
-export const EFFORTS: Effort[] = ["off", "low", "medium", "high", "xhigh", "max"];
+export const EFFORTS: Effort[] = ["off", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 // Preserve the original shortcut behavior until the user explicitly configures
 // the cycle. Off and Low remain available both in the picker and as opt-in
@@ -35,9 +37,9 @@ export const EFFORTS: Effort[] = ["off", "low", "medium", "high", "xhigh", "max"
 export const DEFAULT_CYCLE_EFFORTS: Effort[] = ["medium", "high", "xhigh", "max"];
 
 export const modelKey = (model: Model) =>
-  model.piModel ? `pi:${model.piModel.provider}/${model.piModel.id}` : model.id;
+  model.agentModel ? `dray:${model.agentModel.provider}/${model.agentModel.id}` : model.id;
 
-export const modelLabel = (model: Model) => model.label || model.piModel?.id || model.id;
+export const modelLabel = (model: Model) => model.label || model.agentModel?.id || model.id;
 
 /// `null` means the catalog is unconfigured, so every discovered model is
 /// shown. Stable keys let an explicit selection survive catalog refreshes.
@@ -51,7 +53,7 @@ export function filterModels(models: Model[], query: string): Model[] {
   const q = query.toLowerCase();
   return models
     .map((model) => {
-      const values = [modelLabel(model), model.id, model.piModel?.id, modelKey(model)]
+      const values = [modelLabel(model), model.id, model.agentModel?.id, modelKey(model)]
         .filter((value): value is string => Boolean(value))
         .map((value) => value.toLowerCase());
       const score = values.some((value) => value.startsWith(q))
@@ -95,16 +97,16 @@ export default function ModelSelector({
   models,
   modelId,
   id,
-  piModel,
+  agentModel,
   effort,
   onChange,
 }: {
   models: Model[];
   modelId: ModelId;
   id?: string;
-  piModel: PiModel | null;
+  agentModel: AgentModel | null;
   effort: Effort | null;
-  onChange: (modelId: ModelId, effort: Effort | null, piModel: PiModel | null) => void;
+  onChange: (modelId: ModelId, effort: Effort | null, agentModel: AgentModel | null) => void;
 }) {
   // Controlled so a click on a submenu trigger can close the whole menu; Radix
   // otherwise keeps the parent open for the submenu it just opened on hover.
@@ -113,14 +115,14 @@ export default function ModelSelector({
   const selected = models.find(
     (m) =>
       m.id === modelId &&
-      (m.id !== "pi" ||
-        (m.piModel?.provider === piModel?.provider && m.piModel?.id === piModel?.id)),
+      (m.id !== "dray" ||
+        (m.agentModel?.provider === agentModel?.provider && m.agentModel?.id === agentModel?.id)),
   ) ?? null;
   /// What a row would resolve to if clicked: the live effort for the model
   /// already selected, each other model's own default. Mirrors the resolution
   /// in `useSessions`, so the menu can't advertise an effort the send wouldn't use.
   const rowEffort = (model: Model): Effort | null =>
-    model.id === modelId ? effort : model.defaultEffort;
+    selected && modelKey(model) === modelKey(selected) ? effort : model.defaultEffort ?? model.efforts[0] ?? null;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -139,7 +141,7 @@ export default function ModelSelector({
               {/* Effort is a qualifier on the model, not part of its name, so it's
                   held back a step rather than reading as one long label. */}
               <span>
-                {selected ? modelLabel(selected) : modelId === "pi" && piModel ? piModel.id : modelId}
+                {selected ? modelLabel(selected) : modelId === "dray" && agentModel ? agentModel.id : modelId}
               </span>
               {effort && (
                 <span className="text-muted-foreground/60">{EFFORT_LABELS[effort]}</span>
@@ -173,7 +175,7 @@ export default function ModelSelector({
               <DropdownMenuSubTrigger
                 className="cursor-pointer gap-1 text-ui"
                 onClick={() => {
-                  onChange(model.id, null, model.piModel);
+                  onChange(model.id, null, model.agentModel);
                   setOpen(false);
                 }}
               >
@@ -190,7 +192,7 @@ export default function ModelSelector({
                     key={level}
                     className="text-ui"
                     onSelect={() => {
-                      onChange(model.id, level, model.piModel);
+                      onChange(model.id, level, model.agentModel);
                       setOpen(false);
                     }}
                   >
@@ -204,7 +206,7 @@ export default function ModelSelector({
             <DropdownMenuItem
               key={modelKey(model)}
               className="text-ui"
-              onSelect={() => onChange(model.id, null, model.piModel)}
+              onSelect={() => onChange(model.id, null, model.agentModel)}
             >
               {modelLabel(model)}
             </DropdownMenuItem>

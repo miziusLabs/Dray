@@ -1,9 +1,13 @@
 # Dray Cloud sandbox image.
 # Build with: pnpm build:sandbox
+FROM rust:1.99-bookworm AS agent-build
+WORKDIR /build
+COPY packages/agent ./agent
+RUN cargo build --release --manifest-path agent/Cargo.toml --locked
+
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG PI_PACKAGE=@earendil-works/pi-coding-agent
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git gnupg openssh-client software-properties-common \
@@ -32,9 +36,8 @@ RUN ln -s /usr/lib/jvm/temurin-21-jdk-* /usr/lib/jvm/default
 ENV JAVA_HOME=/usr/lib/jvm/default
 ENV PATH=/usr/lib/jvm/default/bin:${PATH}
 ENV NODE_PATH=/usr/lib/node_modules
-ENV PI_CODING_AGENT_DIR=/home/agent/.pi/agent
 
-RUN npm install --global "${PI_PACKAGE}"
+COPY --from=agent-build /build/agent/target/release/dray-agent /usr/local/bin/dray-agent
 
 # Ubuntu images ship a default `ubuntu` user at UID 1000, which would collide
 # with the agent user below; drop it first so fresh pulls of the base image
@@ -44,7 +47,7 @@ RUN userdel -r ubuntu \
   && mkdir -p /home/agent/workspace \
   && chown -R agent:agent /home/agent
 
-COPY sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint
+COPY apps/desktop/sandbox/sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint
 # Git for Windows checks shell scripts out with CRLF line endings when
 # core.autocrlf is set, and the container cannot execute a CRLF shebang. Strip
 # carriage returns defensively so the image runs regardless of host checkout

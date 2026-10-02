@@ -1,6 +1,8 @@
 import { useId, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
+import ChatGptAccount from "@/components/ChatGptAccount";
+
 import packageJson from "../../package.json";
 import {
   Dialog,
@@ -28,7 +30,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { IS_MAC } from "@/lib/platform";
-import type { Effort, Model, ModelId, PiModel } from "@/types/events";
+import type { Effort, Model, ModelId, AgentModel } from "@/types/events";
 import type { UsageDisplayMode } from "@/types/usage";
 import type { UpdateCheckResult } from "@/components/UpdateNotice";
 
@@ -72,7 +74,7 @@ export default function SettingsDialog({
   onAutoDownloadUpdatesChange,
   titleModels,
   titleModelId,
-  titlePiModel,
+  titleAgentModel,
   titleEffort,
   onTitleModelChange,
   checkingForUpdates,
@@ -97,12 +99,12 @@ export default function SettingsDialog({
   onAutoDownloadUpdatesChange: (next: boolean) => void;
   titleModels: Model[];
   titleModelId: ModelId;
-  titlePiModel: PiModel | null;
+  titleAgentModel: AgentModel | null;
   titleEffort: Effort;
   onTitleModelChange: (
     modelId: ModelId,
     effort: Effort | null,
-    piModel: PiModel | null,
+    agentModel: AgentModel | null,
   ) => void;
   checkingForUpdates: boolean;
   onCheckForUpdates: () => Promise<UpdateCheckResult>;
@@ -191,6 +193,7 @@ export default function SettingsDialog({
             aria-hidden={category !== "models"}
             inert={category !== "models"}
           >
+            <ChatGptAccount />
             <ModelSelectionRow
               models={models}
               selectedKeys={visibleModelKeys}
@@ -221,7 +224,7 @@ export default function SettingsDialog({
             <TitleGenerationRow
               models={titleModels}
               modelId={titleModelId}
-              piModel={titlePiModel}
+              agentModel={titleAgentModel}
               effort={titleEffort}
               onChange={onTitleModelChange}
             />
@@ -265,13 +268,13 @@ function UsageDisplayRow({
   return (
     <SettingRow
       id={id}
-      label="Usage display"
-      description="Choose whether Codex analytics bars show what is left or already used."
+      label="Cache indicator"
+      description="Choose whether the usage bar shows cached or uncached input tokens."
     >
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button id={id} type="button" variant="outline" size="sm" className="text-ui">
-            {mode === "left" ? "Left" : "Used"}
+            {mode === "left" ? "Uncached" : "Cached"}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-24">
@@ -282,10 +285,10 @@ function UsageDisplayRow({
             }}
           >
             <DropdownMenuRadioItem value="left" className="text-ui">
-              Left
+              Uncached
             </DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="used" className="text-ui">
-              Used
+              Cached
             </DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
@@ -489,15 +492,15 @@ function CycleEffortsRow({
 function TitleGenerationRow({
   models,
   modelId,
-  piModel,
+  agentModel,
   effort,
   onChange,
 }: {
   models: Model[];
   modelId: ModelId;
-  piModel: PiModel | null;
+  agentModel: AgentModel | null;
   effort: Effort;
-  onChange: (modelId: ModelId, effort: Effort | null, piModel: PiModel | null) => void;
+  onChange: (modelId: ModelId, effort: Effort | null, agentModel: AgentModel | null) => void;
 }) {
   const id = useId();
 
@@ -511,7 +514,7 @@ function TitleGenerationRow({
         id={id}
         models={models}
         modelId={modelId}
-        piModel={piModel}
+        agentModel={agentModel}
         effort={effort}
         onChange={onChange}
       />

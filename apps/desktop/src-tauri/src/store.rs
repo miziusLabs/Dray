@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     events::{now_rfc3339, AgentEvent},
-    models::{Effort, ModelId, PiModel},
+    models::{AgentModel, Effort, ModelId},
     session::Harness,
 };
 
@@ -56,9 +56,10 @@ pub struct SessionIndexItem {
     /// the user last picked instead of resetting to a default.
     #[serde(default)]
     pub model: ModelId,
-    /// The concrete provider/model selected when the harness is Pi.
+    /// The concrete provider/model selected when the harness is Dray.
     #[serde(default)]
-    pub pi_model: Option<PiModel>,
+    #[serde(alias = "piModel")]
+    pub agent_model: Option<AgentModel>,
     /// `None` for models that take no effort flag.
     #[serde(default)]
     pub effort: Option<Effort>,
@@ -250,7 +251,7 @@ impl SessionIndexItem {
             cloud_name: cloud_name.map(str::to_string),
             title: title_from_prompt(first_prompt),
             model,
-            pi_model: None,
+            agent_model: None,
             effort,
             status: SessionStatus::default(),
             fork_from: None,
@@ -286,7 +287,7 @@ impl SessionIndexItem {
             cloud_name: cloud_name.map(str::to_string),
             title: fork_title(&self.title),
             model: self.model,
-            pi_model: self.pi_model.clone(),
+            agent_model: self.agent_model.clone(),
             effort: self.effort,
             status: SessionStatus::default(),
             fork_from: Some(self.session_id.clone()),
@@ -409,7 +410,7 @@ pub async fn append_session_index_item(session: SessionIndexItem) -> Result<()> 
 pub async fn touch_session_index_item(
     session_id: &str,
     model: ModelId,
-    pi_model: Option<&PiModel>,
+    agent_model: Option<&AgentModel>,
     effort: Option<Effort>,
 ) -> Result<()> {
     let _guard = INDEX_LOCK.lock().await;
@@ -421,7 +422,7 @@ pub async fn touch_session_index_item(
 
     item.modified = now_rfc3339();
     item.model = model;
-    item.pi_model = pi_model.cloned();
+    item.agent_model = agent_model.cloned();
     item.effort = effort;
 
     write_session_index(&sessions).await
@@ -873,7 +874,7 @@ mod tests {
         assert_eq!(item.status, SessionStatus::Idle);
         // Reads back as a model no build lists, so it can never reach a spawn.
         assert_eq!(item.model, ModelId::Unknown);
-        assert!(crate::models::find_model(item.model, item.pi_model.as_ref()).is_none());
+        assert!(crate::models::find_model(item.model, item.agent_model.as_ref()).is_none());
     }
 
     #[test]
@@ -897,13 +898,13 @@ mod tests {
     fn forking_in_place_inherits_the_tree_without_owning_it() {
         let mut parent = SessionIndexItem::new(
             "parent",
-            Harness::Pi,
+            Harness::Dray,
             "/p/.dray/cloud/wt",
             "/p",
             Some("wt"),
             Some("main"),
             "add the PR panel",
-            ModelId::Pi,
+            ModelId::Dray,
             Some(Effort::High),
             None,
         );
@@ -932,13 +933,13 @@ mod tests {
     fn a_sessions_branch_reads_the_same_way_the_pr_tab_reads_it() {
         let cloud = SessionIndexItem::new(
             "a",
-            Harness::Pi,
+            Harness::Dray,
             "/p/.dray/cloud/calm-owl",
             "/p",
             Some("calm-owl"),
             Some("main"),
             "hi",
-            ModelId::Pi,
+            ModelId::Dray,
             None,
             None,
         );
@@ -954,18 +955,17 @@ mod tests {
 
         let plain = SessionIndexItem::new(
             "b",
-            Harness::Pi,
+            Harness::Dray,
             "/p",
             "/p",
             None,
             Some("feature"),
             "hi",
-            ModelId::Pi,
+            ModelId::Dray,
             None,
             None,
         );
         assert_eq!(session_branch(&plain, None).as_deref(), Some("feature"));
-
     }
 
     /// A fork is a copy, so it sits exactly where the original sits: beside its
@@ -976,13 +976,13 @@ mod tests {
     fn a_fork_keeps_its_source_place_in_the_spawn_chain() {
         let mut spawned = SessionIndexItem::new(
             "spawned",
-            Harness::Pi,
+            Harness::Dray,
             "/p",
             "/p",
             None,
             None,
             "work the issue",
-            ModelId::Pi,
+            ModelId::Dray,
             None,
             Some("orchestrator"),
         );
@@ -1004,13 +1004,13 @@ mod tests {
     fn forking_into_a_cloud_takes_a_tree_of_its_own() {
         let parent = SessionIndexItem::new(
             "parent",
-            Harness::Pi,
+            Harness::Dray,
             "/p",
             "/p",
             None,
             Some("main"),
             "add the PR panel",
-            ModelId::Pi,
+            ModelId::Dray,
             None,
             None,
         );
@@ -1068,7 +1068,7 @@ mod tests {
         let event = |payload| AgentEvent {
             id: "e1".into(),
             session_id: "parent".into(),
-            harness: Harness::Pi,
+            harness: Harness::Dray,
             seq: 0,
             ts: "t".into(),
             turn_id: None,
@@ -1113,9 +1113,9 @@ mod tests {
         assert_eq!(
             paths,
             vec![
-                "/home/.dray/attachments/child/a.png",
-                "/home/.dray/attachments/child/b.png",
-                "/tmp/elsewhere.png",
+                to_dir.join("a.png").to_string_lossy().into_owned(),
+                to_dir.join("b.png").to_string_lossy().into_owned(),
+                "/tmp/elsewhere.png".to_owned(),
             ]
         );
     }
@@ -1125,13 +1125,13 @@ mod tests {
         let item = |id: &str, archived: bool| {
             let mut i = SessionIndexItem::new(
                 id,
-                Harness::Pi,
+                Harness::Dray,
                 "/p",
                 "/p",
                 None,
                 None,
                 "hi",
-                ModelId::Pi,
+                ModelId::Dray,
                 None,
                 None,
             );
@@ -1165,13 +1165,13 @@ mod tests {
     fn a_cloud_session_records_the_branch_its_work_lands_on() {
         let item = SessionIndexItem::new(
             "a",
-            Harness::Pi,
+            Harness::Dray,
             "/p/.dray/cloud/calm-owl",
             "/p",
             Some("calm-owl"),
             Some("main"),
             "hi",
-            ModelId::Pi,
+            ModelId::Dray,
             None,
             None,
         );
@@ -1183,13 +1183,13 @@ mod tests {
     fn snapshot_flattens_index_fields_beside_events() {
         let item = SessionIndexItem::new(
             "a",
-            Harness::Pi,
+            Harness::Dray,
             "/p",
             "/p",
             None,
             Some("main"),
             "hi",
-            ModelId::Pi,
+            ModelId::Dray,
             Some(Effort::High),
             None,
         );

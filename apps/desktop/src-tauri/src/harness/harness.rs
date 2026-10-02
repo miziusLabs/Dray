@@ -1,7 +1,7 @@
-//! The Pi Coding Agent integration used by Dray.
+//! The Dray Coding Agent integration used by Dray.
 
-#[path = "pi/pi.rs"]
-pub mod pi;
+#[path = "dray/dray.rs"]
+pub mod dray;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -10,7 +10,7 @@ use ts_rs::TS;
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum Harness {
-    /// Legacy persisted sessions are resumed with Pi rather than rejected.
-    #[serde(alias = "claude_code", alias = "codex")]
-    Pi,
+    /// Legacy persisted sessions are resumed with Dray rather than rejected.
+    #[serde(alias = "pi", alias = "claude_code", alias = "codex")]
+    Dray,
 }

@@ -1,14 +1,14 @@
 import { useCallback } from "react";
 
 import { useLocalStorage } from "@/hooks/useLocalStorage";
-import type { Effort, Harness, ModelId, PiModel } from "@/types/events";
+import type { Effort, Harness, ModelId, AgentModel } from "@/types/events";
 
 /// Seeds for a first run with nothing stored. Once the user picks anything, their
 /// pick is the default — these are never read again.
 const SEED: ComposerPrefs = {
-  harness: "pi",
-  modelId: "pi",
-  piModel: null,
+  harness: "dray",
+  modelId: "dray",
+  agentModel: null,
   effortByModel: {},
   useCloud: false,
 };
@@ -24,7 +24,7 @@ export type EffortByModel = Partial<Record<ModelId, Effort>>;
 export type ComposerPrefs = {
   harness: Harness;
   modelId: ModelId;
-  piModel: PiModel | null;
+  agentModel: AgentModel | null;
   effortByModel: EffortByModel;
   useCloud: boolean;
 };
@@ -45,8 +45,8 @@ export function useComposerPrefs() {
   const merged: ComposerPrefs = {
     ...SEED,
     ...prefs,
-    harness: "pi",
-    modelId: "pi",
+    harness: "dray",
+    modelId: "dray",
   };
 
   const patch = useCallback(

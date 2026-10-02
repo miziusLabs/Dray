@@ -1,8 +1,8 @@
 //! Docker sandbox integration for Cloud sessions.
 //!
 //! A Cloud session gets a disposable container and a private named volume. The
-//! volume keeps Pi's conversation and workspace between turns, but the host
-//! project is never mounted into it. Pi configuration is copied from a
+//! volume keeps Dray's conversation and workspace between turns, but the host
+//! project is never mounted into it. Dray configuration is copied from a
 //! read-only seed mount by the image entrypoint, while GitHub credentials stay
 //! in the container environment for the lifetime of the container only.
 
@@ -34,7 +34,9 @@ pub fn container_name(session_id: &str) -> String {
     // this name is handed directly to Docker as an argument.
     let safe: String = session_id
         .chars()
-        .filter(|character| character.is_ascii_alphanumeric() || *character == '-' || *character == '_')
+        .filter(|character| {
+            character.is_ascii_alphanumeric() || *character == '-' || *character == '_'
+        })
         .collect();
     format!("{CONTAINER_PREFIX}{safe}")
 }
@@ -53,10 +55,7 @@ pub async fn is_available() -> bool {
 }
 
 async fn command_succeeded(mut command: Command) -> bool {
-    command
-        .status()
-        .await
-        .is_ok_and(|status| status.success())
+    command.status().await.is_ok_and(|status| status.success())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,7 +117,7 @@ pub async fn ensure_image() -> Result<()> {
     )
 }
 
-/// Builds a Docker command that runs Pi through the image entrypoint.
+/// Builds a Docker command that runs Dray through the image entrypoint.
 ///
 /// The session manager verifies the image before indexing a new or resumed
 /// Cloud. Do not inspect it again here: every inspection launches another
@@ -129,9 +128,13 @@ pub async fn ensure_image() -> Result<()> {
 /// environment, so the secret does not appear in the command-line argument
 /// visible to local process inspectors. The entrypoint mirrors Agentsmith by
 /// exporting it as `GH_TOKEN` and running `gh auth setup-git`.
-pub async fn pi_command(session_id: &str, cloud_name: &str, pi_args: &[String]) -> Result<Command> {
+pub async fn agent_command(
+    session_id: &str,
+    cloud_name: &str,
+    agent_args: &[String],
+) -> Result<Command> {
     let home = dirs::home_dir().context("could not resolve home directory")?;
-    let pi_agent = home.join(".pi").join("agent");
+    let skills = home.join(".dray").join("skills");
     let volume = volume_name(cloud_name);
     let container = container_name(session_id);
 
@@ -151,17 +154,14 @@ pub async fn pi_command(session_id: &str, cloud_name: &str, pi_args: &[String]) 
         &format!("type=volume,source={volume},target=/home/agent"),
     ]);
 
-    // A missing host configuration is valid: Pi then starts with the image's
-    // defaults. When present, it is a read-only seed, not a live bind mount;
-    // the entrypoint copies it into the session volume and removes any host
-    // session transcripts so Cloud sessions cannot alter local Pi history.
-    if pi_agent.is_dir() {
-        let source = pi_agent
+    // Skills are shared read-only; OpenAI credentials are delivered over stdin.
+    if skills.is_dir() {
+        let source = skills
             .to_str()
-            .context("Pi agent directory is not valid UTF-8")?;
+            .context("Skills directory is not valid UTF-8")?;
         command.args([
             "--mount",
-            &format!("type=bind,source={source},target=/run/pi-agent,readonly"),
+            &format!("type=bind,source={source},target=/home/agent/.dray/skills,readonly"),
         ]);
     }
 
@@ -172,10 +172,7 @@ pub async fn pi_command(session_id: &str, cloud_name: &str, pi_args: &[String]) 
         command.arg("--env").arg("GITHUB_TOKEN");
     }
 
-    command
-        .arg(image())
-        .arg("pi")
-        .args(pi_args);
+    command.arg(image()).arg("dray-agent").args(agent_args);
     Ok(command)
 }
 
@@ -221,7 +218,10 @@ pub async fn remove_container(session_id: &str) {
 pub async fn remove_volume(cloud_name: &str) {
     let volume = volume_name(cloud_name);
     let mut command = docker_command();
-    let _ = command.args(["volume", "rm", "--force", &volume]).output().await;
+    let _ = command
+        .args(["volume", "rm", "--force", &volume])
+        .output()
+        .await;
 }
 
 fn docker_command() -> Command {

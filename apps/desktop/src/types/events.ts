@@ -10,7 +10,7 @@ export type AgentEvent = { id: string, sessionId: string, harness: Harness,
  * Position in the session's event log, and the cursor for reconnecting a UI
  * to a running session. One counter per session, shared by mapped stdout
  * lines and events the app synthesizes itself, seeded from the persisted log
- * on resume. Never sort by `ts` — most Pi events omit it.
+ * on resume. Never sort by `ts` — most Dray events omit it.
  */
 seq: number, ts: string, turnId: string | null, payload: AgentEventPayload, 
 /**
@@ -88,7 +88,7 @@ name: string, toolType: ToolType,
  */
 input: JsonValue, 
 /**
- * Input that isn't JSON at all — Pi's `custom_tool_call.input` is raw
+ * Input that isn't JSON at all — Dray's `custom_tool_call.input` is raw
  * JS source.
  */
 rawInput: string | null, title: string | null, } | { "type": "tool_call_completed", callId: string, result: ToolResult, } | { "type": "file_edits", callId: string | null, edits: Array<FileEdit>, } | { "type": "usage_update" } & Usage | { "type": "rate_limited", 
@@ -133,6 +133,10 @@ questions: Array<Question>, } | { "type": "question_answered", requestId: string
  */
 trigger: string | null, preTokens: number | null, postTokens: number | null, durationMs: number | null, } | { "type": "error", source: ErrorSource, message: string, fatal: boolean, } | { "type": "unknown", harnessType: string, } | { "type": "unrecognized" };
 
+export type AgentModel = { provider: string, id: string, };
+
+export type AgentUsage = { inputTokens: number, outputTokens: number, cachedInputTokens: number, reasoningTokens: number, completedTurns: number, signedIn: boolean, email: string | null, };
+
 /**
  * One thing the user attached, as the composer needs to draw it.
  */
@@ -162,7 +166,7 @@ preview: string | null, };
 
 /**
  * Joins streamed content to its committed counterpart. A message is often
- * `[text, tool_use, …]` and each block arrives as its own event; Pi's
+ * `[text, tool_use, …]` and each block arrives as its own event; Dray's
  * committed events carry no index, so the mapper derives one by counting blocks
  * per `message_id` in arrival order.
  */
@@ -264,7 +268,7 @@ export type ContextWindow = { usedTokens: number, maxTokens: number, };
  *
  * **Deltas are a preview, never the source of truth**: the committed event for
  * the same [`BlockRef`] supersedes whatever they accumulated. Absent deltas are
- * the common case — Pi emits none — so
+ * the common case — Dray emits none — so
  * consumers must render correctly without them.
  * Tagged on `delta`, not `type`: [`AgentEventPayload::Delta`] is a newtype
  * variant, so these fields flatten into the payload object alongside its own
@@ -272,9 +276,9 @@ export type ContextWindow = { usedTokens: number, maxTokens: number, };
  */
 export type DeltaEvent = { "delta": "block_start", block: BlockRef, blockType: BlockType, } | { "delta": "text_delta", block: BlockRef, text: string, } | { "delta": "input_delta", block: BlockRef, partialJson: string, } | { "delta": "block_stop", block: BlockRef, };
 
-export type Effort = "off" | "low" | "medium" | "high" | "xhigh" | "max";
+export type Effort = "off" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export type ErrorSource = "harness" | "parser" | "process";
+export type ErrorSource = "provider" | "harness" | "parser" | "process";
 
 export type FileChange = "add" | "update" | "delete";
 
@@ -294,7 +298,7 @@ name: string,
 /**
  * Everything before `name`, without a trailing slash. Empty at the root.
  */
-dir: string,
+dir: string, 
 /**
  * Whether this row is a directory rather than a regular file.
  */
@@ -319,7 +323,7 @@ newText: string | null,
  */
 unreadable: Unreadable | null, };
 
-export type Harness = "pi";
+export type Harness = "dray";
 
 export type HookPhase = "started" | "finished";
 
@@ -356,16 +360,16 @@ export type MessageSender = { sessionId: string, title: string, };
 
 export type Model = { 
 /**
- * The harness-specific model family. Pi models carry their provider and
- * concrete id in [`pi_model`].
+ * The harness-specific model family. Dray models carry their provider and
+ * concrete id in [`agent_model`].
  */
-id: ModelId, piModel: PiModel | null, label: string, 
+id: ModelId, agentModel: AgentModel | null, label: string, 
 /**
  * Empty means the model has no effort levels. The CLI tolerates `--effort`
  * on such a model and ignores it, so this drives the UI and keeps the
  * persisted value honest rather than preventing a crash.
  */
-efforts: Array<Effort>, defaultEffort: Effort | null, };
+efforts: Array<Effort>, defaultEffort: Effort | null, contextWindow?: number, };
 
 /**
  * The `--model` alias, typed. `Unknown` exists so an index entry naming a
@@ -373,7 +377,7 @@ efforts: Array<Effort>, defaultEffort: Effort | null, };
  * model beats failing the whole index read and emptying the sidebar. It maps
  * to no alias, so [`find_model`] rejects it and it can't reach a spawn.
  */
-export type ModelId = "pi" | "unknown";
+export type ModelId = "dray" | "unknown";
 
 /**
  * What one model has consumed **for the session so far** — cumulative and
@@ -392,17 +396,15 @@ export type ModelId = "pi" | "unknown";
  */
 export type ModelUsage = { 
 /**
- * The harness's own key — a dated id (`pi-haiku-4-5-20251001`), not the
+ * The harness's own key — a dated id (`dray-haiku-4-5-20251001`), not the
  * alias a session was started with.
  */
 model: string, inputTokens: number | null, outputTokens: number | null, cachedInputTokens: number | null, cacheWriteTokens: number | null, webSearchRequests: number | null, costUsd: number | null, 
 /**
  * This model's context window. Also what the composer's gauge measures
- * against — see `context_window` in the Pi mapper.
+ * against — see `context_window` in the Dray mapper.
  */
 contextWindow: number | null, maxOutputTokens: number | null, };
-
-export type PiModel = { provider: string, id: string, };
 
 export type PrCheck = { name: string, state: CheckState, 
 /**
@@ -521,7 +523,7 @@ name: string,
  * The user's explicit position in the project picker. Unlike
  * [`last_selected`], selecting a project does not change this value.
  */
-position: number,
+position: number, 
 /**
  * Used only to restore the selected project on startup. It must not sort
  * the picker because selecting a project should not undo manual ordering.
@@ -666,9 +668,9 @@ cloudName: string | null, title: string,
  */
 model: ModelId, 
 /**
- * The concrete provider/model selected when the harness is Pi.
+ * The concrete provider/model selected when the harness is Dray.
  */
-piModel: PiModel | null, 
+agentModel: AgentModel | null, 
 /**
  * `None` for models that take no effort flag.
  */
@@ -727,9 +729,9 @@ cloudName: string | null, title: string,
  */
 model: ModelId, 
 /**
- * The concrete provider/model selected when the harness is Pi.
+ * The concrete provider/model selected when the harness is Dray.
  */
-piModel: PiModel | null, 
+agentModel: AgentModel | null, 
 /**
  * `None` for models that take no effort flag.
  */
@@ -789,15 +791,7 @@ export type SessionTitleEvent = { sessionId: string, title: string, };
  */
 export type Settings = { model: string | null, sandbox: string | null, writableRoots: Array<string>, networkAccess: boolean | null, fastMode: string | null, };
 
-/**
- * One command the user may type. `name` carries no leading slash — the picker
- * adds it — and may be namespaced by an extension.
- */
-export type SlashCommand = { name: string, description: string, argumentHint: string, aliases: Array<string>, 
-/**
- * Skills are displayed with `$` while Pi still receives `/skill:`.
- */
-isSkill: boolean, };
+export type SlashCommand = { name: string, description: string, argumentHint: string, aliases: Array<string>, isSkill: boolean, };
 
 /**
  * Where the current branch stands against its upstream — everything the push
@@ -851,8 +845,8 @@ images: Array<ImageRef>, };
 export type ToolType = "shell" | "file_read" | "file_edit" | "search" | "web" | "mcp" | "other";
 
 /**
- * How a turn ended. Pi reports this as `is_error` on its result
- * event; Pi live emits `turn.completed` (a failed turn is uncaptured so
+ * How a turn ended. Dray reports this as `is_error` on its result
+ * event; Dray live emits `turn.completed` (a failed turn is uncaptured so
  * far). A user-abort outcome likely deserves its own variant once one has been
  * captured.
  */

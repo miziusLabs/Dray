@@ -1,0 +1,9 @@
+**
+!packages/
+!packages/agent/
+!packages/agent/**
+packages/agent/target/
+!apps/
+!apps/desktop/
+!apps/desktop/sandbox/
+!apps/desktop/sandbox/**

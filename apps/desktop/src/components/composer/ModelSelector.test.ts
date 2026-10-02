@@ -4,8 +4,8 @@ import { modelsForKeys, nextEffort } from "./ModelSelector";
 import type { Model } from "@/types/events";
 
 const model: Model = {
-  id: "pi",
-  piModel: { provider: "test", id: "model" },
+  id: "dray",
+  agentModel: { provider: "test", id: "model" },
   label: "Model",
   efforts: ["off", "low", "medium", "high", "xhigh", "max"],
   defaultEffort: "high",
@@ -14,7 +14,7 @@ const model: Model = {
 describe("modelsForKeys", () => {
   const otherModel: Model = {
     ...model,
-    piModel: { provider: "test", id: "other" },
+    agentModel: { provider: "test", id: "other" },
     label: "Other",
   };
 
@@ -23,8 +23,8 @@ describe("modelsForKeys", () => {
   });
 
   it("matches explicit selections by stable model key", () => {
-    expect(modelsForKeys([model, otherModel], ["pi:test/other"])).toEqual([otherModel]);
-    expect(modelsForKeys([model, otherModel], ["pi:test/model"])).toEqual([model]);
+    expect(modelsForKeys([model, otherModel], ["dray:test/other"])).toEqual([otherModel]);
+    expect(modelsForKeys([model, otherModel], ["dray:test/model"])).toEqual([model]);
   });
 });
 

@@ -5,12 +5,11 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const image = process.env.DRAY_CLOUD_IMAGE?.trim() || "dray-cloud:latest";
-const piPackage = process.env.PI_PACKAGE?.trim() || "@earendil-works/pi-coding-agent";
 
 console.log(`Building Dray Cloud sandbox image ${image}`);
 const child = spawn(
   "docker",
-  ["build", "--build-arg", `PI_PACKAGE=${piPackage}`, "--tag", image, resolve(root, "sandbox")],
+  ["build", "--file", resolve(root, "sandbox/Dockerfile"), "--tag", image, resolve(root, "../..")],
   { stdio: "inherit" },
 );
 

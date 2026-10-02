@@ -1,6 +1,6 @@
-//! Pi RPC events → normalized [`AgentEvent`](crate::events::AgentEvent)s.
+//! Dray RPC events → normalized [`AgentEvent`](crate::events::AgentEvent)s.
 //!
-//! Pi keeps messages and extension payloads deliberately open-ended. This
+//! Dray keeps messages and extension payloads deliberately open-ended. This
 //! mapper therefore uses the stable lifecycle/tool envelopes for structure and
 //! leaves extension arguments and results as JSON values for the UI.
 
@@ -11,7 +11,7 @@ use crate::{
         Usage,
     },
     harness::{
-        pi::parser::{AssistantMessageEvent, PiEvent, PiUsage},
+        dray::parser::{AgentRpcEvent, AgentRpcUsage, AssistantMessageEvent},
         Harness,
     },
 };
@@ -26,7 +26,7 @@ use std::{
 };
 use uuid::Uuid;
 
-/// A Pi extension dialog waiting for a response from the host UI.
+/// A Dray extension dialog waiting for a response from the host UI.
 #[derive(Debug, Clone)]
 pub struct PendingUiRequest {
     pub id: String,
@@ -34,11 +34,11 @@ pub struct PendingUiRequest {
     pub question: String,
 }
 
-/// Pending Pi extension dialogs shared by the stdout task and Tauri commands.
+/// Pending Dray extension dialogs shared by the stdout task and Tauri commands.
 pub type PendingUiRequests = Arc<Mutex<HashMap<String, PendingUiRequest>>>;
 
 impl PendingUiRequest {
-    /// Converts a questionnaire answer into Pi's extension UI response shape.
+    /// Converts a questionnaire answer into Dray's extension UI response shape.
     pub fn response(&self, answers: &HashMap<String, String>) -> Value {
         let Some(answer) = answers.get(&self.question) else {
             return json!({
@@ -73,7 +73,7 @@ impl PendingUiRequest {
     }
 }
 
-/// Stateful mapper for one Pi RPC child.
+/// Stateful mapper for one Dray RPC child.
 pub struct Mapper {
     seq: Arc<AtomicU64>,
     session_id: String,
@@ -90,7 +90,7 @@ pub struct Mapper {
 
 impl Default for Mapper {
     fn default() -> Self {
-        Self::new("pi-session", "")
+        Self::new("dray-session", "")
     }
 }
 
@@ -122,7 +122,7 @@ impl Mapper {
         Self::with_seq_and_ui(session_id, cwd, seq, PendingUiRequests::default())
     }
 
-    /// Uses a shared request map so Pi extension dialogs can be answered by
+    /// Uses a shared request map so Dray extension dialogs can be answered by
     /// Tauri commands while the mapper remains synchronous.
     pub fn with_seq_and_ui(
         session_id: impl Into<String>,
@@ -136,17 +136,30 @@ impl Mapper {
         mapper
     }
 
-    /// Maps one Pi record. A message can contain several content blocks, so a
+    /// Maps one Dray record. A message can contain several content blocks, so a
     /// single wire line may produce several normalized events.
-    pub fn map(&mut self, event: PiEvent) -> Result<Vec<AgentEvent>> {
+    pub fn map(&mut self, event: AgentRpcEvent) -> Result<Vec<AgentEvent>> {
         let payloads = match event {
-            PiEvent::Session { cwd, .. } => {
+            AgentRpcEvent::RequestUsage { usage, model } => vec![AgentEventPayload::UsageUpdate(
+                map_usage(&usage, Some(&model)),
+            )],
+            AgentRpcEvent::RequestError {
+                status,
+                code,
+                message,
+                request_id,
+            } => vec![AgentEventPayload::Error {
+                source: ErrorSource::Provider,
+                message: format!("OpenAI {status} ({code}): {message} [request {request_id}]"),
+                fatal: false,
+            }],
+            AgentRpcEvent::Session { cwd, .. } => {
                 if self.cwd.is_empty() {
                     self.cwd = cwd;
                 }
                 Vec::new()
             }
-            PiEvent::AgentStart => {
+            AgentRpcEvent::AgentStart => {
                 self.last_text = None;
                 self.last_usage = None;
                 self.last_stop_reason = None;
@@ -158,7 +171,7 @@ impl Mapper {
                     ..SessionInfo::default()
                 })]
             }
-            PiEvent::AgentSettled => vec![AgentEventPayload::TurnCompleted {
+            AgentRpcEvent::AgentSettled => vec![AgentEventPayload::TurnCompleted {
                 status: if self.last_turn_error {
                     TurnStatus::Error
                 } else {
@@ -170,13 +183,13 @@ impl Mapper {
                 duration_ms: None,
                 head: None,
             }],
-            PiEvent::MessageStart { message } => {
+            AgentRpcEvent::MessageStart { message } => {
                 if role(&message) == Some("assistant") {
                     self.start_message();
                 }
                 Vec::new()
             }
-            PiEvent::MessageUpdate {
+            AgentRpcEvent::MessageUpdate {
                 usage,
                 assistant_message_event,
             } => {
@@ -190,8 +203,8 @@ impl Mapper {
                 }
                 out
             }
-            PiEvent::TurnStart => vec![AgentEventPayload::ModelRequestStarted],
-            PiEvent::Response {
+            AgentRpcEvent::TurnStart => vec![AgentEventPayload::ModelRequestStarted],
+            AgentRpcEvent::Response {
                 command,
                 success,
                 data,
@@ -200,8 +213,8 @@ impl Mapper {
                 .map(AgentEventPayload::UsageUpdate)
                 .into_iter()
                 .collect(),
-            PiEvent::MessageEnd { message } => self.map_message_end(message),
-            PiEvent::ToolExecutionStart {
+            AgentRpcEvent::MessageEnd { message } => self.map_message_end(message),
+            AgentRpcEvent::ToolExecutionStart {
                 tool_call_id,
                 tool_name,
                 args,
@@ -213,7 +226,7 @@ impl Mapper {
                 raw_input: None,
                 title: None,
             }],
-            PiEvent::ToolExecutionEnd {
+            AgentRpcEvent::ToolExecutionEnd {
                 tool_call_id,
                 tool_name: _,
                 result,
@@ -222,10 +235,10 @@ impl Mapper {
                 call_id: tool_call_id,
                 result: map_tool_result(result, is_error),
             }],
-            PiEvent::CompactionStart { .. } => {
+            AgentRpcEvent::CompactionStart { .. } => {
                 vec![AgentEventPayload::ContextCompactionStarted]
             }
-            PiEvent::CompactionEnd {
+            AgentRpcEvent::CompactionEnd {
                 reason,
                 result,
                 aborted: _,
@@ -248,7 +261,7 @@ impl Mapper {
                     duration_ms: None,
                 }]
             }
-            PiEvent::ExtensionUiRequest {
+            AgentRpcEvent::ExtensionUiRequest {
                 id,
                 method,
                 title,
@@ -266,37 +279,37 @@ impl Mapper {
                 placeholder,
                 notify_type,
             ),
-            PiEvent::ExtensionError {
+            AgentRpcEvent::ExtensionError {
                 extension_path,
                 event,
                 error,
             } => vec![AgentEventPayload::Error {
                 source: ErrorSource::Harness,
-                message: format!("Pi extension {extension_path} ({event}): {error}"),
+                message: format!("Dray extension {extension_path} ({event}): {error}"),
                 fatal: false,
             }],
-            PiEvent::AutoRetryEnd {
+            AgentRpcEvent::AutoRetryEnd {
                 success: false,
                 final_error,
                 ..
             } => vec![AgentEventPayload::Error {
                 source: ErrorSource::Harness,
-                message: final_error.unwrap_or_else(|| "Pi automatic retry failed.".into()),
+                message: final_error.unwrap_or_else(|| "Dray automatic retry failed.".into()),
                 fatal: false,
             }],
-            PiEvent::AgentEnd { .. }
-            | PiEvent::TurnEnd { .. }
-            | PiEvent::ToolExecutionUpdate { .. }
-            | PiEvent::QueueUpdate { .. }
-            | PiEvent::EntryAppended { .. }
-            | PiEvent::SessionInfoChanged { .. }
-            | PiEvent::ThinkingLevelChanged { .. }
-            | PiEvent::AutoRetryStart { .. }
-            | PiEvent::AutoRetryEnd { success: true, .. }
-            | PiEvent::BashExecutionUpdate { .. }
-            | PiEvent::Response { .. } => Vec::new(),
-            PiEvent::Unrecognized => vec![AgentEventPayload::Unknown {
-                harness_type: "pi".into(),
+            AgentRpcEvent::AgentEnd { .. }
+            | AgentRpcEvent::TurnEnd { .. }
+            | AgentRpcEvent::ToolExecutionUpdate { .. }
+            | AgentRpcEvent::QueueUpdate { .. }
+            | AgentRpcEvent::EntryAppended { .. }
+            | AgentRpcEvent::SessionInfoChanged { .. }
+            | AgentRpcEvent::ThinkingLevelChanged { .. }
+            | AgentRpcEvent::AutoRetryStart { .. }
+            | AgentRpcEvent::AutoRetryEnd { success: true, .. }
+            | AgentRpcEvent::BashExecutionUpdate { .. }
+            | AgentRpcEvent::Response { .. } => Vec::new(),
+            AgentRpcEvent::Unrecognized => vec![AgentEventPayload::Unknown {
+                harness_type: "dray".into(),
             }],
         };
 
@@ -310,7 +323,7 @@ impl Mapper {
         AgentEvent {
             id: Uuid::now_v7().to_string(),
             session_id: self.session_id.clone(),
-            harness: Harness::Pi,
+            harness: Harness::Dray,
             seq: self.seq.fetch_add(1, Relaxed),
             ts: now_rfc3339(),
             turn_id: None,
@@ -320,7 +333,7 @@ impl Mapper {
     }
 
     fn start_message(&mut self) -> String {
-        let id = format!("pi-message-{}", self.next_message_id);
+        let id = format!("dray-message-{}", self.next_message_id);
         self.next_message_id += 1;
         self.current_message_id = Some(id.clone());
         id
@@ -459,7 +472,7 @@ impl Mapper {
 
         self.pending_ui
             .lock()
-            .expect("Pi UI request mutex poisoned")
+            .expect("Dray UI request mutex poisoned")
             .insert(
                 id.clone(),
                 PendingUiRequest {
@@ -469,7 +482,7 @@ impl Mapper {
                 },
             );
 
-        let tool_use_id = format!("pi-ui-{id}");
+        let tool_use_id = format!("dray-ui-{id}");
         vec![AgentEventPayload::QuestionsAsked {
             request_id: id,
             tool_use_id,
@@ -497,7 +510,7 @@ impl Mapper {
         let message_id = self.current_message();
         let usage = message
             .get("usage")
-            .and_then(|value| serde_json::from_value::<PiUsage>(value.clone()).ok())
+            .and_then(|value| serde_json::from_value::<AgentRpcUsage>(value.clone()).ok())
             .map(|usage| map_usage(&usage, message.get("model").and_then(Value::as_str)));
         let text = content_text(message.get("content"));
         if !text.is_empty() {
@@ -573,7 +586,7 @@ fn normalize_input(value: Value) -> Value {
     }
 }
 
-fn map_usage(wire: &PiUsage, model: Option<&str>) -> Usage {
+fn map_usage(wire: &AgentRpcUsage, model: Option<&str>) -> Usage {
     Usage {
         input_tokens: wire.input,
         output_tokens: wire.output,
@@ -589,7 +602,7 @@ fn map_usage(wire: &PiUsage, model: Option<&str>) -> Usage {
     }
 }
 
-/// Maps Pi's `get_session_stats` response to the current conversation context.
+/// Maps Dray's `get_session_stats` response to the current conversation context.
 /// This is separate from provider usage: `message_end.usage.totalTokens` is
 /// cumulative model billing, while `contextUsage.tokens` includes the actual
 /// messages currently retained in the context after tools and compaction.
@@ -694,7 +707,7 @@ fn strip_image_data(value: &mut Value) {
     }
 }
 
-/// Classifies Pi's built-in tools while leaving extension names generic.
+/// Classifies Dray's built-in tools while leaving extension names generic.
 fn tool_type(name: &str) -> ToolType {
     match name {
         "bash" | "background_command" => ToolType::Shell,
@@ -709,7 +722,7 @@ fn tool_type(name: &str) -> ToolType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::pi::parser;
+    use crate::harness::dray::parser;
 
     fn map_lines(lines: &[&str]) -> Vec<AgentEvent> {
         let mut mapper = Mapper::default();
@@ -777,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_pi_streams_and_joins_the_committed_message() {
+    fn maps_dray_streams_and_joins_the_committed_message() {
         let events = map_lines(&[
             r#"{"type":"agent_start"}"#,
             r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,
@@ -804,7 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_pi_edit_arguments_to_the_existing_file_edit_renderer() {
+    fn maps_dray_edit_arguments_to_the_existing_file_edit_renderer() {
         let events = map_lines(&[
             r#"{"type":"tool_execution_start","toolCallId":"call-1","toolName":"edit","args":{"path":"src/lib.rs","edits":[{"oldText":"old","newText":"new"}]}}"#,
         ]);
@@ -835,13 +848,13 @@ mod tests {
     #[test]
     fn maps_extension_notifications_without_treating_them_as_errors() {
         let events = map_lines(&[
-            r#"{"type":"extension_ui_request","id":"notice-1","method":"notify","message":"Pi extension is ready","notifyType":"info"}"#,
+            r#"{"type":"extension_ui_request","id":"notice-1","method":"notify","message":"Dray extension is ready","notifyType":"info"}"#,
         ]);
 
         assert!(matches!(
             &events[0].payload,
             AgentEventPayload::ExtensionNotification { message, level }
-                if message == "Pi extension is ready" && level == "info"
+                if message == "Dray extension is ready" && level == "info"
         ));
     }
 
@@ -880,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn classifies_pi_builtins() {
+    fn classifies_dray_builtins() {
         assert_eq!(tool_type("read"), ToolType::FileRead);
         assert_eq!(tool_type("edit"), ToolType::FileEdit);
         assert_eq!(tool_type("background_command"), ToolType::Shell);

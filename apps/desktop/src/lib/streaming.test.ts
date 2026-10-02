@@ -9,14 +9,14 @@ describe("streamingCall", () => {
     );
   });
 
-  it("supports Pi's lower-case write tool", () => {
+  it("supports Dray's lower-case write tool", () => {
     expect(streamingCall("write", '{"path":"src/main.ts","content":"one\\ntwo"}')).toEqual({
       target: "src/main.ts",
       added: 2,
     });
   });
 
-  it("shows a Pi research task while its arguments stream", () => {
+  it("shows a Dray research task while its arguments stream", () => {
     expect(streamingCall("libarian", '{"task":"research the protocol"}')).toEqual({
       target: "research the protocol",
       added: null,

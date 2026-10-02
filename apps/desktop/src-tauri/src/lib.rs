@@ -1,9 +1,15 @@
+// Tauri embeds Common Controls 6 in binaries, while the library test harness
+// also needs that manifest for the Windows dialog imports to load correctly.
+#[cfg(all(test, windows, target_env = "gnu"))]
+#[link(name = "libresource.a", kind = "static", modifiers = "+verbatim,-bundle")]
+extern "C" {}
+
 use crate::{
     attachments::Attachment,
     files::FileMatch,
     git::BranchList,
-    harness::pi::commands::SlashCommand,
-    models::{Effort, Model, ModelId, PiModel},
+    harness::dray::commands::SlashCommand,
+    models::{AgentModel, Effort, Model, ModelId},
     projects::Project,
     session::{Harness, QueuedMessage, SendOutcome, SessionManager},
     store::{SessionIndexByProject, SessionIndexItem, SessionSnapshot, SessionStatus},
@@ -11,6 +17,7 @@ use crate::{
 use std::collections::HashMap;
 use tauri::{AppHandle, Manager, State, WindowEvent};
 
+pub mod account;
 pub mod attachments;
 pub mod binpath;
 #[path = "events/events.rs"]
@@ -24,16 +31,43 @@ pub mod harness;
 pub mod models;
 pub mod notifications;
 pub mod projects;
-pub mod sandbox;
 pub mod quit;
+pub mod sandbox;
 pub mod session;
 pub mod store;
 pub mod title;
 pub mod usage;
 
 #[tauri::command]
-async fn get_codex_usage() -> Result<usage::CodexUsage, String> {
+async fn get_agent_usage() -> Result<usage::AgentUsage, String> {
     usage::fetch().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_account_status() -> Result<account::AccountStatus, String> {
+    account::status().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn sign_in_chatgpt(app: AppHandle) -> Result<(), String> {
+    account::begin(app).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn cancel_chatgpt_sign_in() {
+    account::cancel().await;
+}
+
+#[tauri::command]
+async fn sign_out_chatgpt(
+    app: AppHandle,
+    manager: State<'_, SessionManager>,
+) -> Result<(), String> {
+    // A signed-out account must not continue issuing requests in existing children.
+    manager.disconnect(&app).await;
+    let result = account::sign_out(&app).await;
+    manager.disconnect(&app).await;
+    result.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -48,9 +82,9 @@ async fn send_msg(
     attachment_paths: Vec<String>,
     harness: &str,
     model: ModelId,
-    pi_model: Option<PiModel>,
+    agent_model: Option<AgentModel>,
     effort: Option<Effort>,
-    title_model: Option<PiModel>,
+    title_model: Option<AgentModel>,
     title_effort: Option<Effort>,
     cwd: &str,
     project_path: Option<&str>,
@@ -62,7 +96,7 @@ async fn send_msg(
     manager: State<'_, SessionManager>,
 ) -> Result<SendOutcome, String> {
     let harness = match harness {
-        "pi" | "pi_coding_agent" => Harness::Pi,
+        "dray" | "dray_agent" => Harness::Dray,
         _ => return Err("invalid harness".into()),
     };
 
@@ -73,7 +107,7 @@ async fn send_msg(
             &attachment_paths,
             harness,
             model,
-            pi_model,
+            agent_model,
             effort,
             title_model,
             title_effort,
@@ -125,15 +159,9 @@ async fn save_pasted_file(bytes: Vec<u8>, name: String) -> Result<Attachment, St
 #[tauri::command]
 async fn list_models(harness: Option<&str>, cwd: Option<&str>) -> Result<Vec<Model>, String> {
     match harness {
-        None | Some("pi") | Some("pi_coding_agent") => {
-            match harness::pi::commands::list_models(cwd).await {
-                Ok(models) if !models.is_empty() => Ok(models),
-                // A missing or unavailable catalog must not make Pi unusable:
-                // Pi can still resolve its configured default when no override
-                // is supplied.
-                Ok(_) | Err(_) => Ok(vec![models::configured_pi_model()]),
-            }
-        }
+        None | Some("dray") | Some("dray_agent") => harness::dray::commands::list_models(cwd)
+            .await
+            .map_err(|error| error.to_string()),
         Some(_) => Err("invalid harness".into()),
     }
 }
@@ -146,8 +174,8 @@ async fn list_slash_commands(
     harness: Option<&str>,
 ) -> Result<Vec<SlashCommand>, String> {
     let commands = match harness {
-        None | Some("pi") | Some("pi_coding_agent") => {
-            harness::pi::commands::list_commands(cwd).await
+        None | Some("dray") | Some("dray_agent") => {
+            harness::dray::commands::list_commands(cwd).await
         }
         Some(_) => return Err("invalid harness".into()),
     };
@@ -398,7 +426,7 @@ async fn fork_session(
         .map_err(|e| e.to_string())
 }
 
-/// Stops all work for a session immediately. The live Pi child is terminated;
+/// Stops all work for a session immediately. The live Dray child is terminated;
 /// the next prompt resumes the persisted session in a fresh process.
 #[tauri::command]
 async fn interrupt_session(
@@ -469,13 +497,11 @@ pub fn run() {
     // Other platforms use the window's preventable close event and should not
     // get Tauri's default native menu bar.
     #[cfg(target_os = "macos")]
-    let builder = builder
-        .menu(quit::menu)
-        .on_menu_event(|app, event| {
-            if event.id() == quit::QUIT_ID {
-                quit::request(app);
-            }
-        });
+    let builder = builder.menu(quit::menu).on_menu_event(|app, event| {
+        if event.id() == quit::QUIT_ID {
+            quit::request(app);
+        }
+    });
 
     builder
         .on_window_event(|window, event| {
@@ -500,7 +526,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             cloud_availability,
-            get_codex_usage,
+            get_agent_usage,
+            get_account_status,
+            sign_in_chatgpt,
+            sign_out_chatgpt,
+            cancel_chatgpt_sign_in,
             send_msg,
             read_attachments,
             save_pasted_image,

@@ -1,6 +1,6 @@
-//! The model/effort menu the UI renders and Pi accepts.
+//! The model/effort menu the UI renders and Dray accepts.
 //!
-//! Pi owns the provider catalog. Dray keeps only the selected provider/model
+//! OpenAI supplies the account catalog. Dray stores the selected provider/model
 //! pair and never maintains a second, stale model list.
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,8 @@ use ts_rs::TS;
 #[serde(rename_all = "snake_case")]
 pub enum Effort {
     Off,
+    None,
+    Minimal,
     Low,
     Medium,
     High,
@@ -23,6 +25,8 @@ impl Effort {
     pub fn as_arg(self) -> &'static str {
         match self {
             Effort::Off => "off",
+            Effort::None => "none",
+            Effort::Minimal => "minimal",
             Effort::Low => "low",
             Effort::Medium => "medium",
             Effort::High => "high",
@@ -37,6 +41,8 @@ impl Effort {
     pub fn from_arg(alias: &str) -> Option<Self> {
         match alias {
             "off" => Some(Effort::Off),
+            "none" => Some(Effort::None),
+            "minimal" => Some(Effort::Minimal),
             "low" => Some(Effort::Low),
             "medium" => Some(Effort::Medium),
             "high" => Some(Effort::High),
@@ -55,9 +61,9 @@ impl Effort {
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum ModelId {
-    /// Uses the model/provider configured by Pi in `~/.pi/agent`, or the
-    /// explicitly selected [`PiModel`].
-    Pi,
+    /// Uses an account-supported OpenAI model identified by [`AgentModel`].
+    #[serde(alias = "pi")]
+    Dray,
     #[serde(other)]
     Unknown,
 }
@@ -69,21 +75,21 @@ impl Default for ModelId {
 }
 
 impl ModelId {
-    /// Pi resolves the concrete provider/model itself, so no CLI alias is
+    /// Dray resolves the concrete provider/model itself, so no CLI alias is
     /// needed here. The field remains for the serialized model contract.
     pub fn as_arg(self) -> Option<&'static str> {
         None
     }
 
     pub fn from_arg(alias: &str) -> Option<Self> {
-        (alias == "pi").then_some(ModelId::Pi)
+        (alias == "dray").then_some(ModelId::Dray)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
-pub struct PiModel {
+pub struct AgentModel {
     pub provider: String,
     pub id: String,
 }
@@ -92,43 +98,48 @@ pub struct PiModel {
 #[ts(export, export_to = "events.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct Model {
-    /// The harness-specific model family. Pi models carry their provider and
-    /// concrete id in [`pi_model`].
+    /// The harness-specific model family. Dray models carry their provider and
+    /// concrete id in [`agent_model`].
     pub id: ModelId,
-    pub pi_model: Option<PiModel>,
+    #[serde(alias = "piModel")]
+    pub agent_model: Option<AgentModel>,
     pub label: String,
     /// Empty means the model has no effort levels. The CLI tolerates `--effort`
     /// on such a model and ignores it, so this drives the UI and keeps the
     /// persisted value honest rather than preventing a crash.
     pub efforts: Vec<Effort>,
     pub default_effort: Option<Effort>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub context_window: Option<u64>,
 }
 
-/// The model exposed by Pi when the user wants to keep model selection in
-/// `~/.pi/agent/settings.json` and let Pi resolve its provider and model.
-pub fn configured_pi_model() -> Model {
+/// A display-only placeholder for an account with no catalog loaded.
+pub fn configured_agent_model() -> Model {
     Model {
-        id: ModelId::Pi,
-        pi_model: None,
-        label: "Pi (configured)".into(),
+        id: ModelId::Dray,
+        agent_model: None,
+        label: "Sign in with ChatGPT".into(),
         efforts: Vec::new(),
         default_effort: None,
+        context_window: None,
     }
 }
 
-/// Returns the model specification for a selected id. Pi's catalog is loaded
-/// separately because its providers and model ids come from the user's config.
-pub fn find_model(id: ModelId, pi_model: Option<&PiModel>) -> Option<Model> {
-    if id == ModelId::Pi {
-        return Some(match pi_model {
-            Some(pi_model) => Model {
+/// Returns the model specification for a selected id. Dray's catalog is loaded
+/// separately because supported models come from the authenticated catalog.
+pub fn find_model(id: ModelId, agent_model: Option<&AgentModel>) -> Option<Model> {
+    if id == ModelId::Dray {
+        return Some(match agent_model {
+            Some(agent_model) => Model {
                 id,
-                pi_model: Some(pi_model.clone()),
-                label: format!("{}/{}", pi_model.provider, pi_model.id),
+                agent_model: Some(agent_model.clone()),
+                label: agent_model.id.clone(),
                 efforts: Vec::new(),
                 default_effort: None,
+                context_window: None,
             },
-            None => configured_pi_model(),
+            None => configured_agent_model(),
         });
     }
 
@@ -153,28 +164,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn configured_pi_model_does_not_take_an_effort() {
-        let pi = find_model(ModelId::Pi, None).unwrap();
+    fn configured_agent_model_does_not_take_an_effort() {
+        let dray = find_model(ModelId::Dray, None).unwrap();
 
-        assert_eq!(resolve_effort(&pi, Some(Effort::Max)), None);
-        assert_eq!(resolve_effort(&pi, None), None);
+        assert_eq!(resolve_effort(&dray, Some(Effort::Max)), None);
+        assert_eq!(resolve_effort(&dray, None), None);
     }
 
     #[test]
-    fn pi_model_keeps_provider_and_id_together() {
-        let selected = PiModel {
+    fn agent_model_keeps_provider_and_id_together() {
+        let selected = AgentModel {
             provider: "openai".into(),
             id: "gpt-5".into(),
         };
-        let model = find_model(ModelId::Pi, Some(&selected)).unwrap();
+        let model = find_model(ModelId::Dray, Some(&selected)).unwrap();
 
-        assert_eq!(model.pi_model, Some(selected));
-        assert_eq!(model.id, ModelId::Pi);
+        assert_eq!(model.agent_model, Some(selected));
+        assert_eq!(model.id, ModelId::Dray);
     }
 
     #[test]
-    fn pi_is_the_only_selectable_model() {
-        assert_eq!(ModelId::from_arg("pi"), Some(ModelId::Pi));
+    fn dray_is_the_only_selectable_model() {
+        assert_eq!(ModelId::from_arg("dray"), Some(ModelId::Dray));
         assert_eq!(ModelId::from_arg("opus"), None);
         assert!(find_model(ModelId::Unknown, None).is_none());
     }

@@ -72,7 +72,11 @@ pub async fn list_branches(cwd: &str) -> Result<BranchList> {
                 // Detached HEAD reports the literal string rather than a branch name.
                 .filter(|s| !s.is_empty() && s != "HEAD")
         },
-        async { git(cwd, &["status", "--porcelain"]).await.map_or(0, |s| count_changes(&s)) },
+        async {
+            git(cwd, &["status", "--porcelain"])
+                .await
+                .map_or(0, |s| count_changes(&s))
+        },
     );
 
     Ok(BranchList {
@@ -1965,6 +1969,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(not(windows))] // Windows forbids '*' in filenames.
     async fn a_glob_named_file_stages_only_itself() {
         let dir = scratch_repo().await;
         let at = dir.to_str().unwrap();

@@ -9,7 +9,7 @@ import type { Harness, SlashCommand } from "@/types/events";
 /// keystroke after every switch.
 const cache = new Map<string, SlashCommand[]>();
 
-/// Pi skills available in `cwd`, empty until they land. Pi commands are not
+/// Dray skills available in `cwd`, empty until they land. Dray commands are not
 /// returned to the composer; Dray owns the slash-command surface.
 ///
 /// A failed probe resolves to no commands rather than surfacing an error: the

@@ -1,17 +1,15 @@
 use crate::{
     attachments,
-    events::{
-        now_rfc3339, AgentEvent, AgentEventPayload, ImageRef, MessageSender,
-    },
+    events::{now_rfc3339, AgentEvent, AgentEventPayload, ImageRef, MessageSender},
     git,
-    harness::{pi, Harness::Pi},
+    harness::{dray, Harness::Dray},
+    models::{resolve_effort, AgentModel, Effort, Model, ModelId},
     sandbox,
-    models::{find_model, resolve_effort, Effort, Model, ModelId, PiModel},
     store::{
-        append_session_event, append_session_index_item, clear_fork_from, copy_session_log,
-        delete_session, get_session_index_item, list_session_events,
+        append_session_event, append_session_index_item, clear_fork_from, cloud_path,
+        copy_session_log, delete_session, get_session_index_item, list_session_events,
         resolve_unclaimed_cloud_name, set_session_status, touch_session_index_item,
-        cloud_path, SessionIndexItem, SessionSnapshot, SessionStatus,
+        SessionIndexItem, SessionSnapshot, SessionStatus,
     },
 };
 use anyhow::{bail, Context, Result};
@@ -23,6 +21,8 @@ use uuid::Uuid;
 // `Harness` is defined in `crate::harness`; re-exported so existing
 // `crate::session::Harness` imports keep working.
 pub use crate::harness::Harness;
+#[cfg(windows)]
+use std::process::Stdio;
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -33,23 +33,21 @@ use std::{
 };
 use tauri::{AppHandle, Emitter};
 #[cfg(windows)]
-use std::process::Stdio;
-#[cfg(windows)]
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, HANDLE},
-    System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JobObjectExtendedLimitInformation,
-    },
-};
+use tokio::process::Command;
 use tokio::{
     io::AsyncWriteExt,
     process::{Child, ChildStdin},
     sync::Mutex,
 };
 #[cfg(windows)]
-use tokio::process::Command;
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, HANDLE},
+    System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    },
+};
 
 /// Emitted once a new session's index entry is durable, so the sidebar gains
 /// the row without waiting for process startup or a refetch.
@@ -63,7 +61,8 @@ use tokio::process::Command;
 /// point.
 pub const SESSION_CREATED: &str = "session_created";
 
-const CLOUD_SESSION_PROMPT: &str = "You are working inside a Cloud environment. Clone repositories if needed.";
+const CLOUD_SESSION_PROMPT: &str =
+    "You are working inside a Cloud environment. Clone repositories if needed.";
 
 /// Resolves the home-relative form used by the No Project setting. PathBuf
 /// handles the native separator on both macOS and Windows; accepting both slash
@@ -78,7 +77,7 @@ fn resolve_local_cwd(cwd: &str, home: &std::path::Path) -> PathBuf {
     }
 }
 
-/// Ensures the local launch directory exists before spawning Pi.
+/// Ensures the local launch directory exists before spawning Dray.
 async fn prepare_local_cwd(cwd: &str) -> Result<String> {
     let home = dirs::home_dir().context("could not resolve home directory")?;
     let path = resolve_local_cwd(cwd, &home);
@@ -294,6 +293,17 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
+    /// Stop sessions when disconnecting the account and update persisted/UI state.
+    pub async fn disconnect(&self, app: &AppHandle) {
+        let mut guard = self.sessions.lock().await;
+        for (id, session) in std::mem::take(&mut *guard) {
+            if let Err(error) = session.kill().await {
+                eprintln!("[session disconnect err] {id}: {error}");
+            }
+            publish_status(&id, SessionStatus::Idle, app).await;
+        }
+    }
+
     /// Stops every live session before the app exits. The map is drained before
     /// awaiting any child so no new send can race shutdown, and a failed kill
     /// is logged without preventing the remaining children from being cleaned.
@@ -320,9 +330,9 @@ impl SessionManager {
         attachment_paths: &[String],
         harness: Harness,
         _model: ModelId,
-        pi_model: Option<PiModel>,
+        agent_model: Option<AgentModel>,
         effort: Option<Effort>,
-        title_model: Option<PiModel>,
+        title_model: Option<AgentModel>,
         title_effort: Option<Effort>,
         cwd: &str,
         // The attached project used for sidebar/Git metadata. `None` means the
@@ -356,10 +366,14 @@ impl SessionManager {
                 .map(|item| item.harness)
                 .unwrap_or(harness)
         };
-        debug_assert_eq!(harness, Pi);
-        let (model, pi_model) = (ModelId::Pi, pi_model);
-        let model_spec = find_model(model, pi_model.as_ref())
-            .with_context(|| format!("unknown model {model:?}"))?;
+        debug_assert_eq!(harness, Dray);
+        let (model, agent_model) = (ModelId::Dray, agent_model);
+        crate::account::access_token().await?;
+        let catalog = crate::harness::dray::commands::list_models(None).await?;
+        let model_spec = catalog
+            .into_iter()
+            .find(|spec| spec.agent_model == agent_model)
+            .context("Choose a supported OpenAI model in the model selector.")?;
         let effort = resolve_effort(&model_spec, effort);
 
         if is_new_session {
@@ -405,11 +419,8 @@ impl SessionManager {
             // Cloud's unselected-project behavior historically used `.` as its
             // metadata marker. Local No Project sessions use an empty grouping
             // key so they cannot be mistaken for a repository path.
-            let recorded_project_path = project_path.unwrap_or(if cloud_name.is_some() {
-                cwd
-            } else {
-                ""
-            });
+            let recorded_project_path =
+                project_path.unwrap_or(if cloud_name.is_some() { cwd } else { "" });
 
             let mut item = SessionIndexItem::new(
                 session_id,
@@ -423,7 +434,7 @@ impl SessionManager {
                 effort,
                 parent_session_id,
             );
-            item.pi_model = pi_model.clone();
+            item.agent_model = agent_model.clone();
 
             // Index before the process starts, so startup failures remain
             // visible and the user can retry after building/fixing Docker.
@@ -472,9 +483,13 @@ impl SessionManager {
                 prompt,
                 // Cloud's launch cwd is the empty host-side marker used by
                 // the Docker-backed session. Title generation runs as a
-                // local one-shot Pi process, so use the selected project
+                // local one-shot Dray process, so use the selected project
                 // context instead (or "." when Cloud has no project).
-                if cloud_name.is_some() { cwd } else { &session_cwd },
+                if cloud_name.is_some() {
+                    cwd
+                } else {
+                    &session_cwd
+                },
                 title_model.as_ref(),
                 title_effort,
                 app,
@@ -498,7 +513,7 @@ impl SessionManager {
         // anything is working at all decides that the child must not be
         // replaced, while only an open model call means this prompt has a turn
         // to be folded into.
-        let (busy, turn_in_flight, tool_in_flight) = match sessions_guard.get(session_id) {
+        let (_busy, turn_in_flight, tool_in_flight) = match sessions_guard.get(session_id) {
             Some(s) => {
                 let tracker = s.status.lock().await;
                 (
@@ -509,25 +524,6 @@ impl SessionManager {
             }
             None => (false, false, false),
         };
-
-        // Effort is fixed at spawn — the CLI has no `set_effort` control request
-        // — so changing it means replacing the child. Resuming by id keeps the
-        // conversation, and the log continues from the persisted seq.
-        //
-        // Never while anything runs, which is the *wider* reading on purpose:
-        // the kill would destroy not just a turn in flight but every background
-        // task the child is still carrying. The index still records the pick
-        // below, so the next idle send is what respawns.
-        let effort_changed = !busy
-            && sessions_guard
-                .get(session_id)
-                .is_some_and(|s| s.effort != effort);
-
-        if effort_changed {
-            if let Some(s) = sessions_guard.remove(session_id) {
-                s.kill().await?;
-            }
-        }
 
         // The caller's `cwd` is a hint for a new session only. From here on the
         // recorded one wins: with a project picker the two can disagree, and
@@ -544,13 +540,8 @@ impl SessionManager {
         if let Some(s) = sessions_guard.get_mut(session_id) {
             // Before the send, so the index reflects intent even if writing to
             // the child fails — the prompt event is persisted ahead of stdin too.
-            touch_session_index_item(
-                session_id,
-                model,
-                model_spec.pi_model.as_ref(),
-                effort,
-            )
-            .await?;
+            touch_session_index_item(session_id, model, model_spec.agent_model.as_ref(), effort)
+                .await?;
 
             // A model call is open, so this prompt is held rather than sent.
             //
@@ -582,7 +573,15 @@ impl SessionManager {
                 });
             }
 
-            if s.model != model || s.pi_model != model_spec.pi_model {
+            if s.effort != effort {
+                write_line(
+                    &s.stdin,
+                    &json!({"type":"set_thinking_level","level":effort.map(|e|e.as_arg())}),
+                )
+                .await?;
+                s.effort = effort;
+            }
+            if s.model != model || s.agent_model != model_spec.agent_model {
                 s.set_model(&model_spec).await?;
             }
 
@@ -595,17 +594,12 @@ impl SessionManager {
             return Ok(SendOutcome::default());
         }
 
-        touch_session_index_item(
-            session_id,
-            model,
-            model_spec.pi_model.as_ref(),
-            effort,
-        )
-        .await?;
+        touch_session_index_item(session_id, model, model_spec.agent_model.as_ref(), effort)
+            .await?;
 
         // A fork that has not spawned yet. Cloud forks get a fresh private
         // volume; the app transcript is still copied immediately, while the
-        // next Pi process starts clean because the parent's Docker volume is
+        // next Dray process starts clean because the parent's Docker volume is
         // deliberately never mounted into another session.
         let fork_from = indexed.as_ref().and_then(|i| i.fork_from.clone());
         let cloud_name = indexed.as_ref().and_then(|i| i.cloud_name.clone());
@@ -639,8 +633,8 @@ impl SessionManager {
             cloud_name.as_deref(),
             is_new_session,
             // A Cloud fork's application transcript is preserved, but its
-            // Pi context lives in the parent's private Docker volume. Starting
-            // a fresh Pi context is safer than mounting another session's
+            // Dray context lives in the parent's private Docker volume. Starting
+            // a fresh Dray context is safer than mounting another session's
             // volume or accidentally sharing mutable state.
             if cloud_name.is_none() {
                 fork_from.as_deref()
@@ -734,7 +728,7 @@ impl SessionManager {
     /// Stops everything the session is doing immediately.
     ///
     /// Remove the child from the live map and terminate its process tree. The
-    /// next prompt resumes the persisted Pi session in a new child.
+    /// next prompt resumes the persisted Dray session in a new child.
     pub async fn interrupt(&self, session_id: &str, app: &AppHandle) -> Result<()> {
         // Keep the manager lock until the idle status is published. Otherwise a
         // prompt sent in the small window after removal could respawn the
@@ -791,10 +785,10 @@ impl SessionManager {
             session.kill().await?;
         }
 
-        // Local Pi sessions keep their context files beside Dray; Cloud Pi
+        // Local Dray sessions keep their context files beside Dray; Cloud Dray
         // sessions keep them in the Docker volume, which is removed below.
-        if let Err(e) = pi::delete_session_data(session_id).await {
-            eprintln!("could not delete Pi session data for {session_id}: {e}");
+        if let Err(e) = dray::delete_session_data(session_id).await {
+            eprintln!("could not delete Dray session data for {session_id}: {e}");
         }
 
         if let Some(item) = get_session_index_item(session_id).await? {
@@ -838,7 +832,7 @@ impl SessionManager {
     }
 }
 
-/// Owns a Windows job containing the Pi process and all of its descendants.
+/// Owns a Windows job containing the Dray process and all of its descendants.
 /// Closing a job configured with `KILL_ON_JOB_CLOSE` terminates the whole tree
 /// without waiting for `taskkill` to enumerate and reap every process.
 #[cfg(windows)]
@@ -852,7 +846,7 @@ pub struct ProcessJob {
 
 #[cfg(windows)]
 impl ProcessJob {
-    /// Creates and configures a job after Pi is spawned. A failure falls back
+    /// Creates and configures a job after Dray is spawned. A failure falls back
     /// to the taskkill path, since being unable to install the optimization
     /// must not prevent a session from starting.
     pub fn attach(child: &Child) -> Option<Self> {
@@ -873,12 +867,12 @@ impl ProcessJob {
                 std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
             ) != 0
         };
-        let assigned = configured
-            && unsafe { AssignProcessToJobObject(handle, process as HANDLE) != 0 };
+        let assigned =
+            configured && unsafe { AssignProcessToJobObject(handle, process as HANDLE) != 0 };
 
         if !assigned {
             unsafe { CloseHandle(handle) };
-            eprintln!("[process job err] could not assign Pi to Windows job");
+            eprintln!("[process job err] could not assign Dray to Windows job");
             return None;
         }
 
@@ -903,13 +897,13 @@ pub struct Session {
     /// behalf of the frontend.
     pub stdin: Arc<Mutex<ChildStdin>>,
     pub harness: Harness,
-    /// Whether the child is a Pi process inside a Docker Cloud sandbox.
+    /// Whether the child is a Dray process inside a Docker Cloud sandbox.
     pub cloud: bool,
     /// The host-side directory used by the local UI. Cloud sessions keep their
     /// actual files in Docker and this directory remains empty.
     pub cwd: String,
     pub model: ModelId,
-    pub pi_model: Option<PiModel>,
+    pub agent_model: Option<AgentModel>,
     pub effort: Option<Effort>,
     pub events: Arc<Mutex<Vec<AgentEvent>>>,
     pub seq: Arc<AtomicU64>,
@@ -922,8 +916,8 @@ pub struct Session {
     /// termination path and does not need an extra handle.
     #[cfg(windows)]
     pub process_job: Option<ProcessJob>,
-    /// Pi extension dialogs waiting for an answer from the frontend.
-    pub pi_ui_requests: pi::mapper::PendingUiRequests,
+    /// Dray extension dialogs waiting for an answer from the frontend.
+    pub agent_ui_requests: dray::mapper::PendingUiRequests,
     /// Prompts typed during a running turn, waiting for the next boundary.
     /// Shared with the stdout task, which is what flushes them.
     pub queued: QueuedMessages,
@@ -945,8 +939,8 @@ impl Session {
         fork_from: Option<&str>,
         app: &AppHandle,
     ) -> Result<Session> {
-        debug_assert_eq!(harness, Pi);
-        pi::init(
+        debug_assert_eq!(harness, Dray);
+        dray::init(
             session_id,
             model,
             effort,
@@ -974,12 +968,6 @@ impl Session {
         from: Option<MessageSender>,
         app: &AppHandle,
     ) -> Result<()> {
-        let extension_command = !self.cloud
-            && self.harness == Pi
-            && pi::commands::is_extension_command(&self.cwd, prompt)
-                .await
-                .unwrap_or(false);
-
         deliver_prompt(
             &self.id,
             self.harness,
@@ -995,16 +983,7 @@ impl Session {
         )
         .await?;
 
-        // Extension commands can complete without entering Pi's agent loop;
-        // marking those as a turn would leave the session busy forever. Clear
-        // the frontend's optimistic busy state when no background work remains.
-        // If an extension starts its own agent run, its `agent_start` event still
-        // opens the status machine normally.
-        if extension_command {
-            if !self.status.lock().await.is_busy() {
-                publish_status(&self.id, SessionStatus::Idle, app).await;
-            }
-        } else if let Some(next) = self.status.lock().await.on_send() {
+        if let Some(next) = self.status.lock().await.on_send() {
             publish_status(&self.id, next, app).await;
         }
 
@@ -1072,22 +1051,28 @@ impl Session {
     /// There is no `set_effort` counterpart — the CLI rejects that subtype, and
     /// an `effort` field on this request is accepted but ignored.
     pub async fn set_model(&mut self, model: &Model) -> Result<()> {
-        if self.harness == Pi {
-            let pi_model = model
-                .pi_model
+        if self.harness == Dray {
+            let agent_model = model
+                .agent_model
                 .as_ref()
-                .context("Pi model is missing its provider")?;
+                .context("Dray model is missing its provider")?;
             write_line(
                 &self.stdin,
                 &serde_json::json!({
                     "type": "set_model",
-                    "provider": pi_model.provider,
-                    "modelId": pi_model.id,
+                    "provider": agent_model.provider,
+                    "modelId": agent_model.id,
+                    "contextWindow":model.context_window,
                 }),
             )
             .await?;
+            write_line(
+                &self.stdin,
+                &json!({"type":"set_thinking_level","level":self.effort.map(|e|e.as_arg())}),
+            )
+            .await?;
             self.model = model.id;
-            self.pi_model = Some(pi_model.clone());
+            self.agent_model = Some(agent_model.clone());
             return Ok(());
         }
 
@@ -1107,11 +1092,11 @@ impl Session {
         app: &AppHandle,
     ) -> Result<()> {
         let pending = self
-            .pi_ui_requests
+            .agent_ui_requests
             .lock()
-            .expect("Pi UI request mutex poisoned")
+            .expect("Dray UI request mutex poisoned")
             .remove(request_id)
-            .with_context(|| format!("no pending Pi UI request {request_id}"))?;
+            .with_context(|| format!("no pending Dray UI request {request_id}"))?;
         write_line(&self.stdin, &pending.response(&answers)).await?;
 
         let answered = AgentEvent {
@@ -1123,7 +1108,7 @@ impl Session {
             turn_id: None,
             payload: AgentEventPayload::QuestionAnswered {
                 request_id: request_id.to_string(),
-                tool_use_id: format!("pi-ui-{request_id}"),
+                tool_use_id: format!("dray-ui-{request_id}"),
             },
             raw: None,
         };
@@ -1158,7 +1143,7 @@ impl Session {
     }
 }
 
-/// Terminates a session's Pi process and, on Windows, every descendant tool.
+/// Terminates a session's Dray process and, on Windows, every descendant tool.
 ///
 /// New sessions use [`ProcessJob`] above. `taskkill /T` remains as a fallback
 /// for a process that could not be assigned to a job (for example, when the
@@ -1265,7 +1250,7 @@ async fn deliver_prompt(
         harness,
         seq,
         ts: now_rfc3339(),
-        // Nothing tracks turns yet; Pi opens one per `init`.
+        // Nothing tracks turns yet; Dray opens one per `init`.
         turn_id: None,
         payload,
         raw: None,
@@ -1279,12 +1264,12 @@ async fn deliver_prompt(
 
     append_session_event(session_id, agent_event).await?;
 
-    debug_assert_eq!(harness, Pi);
-    // `$name` is Dray's user-facing skill syntax; Pi's RPC parser expects the
+    debug_assert_eq!(harness, Dray);
+    // `$name` is Dray's user-facing skill syntax; Dray's RPC parser expects the
     // equivalent `/skill:name` command. Keep the stored event in `$` form so
     // the transcript reflects what the user typed.
-    let pi_prompt = normalize_skill_prompt(&prepared.text);
-    let mut line = json!({"type": "prompt", "message": pi_prompt});
+    let agent_prompt = normalize_skill_prompt(&prepared.text);
+    let mut line = json!({"type": "prompt", "message": agent_prompt});
     if !prepared.images.is_empty() {
         line["images"] = json!(prepared
             .images
@@ -1297,11 +1282,13 @@ async fn deliver_prompt(
             .collect::<Vec<_>>());
     }
     if queued {
-        // Pi requires a delivery mode when a prompt arrives while its agent
+        // Dray requires a delivery mode when a prompt arrives while its agent
         // loop is active. Dray's queued prompts are steering messages, so they
         // are delivered at the next tool boundary.
         line["streamingBehavior"] = json!("steer");
     }
+    let token = crate::account::access_token().await?;
+    write_line(stdin, &json!({"type":"auth", "accessToken":token})).await?;
     write_line(stdin, &line).await
 }
 
@@ -1392,7 +1379,10 @@ mod tests {
 
     #[test]
     fn normalizes_skill_prompts_for_pi() {
-        assert_eq!(normalize_skill_prompt("$commit-and-push"), "/skill:commit-and-push");
+        assert_eq!(
+            normalize_skill_prompt("$commit-and-push"),
+            "/skill:commit-and-push"
+        );
         assert_eq!(
             normalize_skill_prompt("$commit-and-push now"),
             "/skill:commit-and-push now"
@@ -1404,9 +1394,18 @@ mod tests {
     fn resolves_home_relative_paths_with_both_separator_styles() {
         let home = std::path::Path::new("/home/tester");
 
-        assert_eq!(resolve_local_cwd("~/Coding/Sandbox", home), home.join("Coding/Sandbox"));
-        assert_eq!(resolve_local_cwd(r"~\Coding\Sandbox", home), home.join(r"Coding\Sandbox"));
-        assert_eq!(resolve_local_cwd("/tmp/sandbox", home), std::path::PathBuf::from("/tmp/sandbox"));
+        assert_eq!(
+            resolve_local_cwd("~/Coding/Sandbox", home),
+            home.join("Coding/Sandbox")
+        );
+        assert_eq!(
+            resolve_local_cwd(r"~\Coding\Sandbox", home),
+            home.join(r"Coding\Sandbox")
+        );
+        assert_eq!(
+            resolve_local_cwd("/tmp/sandbox", home),
+            std::path::PathBuf::from("/tmp/sandbox")
+        );
     }
 
     fn turn_completed() -> AgentEventPayload {

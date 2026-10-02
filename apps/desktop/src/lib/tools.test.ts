@@ -13,7 +13,7 @@ import {
 // Every string here is a real `Bash` error taken out of `~/.dray/sessions`,
 // including the "Exit code N" prefix a shell failure actually arrives with —
 // the patterns have to match inside that, not against a bare message.
-describe("Pi extension tool labels", () => {
+describe("Dray extension tool labels", () => {
   it("shows the useful argument for installed extension tools", () => {
     expect(toolSummary("finder", "other", { query: "find the parser" })).toBe("find the parser");
     expect(toolSummary("libarian", "other", { task: "research the protocol" })).toBe(
@@ -24,7 +24,7 @@ describe("Pi extension tool labels", () => {
     );
   });
 
-  it("uses readable labels for Pi built-ins and extensions", () => {
+  it("uses readable labels for Dray built-ins and extensions", () => {
     expect(toolLabel("read", true)).toBe("Reading");
     expect(toolLabel("edit", false)).toBe("Edited");
     expect(toolLabel("libarian", false)).toBe("Researched");
@@ -77,7 +77,7 @@ describe("isRoutineError", () => {
   });
 
   it("passes over a binary that isn't there", () => {
-    expect(isRoutineError("Exit code 127\n(eval):1: command not found: pi")).toBe(true);
+    expect(isRoutineError("Exit code 127\n(eval):1: command not found: dray")).toBe(true);
   });
 
   it("passes over a command the harness blocked", () => {

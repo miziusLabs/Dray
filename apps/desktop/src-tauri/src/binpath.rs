@@ -1,7 +1,7 @@
 //! Finding agent binaries when the app wasn't launched from a shell.
 //!
 //! A bundled `.app` started from Finder or the Dock inherits `launchd`'s
-//! minimal environment rather than the user's PATH. Resolve Pi once and reuse
+//! minimal environment rather than the user's PATH. Resolve Dray once and reuse
 //! it: the login-shell probe on Unix costs real time, and the answer cannot
 //! change while the app runs.
 
@@ -14,111 +14,20 @@ use tokio::process::Command;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-static PI_PATH: OnceLock<PathBuf> = OnceLock::new();
 static GH_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
-
-/// Applies the process settings shared by every GUI-launched child.
-///
-/// Windows otherwise creates a console window for commands such as Pi, Git, or
-/// `taskkill`, which is especially distracting when a session starts or stops.
 #[cfg(windows)]
 pub fn configure_command(command: &mut Command) {
     command.creation_flags(CREATE_NO_WINDOW);
 }
-
 #[cfg(not(windows))]
 pub fn configure_command(_command: &mut Command) {}
 
-/// The absolute path to `pi`, or the bare name as a last resort.
-pub async fn pi() -> PathBuf {
-    if let Some(path) = PI_PATH.get() {
-        return path.clone();
-    }
-
-    let resolved = resolve("pi").await.unwrap_or_else(|| PathBuf::from("pi"));
-    let _ = PI_PATH.set(resolved);
-    PI_PATH
-        .get()
-        .cloned()
-        .unwrap_or_else(|| PathBuf::from("pi"))
-}
-
-/// Builds a command for the resolved Pi executable.
-///
-/// npm exposes global packages through `.cmd` shims on Windows, but
-/// `CreateProcess` cannot execute those files directly. The generated shim is
-/// parsed to find its JavaScript entrypoint so prompts and RPC messages still
-/// reach Node as ordinary argv values rather than passing user text through a
-/// shell. The command-shell fallback is only for a non-npm batch file.
-pub async fn pi_command() -> Command {
-    let path = pi().await;
-    let mut command = command_for(&path);
+/// The agent ships in the desktop executable; PATH never selects another agent.
+pub async fn agent_command() -> Command {
+    let mut command = Command::new(std::env::current_exe().expect("desktop executable path"));
+    command.arg("--agent");
     configure_command(&mut command);
     command
-}
-
-fn command_for(path: &Path) -> Command {
-    #[cfg(windows)]
-    {
-        let is_batch = path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "cmd" | "bat"));
-
-        if is_batch {
-            if let Some(script) = npm_shim_script(path) {
-                let node = path
-                    .parent()
-                    .map(|parent| parent.join("node.exe"))
-                    .filter(|candidate| is_executable(candidate))
-                    .or_else(|| search_path("node"))
-                    .or_else(|| search_known_dirs("node"))
-                    .unwrap_or_else(|| PathBuf::from("node"));
-                let mut command = Command::new(node);
-                command.arg(script);
-                return command;
-            }
-
-            let shell = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
-            let mut command = Command::new(shell);
-            command.args(["/D", "/S", "/C", "call"]);
-            command.arg(path);
-            return command;
-        }
-    }
-
-    Command::new(path)
-}
-
-/// Extracts the JavaScript entrypoint from npm's generated Windows shim.
-///
-/// The shim uses either `%~dp0` or `%dp0%` for its own directory. Only an
-/// existing `.js` file is accepted, so an unrelated quoted path in a custom
-/// batch file cannot accidentally become the executable.
-#[cfg(windows)]
-fn npm_shim_script(path: &Path) -> Option<PathBuf> {
-    let base = path.parent()?;
-    let contents = std::fs::read_to_string(path).ok()?;
-
-    for token in contents.split('"').skip(1).step_by(2) {
-        let lower = token.to_ascii_lowercase();
-        let candidate = if lower.starts_with("%~dp0") || lower.starts_with("%dp0%") {
-            base.join(token[5..].trim_start_matches(['\\', '/']))
-        } else {
-            PathBuf::from(token)
-        };
-
-        if candidate
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("js"))
-            && candidate.is_file()
-        {
-            return Some(candidate);
-        }
-    }
-
-    None
 }
 
 /// Reconstructs the PATH a child needs when the app was launched by Finder or
@@ -203,7 +112,7 @@ fn search_path(bin: &str) -> Option<PathBuf> {
 /// inherits this process's `PATH`, and a bundled app launched from Finder or
 /// Explorer may hold none of these. So a `dray` the user has installed is
 /// invisible to the agent unless these are put back — the same failure this
-/// module exists to solve for Pi, one layer out.
+/// module exists to solve for Dray, one layer out.
 pub fn known_dirs() -> Vec<PathBuf> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
@@ -225,9 +134,9 @@ pub fn known_dirs() -> Vec<PathBuf> {
             PathBuf::from("/usr/local/bin"),
         ]);
 
-        // Pi is commonly installed through npm under nvm. Those directories
+        // Dray is commonly installed through npm under nvm. Those directories
         // are not stable enough to list statically, but they must be in a
-        // child's PATH as well as in the resolver's search path because Pi is
+        // child's PATH as well as in the resolver's search path because Dray is
         // a Node script.
         if let Ok(versions) = std::fs::read_dir(home.join(".nvm/versions/node")) {
             dirs.extend(versions.flatten().map(|entry| entry.path().join("bin")));
@@ -237,7 +146,7 @@ pub fn known_dirs() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
         // npm's per-user Windows prefix is where `npm install -g` puts command
-        // launchers such as `pi.cmd`. A GUI app may not inherit the shell PATH,
+        // launchers such as `dray.cmd`. A GUI app may not inherit the shell PATH,
         // so include it in both resolution and the child environment.
         if let Some(data_dir) = dirs::data_dir() {
             dirs.push(data_dir.join("npm"));
@@ -305,7 +214,7 @@ fn search_known_dirs(bin: &str) -> Option<PathBuf> {
 ///
 /// Windows npm installs an extensionless shell script, a `.cmd` launcher, and
 /// often a `.ps1` launcher together. The resolver returns a `.cmd` when that
-/// is the usable launcher; [`pi_command`] turns npm's shim into a direct Node
+/// is the usable launcher; [`agent_command`] turns npm's shim into a direct Node
 /// invocation before spawning it.
 fn executable_candidates(dir: &Path, bin: &str) -> Vec<PathBuf> {
     #[cfg(windows)]
@@ -384,12 +293,11 @@ fn is_executable(path: &std::path::Path) -> bool {
 mod tests {
     use super::*;
 
-    /// Pi is a Node entrypoint, so the same resolver must find it before a
-    /// bundled app tries to spawn its shebang.
+    /// The CLI resolver also supports workspace tools such as Git.
     #[tokio::test]
-    async fn finds_the_pi_binary() {
-        let Some(found) = resolve("pi").await else {
-            eprintln!("pi not installed; skipping");
+    async fn finds_the_git_binary() {
+        let Some(found) = resolve("git").await else {
+            eprintln!("git not installed; skipping");
             return;
         };
 
