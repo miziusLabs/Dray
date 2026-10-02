@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Markdown } from "@/components/chat/Markdown";
 import {
   Questionnaire,
   QuestionnaireActions,
   QuestionnaireChoice,
-  QuestionnaireChoiceDescription,
   QuestionnaireChoices,
   QuestionnaireInput,
   QuestionnaireItem,
@@ -105,9 +105,12 @@ export default function QuestionRequest({
                 model writes alongside the question — "Indentation" over "Tabs or
                 spaces?" — which reads as a heading for a section that isn't
                 there, and says nothing the question doesn't. */}
-            <QuestionnaireTitle className="text-chat font-medium">
+            <QuestionnaireTitle className="sr-only mb-0">
               {question.question}
             </QuestionnaireTitle>
+            <Markdown className="text-chat font-medium">
+              {question.question}
+            </Markdown>
 
             <QuestionnaireChoices>
               {question.options.map((option) => (
@@ -121,11 +124,13 @@ export default function QuestionRequest({
                   value={option.label}
                   className="min-h-0 py-2"
                 >
-                  <span className="font-medium">{option.label}</span>
+                  <Markdown className="text-chat font-medium">
+                    {option.label}
+                  </Markdown>
                   {option.description && (
-                    <QuestionnaireChoiceDescription>
+                    <Markdown className="text-chat text-muted-foreground">
                       {option.description}
-                    </QuestionnaireChoiceDescription>
+                    </Markdown>
                   )}
                   {option.preview && (
                     <pre className="mt-1.5 overflow-x-auto rounded-md border border-border px-2.5 py-2 font-mono text-xs">
