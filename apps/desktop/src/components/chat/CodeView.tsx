@@ -59,7 +59,7 @@ export default function CodeView({
     [pair, resolvedMode, renumber],
   );
 
-  const frame = cn("overflow-hidden rounded-md border border-border/60 text-code", className);
+  const frame = cn("overflow-hidden rounded-md text-code", className);
 
   // Plain text while the grammar loads, not an empty box. Grammar fetches range
   // from ~10ms to several hundred (Ruby pulls HTML, CSS, JS and SQL along for

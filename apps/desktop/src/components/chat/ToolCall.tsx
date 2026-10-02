@@ -242,12 +242,12 @@ export default function ToolCall({
 
       <CollapsibleContent className="collapsible-smooth">
         <div className="flex flex-col gap-1.5">
-          {sides && <DiffView sides={sides} />}
+          {sides && <DiffView sides={sides} className="border-0" />}
 
           {range && <CodeView range={range} />}
 
           {shellDetail && (
-        <div className="rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-muted-foreground">
+        <div className="rounded-xl bg-surface-raised px-3 py-2.5 text-muted-foreground">
           <div className="mb-2 text-chat">Shell</div>
           <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-tool">
             $ {summary}
@@ -266,7 +266,7 @@ export default function ToolCall({
       )}
 
           {body && !shellDetail && (
-        <pre className="overflow-x-auto rounded-md border border-border bg-surface-raised px-2.5 py-2 font-mono text-tool text-muted-foreground">
+        <pre className="overflow-x-auto rounded-md bg-surface-raised px-2.5 py-2 font-mono text-tool text-muted-foreground">
           {body}
         </pre>
       )}
@@ -274,7 +274,7 @@ export default function ToolCall({
           {fallbackStatus && (
         <div
           className={cn(
-            "flex items-center justify-end gap-1 rounded-md border border-border bg-surface-raised px-3 py-2 text-chat text-muted-foreground",
+            "flex items-center justify-end gap-1 rounded-md bg-surface-raised px-3 py-2 text-chat text-muted-foreground",
             failed && "text-destructive",
           )}
         >
