@@ -16,6 +16,7 @@ import ModelSelector, {
   EFFORTS,
   modelKey,
   modelLabel,
+  modelsForKeys,
 } from "@/components/composer/ModelSelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -203,13 +204,13 @@ export default function SettingsDialog({
               description="Choose which models appear in the model selector and /model or /models commands."
             />
             <ModelSelectionRow
-              models={models}
+              models={modelsForKeys(models, visibleModelKeys)}
               selectedKeys={cycleModelKeys}
               onChange={onCycleModelKeysChange}
               label="Cycle models"
               description={
                 <>
-                  Choose which models{" "}
+                  Choose which shown models{" "}
                   <KbdGroup>
                     <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
                     <Kbd>M</Kbd>

@@ -155,7 +155,7 @@ function App() {
     "ade.cycleModelKeys",
     null,
   );
-  const cycleModels = modelsForKeys(models, cycleModelKeys);
+  const cycleModels = modelsForKeys(visibleModels, cycleModelKeys);
   // `null` preserves the original Medium-through-Max cycle. An explicit list,
   // including an empty one, is the user's configured reasoning cycle.
   const [cycleEfforts, setCycleEfforts] = useLocalStorage<Effort[] | null>(

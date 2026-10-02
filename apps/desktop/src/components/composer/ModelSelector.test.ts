@@ -22,6 +22,14 @@ describe("modelsForKeys", () => {
     expect(modelsForKeys([model, otherModel], null)).toEqual([model, otherModel]);
   });
 
+  it("limits cycling to shown models even with previously saved cycle choices", () => {
+    const shown = modelsForKeys([model, otherModel], ["dray:test/model"]);
+    expect(modelsForKeys(shown, null)).toEqual([model]);
+    expect(modelsForKeys(shown, ["dray:test/model", "dray:test/other"])).toEqual([model]);
+    expect(modelsForKeys(shown, ["dray:test/other"])).toEqual([]);
+    expect(modelsForKeys(modelsForKeys([model, otherModel], []), null)).toEqual([]);
+  });
+
   it("matches explicit selections by stable model key", () => {
     expect(modelsForKeys([model, otherModel], ["dray:test/other"])).toEqual([otherModel]);
     expect(modelsForKeys([model, otherModel], ["dray:test/model"])).toEqual([model]);
