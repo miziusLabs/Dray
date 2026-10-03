@@ -13,6 +13,8 @@ use std::{
 use tokio::sync::mpsc;
 
 pub const API: &str = "https://api.openai.com/v1";
+const MAX_RETRIES: u32 = 5;
+const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 fn initialize_tls_provider() {
     static INITIALIZED: OnceLock<()> = OnceLock::new();
@@ -55,10 +57,59 @@ type Queue = Arc<Mutex<VecDeque<Value>>>;
 
 /// Streaming Responses API transport, also used for title generation.
 pub async fn response(token: &str, body: Value, preview: bool) -> Result<Value> {
-    response_impl(token, body, preview, false).await
+    response_with_retries(token, body, preview, false).await
 }
 async fn response_recorded(token: &str, body: Value, preview: bool) -> Result<Value> {
-    response_impl(token, body, preview, true).await
+    response_with_retries(token, body, preview, true).await
+}
+async fn response_with_retries(
+    token: &str,
+    body: Value,
+    preview: bool,
+    record: bool,
+) -> Result<Value> {
+    for attempt in 0..=MAX_RETRIES {
+        match response_impl(
+            token,
+            body.clone(),
+            preview,
+            record,
+            attempt == MAX_RETRIES,
+            attempt > 0,
+        )
+        .await
+        {
+            Ok(response) => return Ok(response),
+            Err(_error) if attempt < MAX_RETRIES => {
+                if preview {
+                    emit(json!({
+                        "type":"message_update",
+                        "assistantMessageEvent":{"type":"text_start", "contentIndex":0}
+                    }));
+                    emit(json!({
+                        "type":"message_update",
+                        "assistantMessageEvent":{"type":"thinking_start", "contentIndex":1}
+                    }));
+                }
+                let delay = INITIAL_RETRY_DELAY * (1_u32 << attempt);
+                tokio::time::sleep(delay).await;
+            }
+            Err(error) => {
+                if preview {
+                    emit(json!({
+                        "type":"message_update",
+                        "assistantMessageEvent":{"type":"text_end", "contentIndex":0}
+                    }));
+                    emit(json!({
+                        "type":"message_update",
+                        "assistantMessageEvent":{"type":"thinking_end", "contentIndex":1}
+                    }));
+                }
+                return Err(error);
+            }
+        }
+    }
+    unreachable!("the retry loop always returns a response or error")
 }
 fn prepare_request(mut body: Value) -> Value {
     if let Some(text) = body["input"].as_str() {
@@ -84,7 +135,14 @@ fn prepare_request(mut body: Value) -> Value {
     body["stream"] = json!(true);
     body
 }
-async fn response_impl(token: &str, body: Value, preview: bool, record: bool) -> Result<Value> {
+async fn response_impl(
+    token: &str,
+    body: Value,
+    preview: bool,
+    record: bool,
+    report_request_error: bool,
+    reset_preview: bool,
+) -> Result<Value> {
     let body = prepare_request(body);
     initialize_tls_provider();
     let client = reqwest::Client::builder()
@@ -110,7 +168,7 @@ async fn response_impl(token: &str, body: Value, preview: bool, record: bool) ->
             .as_str()
             .or_else(|| error["detail"].as_str())
             .unwrap_or("Check your ChatGPT connection, model access, and usage limits.");
-        if record {
+        if record && report_request_error {
             emit(
                 json!({"type":"request_error","status":status.as_u16(),"code":code,"message":message,"requestId":request_id}),
             );
@@ -128,20 +186,23 @@ async fn response_impl(token: &str, body: Value, preview: bool, record: bool) ->
         for event in decoder.push(&chunk)? {
             output.push(&event)?;
             match event["type"].as_str().unwrap_or_default() {
-                "response.output_text.delta" if preview => emit(
-                    json!({"type":"message_update", "assistantMessageEvent":{"type":"text_delta", "contentIndex":0, "delta":event["delta"]}}),
-                ),
+                "response.output_text.delta" if preview => emit(json!({
+                    "type":"message_update",
+                    "assistantMessageEvent":{"type":"text_delta", "contentIndex":0, "delta":event["delta"]}
+                })),
                 "response.completed" => completed = Some(event["response"].clone()),
                 "response.reasoning_summary_text.delta" if preview => {
                     if !thinking_started {
-                        emit(
-                            json!({"type":"message_update", "assistantMessageEvent":{"type":"thinking_start", "contentIndex":1}}),
-                        );
+                        emit(json!({
+                            "type":"message_update",
+                            "assistantMessageEvent":{"type":"thinking_start", "contentIndex":1}
+                        }));
                         thinking_started = true;
                     }
-                    emit(
-                        json!({"type":"message_update", "assistantMessageEvent":{"type":"thinking_delta", "contentIndex":1, "delta":event["delta"]}}),
-                    );
+                    emit(json!({
+                        "type":"message_update",
+                        "assistantMessageEvent":{"type":"thinking_delta", "contentIndex":1, "delta":event["delta"]}
+                    }));
                 }
                 "response.failed" | "response.incomplete" | "error" => {
                     let failure = if event["response"]["error"].is_object() {
@@ -163,6 +224,41 @@ async fn response_impl(token: &str, body: Value, preview: bool, record: bool) ->
     let result = output.finish(
         completed.context("OpenAI stream closed before response.completed; retry the turn")?,
     )?;
+    if preview {
+        let has_text = result["output"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|item| item["content"].as_array().into_iter().flatten())
+            .any(|part| {
+                part["type"] == "output_text"
+                    && part["text"]
+                        .as_str()
+                        .is_some_and(|text| !text.trim().is_empty())
+            });
+        if !has_text {
+            emit(json!({
+                "type":"message_update",
+                "assistantMessageEvent":{"type":"text_end", "contentIndex":0}
+            }));
+        }
+        let has_reasoning = result["output"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|item| {
+                item["type"] == "reasoning"
+                    && item["summary"]
+                        .as_array()
+                        .is_some_and(|parts| !parts.is_empty())
+            });
+        if (thinking_started || reset_preview) && !has_reasoning {
+            emit(json!({
+                "type":"message_update",
+                "assistantMessageEvent":{"type":"thinking_end", "contentIndex":1}
+            }));
+        }
+    }
     if record {
         emit(
             json!({"type":"request_usage","model":body["model"],"usage":{"input":result["usage"]["input_tokens"],"output":result["usage"]["output_tokens"],"cacheRead":result["usage"]["input_tokens_details"]["cached_tokens"],"reasoning":result["usage"]["output_tokens_details"]["reasoning_tokens"],"totalTokens":result["usage"]["total_tokens"]}}),
