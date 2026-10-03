@@ -45,7 +45,7 @@ Model and reasoning choices come from the account's OpenAI catalog. Credentials
 stay in the native backend and operating system credential store on Windows
 and macOS. Dray never imports Pi authentication.
 
-Skills live in `~/.agents/skills/<name>/SKILL.md` or a project's
+Skills live in `~/.mizius/skills/<name>/SKILL.md` or a project's
 `.agents/skills/<name>/SKILL.md`. Dray's bundled skills are installed in the
 global directory so they can be read like other skills; existing files are
 never overwritten. Use YAML frontmatter with `name` and `description`, followed
@@ -103,7 +103,7 @@ cd apps/desktop/src-tauri && cargo test
 
 Cloud Sessions run the standalone Dray agent in Docker without mounting or
 cloning the selected project. The image includes Java 21, Java 25, Node.js 24,
-GitHub CLI, Git, and Dray. Host `~/.agents/skills` is mounted read-only. Each
+GitHub CLI, Git, and Dray. Host `~/.mizius/skills` is mounted read-only. Each
 workspace has its own persistent history. Short-lived OpenAI access tokens
 travel through stdin; credentials remain on the host. GitHub authentication
 uses `GITHUB_TOKEN` or an authenticated host `gh`.

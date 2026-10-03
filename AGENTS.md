@@ -212,7 +212,7 @@ Cloud mode is local Docker isolation, not a hosted service. `src-tauri/src/sandb
 
 The image is defined by `apps/desktop/sandbox/Dockerfile` and launched through
 `sandbox-entrypoint.sh`. A Rust build stage creates `dray-agent`; the runtime
-includes Java 21, Java 25, Node.js 24, GitHub CLI, and Git. Host `~/.agents/skills`
+includes Java 21, Java 25, Node.js 24, GitHub CLI, and Git. Host `~/.mizius/skills`
 is mounted read-only. History lives in the persistent workspace volume.
 OAuth credentials remain on the host; short-lived access tokens travel through
 stdin. GitHub credentials are exposed only to the container and converted to
@@ -227,8 +227,8 @@ queued follow-ups, interruption checkpoints, prompt caching, and compaction.
 search, research, and GitHub retrieval; the finder has dedicated native `find`
 and `grep` tools instead of shell access. `process.rs` cleans up
 shell descendants. `skills.rs` discovers
-standard SKILL.md files in global and applicable ancestor `.agents/skills`
-directories. The embedded `SYSTEM.md` is the supplied personal Pi system prompt;
+standard SKILL.md files in global `~/.mizius/skills` and applicable ancestor
+`.agents/skills` directories. The embedded `SYSTEM.md` is the supplied personal Pi system prompt;
 Pi itself and its authentication are no longer dependencies.
 
 Responses output is collected from finalized SSE output items; the terminal

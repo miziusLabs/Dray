@@ -60,7 +60,7 @@ fn install_bundled_skills_at(root: &Path) -> anyhow::Result<()> {
 /// can be inspected and loaded like any other `SKILL.md` file.
 pub fn install_bundled() -> anyhow::Result<()> {
     let home = dirs::home_dir().context("could not resolve user home directory")?;
-    install_bundled_skills_at(&home.join(".agents/skills"))
+    install_bundled_skills_at(&home.join(".mizius/skills"))
 }
 
 fn discover_from(cwd: &Path, home: Option<&Path>) -> Vec<Skill> {
@@ -71,7 +71,7 @@ fn discover_from(cwd: &Path, home: Option<&Path>) -> Vec<Skill> {
 
     let mut roots = Vec::new();
     if let Some(home) = home {
-        roots.push(home.join(".agents/skills"));
+        roots.push(home.join(".mizius/skills"));
     }
     let mut ancestors: Vec<_> = cwd.ancestors().collect();
     ancestors.reverse();
@@ -101,8 +101,8 @@ pub fn discover(cwd: &Path) -> Vec<Skill> {
     if let Some(home) = &home {
         // Discovery remains usable when the home directory is read-only: the
         // embedded copy is retained as a fallback, while normal installs expose
-        // every bundled skill from ~/.agents/skills/<name>/SKILL.md.
-        let _ = install_bundled_skills_at(&home.join(".agents/skills"));
+        // every bundled skill from ~/.mizius/skills/<name>/SKILL.md.
+        let _ = install_bundled_skills_at(&home.join(".mizius/skills"));
     }
     discover_from(cwd, home.as_deref())
 }
@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn discovers_global_and_project_skills_from_agents_directories_not_dray() {
+    fn discovers_global_and_project_skills_from_mizius_home_and_agents_project_directories() {
         let root = std::env::temp_dir().join(format!("dray-skills-{}", uuid::Uuid::new_v4()));
         let home = root.join("home");
         let cwd = root.join("nested/project");
@@ -174,7 +174,7 @@ mod tests {
         let project_name = format!("project-{}", uuid::Uuid::new_v4());
         let old_name = format!("old-{}", uuid::Uuid::new_v4());
         let global_skill_path = home
-            .join(".agents/skills")
+            .join(".mizius/skills")
             .join(&global_name)
             .join("SKILL.md");
         let project_skill_path = root
@@ -182,7 +182,7 @@ mod tests {
             .join(&project_name)
             .join("SKILL.md");
         let old_skill_path = home
-            .join(".dray/skills")
+            .join(".agents/skills")
             .join(&old_name)
             .join("SKILL.md");
 
@@ -216,10 +216,10 @@ mod tests {
     }
 
     #[test]
-    fn installs_and_discovers_bundled_skills_from_the_global_agents_directory() {
+    fn installs_and_discovers_bundled_skills_from_the_global_mizius_directory() {
         let root = std::env::temp_dir().join(format!("dray-skills-{}", uuid::Uuid::new_v4()));
         let home = root.join("home");
-        let skill_root = home.join(".agents/skills");
+        let skill_root = home.join(".mizius/skills");
         install_bundled_skills_at(&skill_root).unwrap();
 
         let skills = discover_from(&root.join("project"), Some(&home));
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn installing_bundled_skills_does_not_overwrite_existing_global_skills() {
         let root = std::env::temp_dir().join(format!("dray-skills-{}", uuid::Uuid::new_v4()));
-        let skill_root = root.join(".agents/skills");
+        let skill_root = root.join(".mizius/skills");
         let path = skill_root.join("github/SKILL.md");
         let custom = concat!(
             "---\nname: github\ndescription: My GitHub workflow.\n---\n",

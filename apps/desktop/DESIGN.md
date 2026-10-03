@@ -147,7 +147,7 @@ selected project is retained only as grouping and branch metadata; it is never
 cloned, mounted, or used as the container's working tree.
 
 The image is built by `scripts/build-sandbox.ps1` and includes Java 21, Java 25,
-Node.js 24, Git, GitHub CLI, and Dray. The host `~/.agents/skills` directory is a
+Node.js 24, Git, GitHub CLI, and Dray. The host `~/.mizius/skills` directory is a
 read-only mount for standard SKILL.md files. Agent history remains private to
 the volume. The desktop delivers short-lived OpenAI access tokens through stdin;
 OAuth credentials stay on the host.

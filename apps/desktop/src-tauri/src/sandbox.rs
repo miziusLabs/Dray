@@ -135,8 +135,8 @@ pub async fn agent_command(
 ) -> Result<Command> {
     let home = dirs::home_dir().context("could not resolve home directory")?;
     dray_agent::skills::install_bundled()
-        .context("could not install bundled skills in ~/.agents/skills")?;
-    let skills = home.join(".agents").join("skills");
+        .context("could not install bundled skills in ~/.mizius/skills")?;
+    let skills = home.join(".mizius").join("skills");
     let volume = volume_name(cloud_name);
     let container = container_name(session_id);
 
@@ -163,7 +163,7 @@ pub async fn agent_command(
             .context("Skills directory is not valid UTF-8")?;
         command.args([
             "--mount",
-            &format!("type=bind,source={source},target=/home/agent/.agents/skills,readonly"),
+            &format!("type=bind,source={source},target=/home/agent/.mizius/skills,readonly"),
         ]);
     }
 
