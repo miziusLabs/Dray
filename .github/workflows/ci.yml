@@ -175,11 +175,14 @@ jobs:
               .map(({ commit, html_url }) => {
                 const [title, ...descriptionLines] = commit.message.split(/\r?\n/);
                 const description = descriptionLines
+                  .filter((line) => !/^\s*Co-authored-by:/i.test(line))
                   .join(" ")
                   .replace(/\s+/g, " ")
                   .trim();
 
-                return `- ${title.trim()}; ${description} (${html_url})`;
+                return description
+                  ? `- ${title.trim()}; ${description} (${html_url})`
+                  : `- ${title.trim()} (${html_url})`;
               })
               .join("\n");
 
