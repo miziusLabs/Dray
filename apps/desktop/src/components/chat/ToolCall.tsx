@@ -5,6 +5,7 @@ import CodeView from "@/components/chat/CodeView";
 import DiffView from "@/components/chat/DiffView";
 import ImageRow from "@/components/chat/ImageRow";
 import ToolCallIcon from "@/components/chat/ToolCallIcon";
+import ToolTarget from "@/components/chat/ToolTarget";
 import {
   Collapsible,
   CollapsibleContent,
@@ -12,7 +13,14 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { countChanges, editSides, readRange } from "@/lib/diff";
-import { formatToolInput, isRoutineError, toolLabel, toolSummary } from "@/lib/tools";
+import {
+  backgroundAction,
+  formatToolInput,
+  isRoutineError,
+  runsInBackground,
+  toolLabel,
+  toolSummary,
+} from "@/lib/tools";
 import type { ToolResult, ToolType } from "@/types/events";
 import type { JsonValue } from "@/types/serde_json/JsonValue";
 
@@ -92,6 +100,7 @@ export default function ToolCall({
   // on every one of them is red on a resting transcript. The row still reads as
   // failed either way — the "Error:" body says so — this only decides the colour.
   const alarming = failed && !isRoutineError(result?.text);
+  const labelTone = alarming ? "text-destructive" : "text-foreground/80";
 
   // A file edit renders as a diff rather than as its raw arguments. `rawInput`
   // wins when present — it means the call is still streaming and the JSON has
@@ -181,23 +190,23 @@ export default function ToolCall({
         <span
           className={cn(
             "shrink-0",
-            alarming ? "text-destructive" : "text-foreground/80",
+            labelTone,
             pending && "shimmer-text",
           )}
         >
-          {toolLabel(name, pending)}
+          {toolLabel(name, pending, backgroundAction(name, input))}
         </span>
 
         {/* `min-w-0` lets it shrink and `max-w-fit` stops it claiming the row's
             free space, which would push the caret out to the far right. */}
         {summary && (
-          <span
-            className={cn(
-              "min-w-0 max-w-fit truncate font-mono text-muted-foreground",
-              pending && "shimmer-text",
-            )}
-          >
-            {summary}
+          <span className="min-w-0 max-w-fit">
+            <ToolTarget
+              target={summary}
+              inBackground={runsInBackground(name, input)}
+              targetClassName={cn("text-muted-foreground", pending && "shimmer-text")}
+              suffixClassName={cn(labelTone, pending && "shimmer-text")}
+            />
           </span>
         )}
 

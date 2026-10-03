@@ -4,13 +4,21 @@ import { ChevronRight } from "lucide-react";
 import EventRow from "@/components/chat/EventRow";
 import StreamingToolCall from "@/components/chat/StreamingToolCall";
 import ToolCallIcon from "@/components/chat/ToolCallIcon";
+import ToolTarget from "@/components/chat/ToolTarget";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { streamingCall } from "@/lib/streaming";
-import { streamingLabel, toolGroupLabel, toolLabel, toolSummary } from "@/lib/tools";
+import {
+  backgroundAction,
+  runsInBackground,
+  streamingLabel,
+  toolGroupLabel,
+  toolLabel,
+  toolSummary,
+} from "@/lib/tools";
 import type { ToolGroup } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
 import type { ToolResult, ToolType } from "@/types/events";
@@ -25,6 +33,7 @@ type ActiveCall = {
   toolType: ToolType;
   label: string;
   target: string | null;
+  inBackground: boolean;
 };
 
 /// A heterogeneous run of consecutive calls. Its resting title summarizes the
@@ -50,20 +59,28 @@ export default function ToolGroupRow({
 
   let active: ActiveCall | null = null;
   if (streamingTool) {
-    const target = streamingCall(streamingTool.name, streamingTool.partialJson).target;
+    const { target, action } = streamingCall(streamingTool.name, streamingTool.partialJson);
     active = {
       name: streamingTool.name,
       toolType: "other",
-      label: target ? toolLabel(streamingTool.name, true) : streamingLabel(streamingTool.name),
+      label: target
+        ? toolLabel(streamingTool.name, true, action)
+        : streamingLabel(streamingTool.name, action),
       target,
+      inBackground:
+        streamingTool.name === "background_command" && action === "start" && target !== null,
     };
   } else if (pending) {
+    const action = backgroundAction(pending.name, pending.input);
     const target = pending.title ?? toolSummary(pending.name, pending.toolType, pending.input);
     active = {
       name: pending.name,
       toolType: pending.toolType,
-      label: target ? toolLabel(pending.name, true) : streamingLabel(pending.name),
+      label: target
+        ? toolLabel(pending.name, true, action)
+        : streamingLabel(pending.name, action),
       target,
+      inBackground: runsInBackground(pending.name, pending.input),
     };
   }
 
@@ -85,7 +102,16 @@ export default function ToolGroupRow({
           {showActiveTitle && active ? (
             <span className="flex min-w-0 items-baseline gap-1.5 shimmer-text">
               <span className="shrink-0">{active.label}</span>
-              {active.target && <span className="truncate font-mono">{active.target}</span>}
+              {active.target && (
+                <ToolTarget
+                  target={active.target}
+                  inBackground={active.inBackground}
+                  targetClassName={
+                    active.inBackground ? "text-muted-foreground shimmer-text" : undefined
+                  }
+                  suffixClassName="shimmer-text"
+                />
+              )}
             </span>
           ) : (
             <span className="min-w-0 truncate">{toolGroupLabel(calls)}</span>

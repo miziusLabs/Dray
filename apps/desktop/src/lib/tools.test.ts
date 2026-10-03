@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  backgroundAction,
   formatDuration,
   isRoutineError,
+  runsInBackground,
   shortenPath,
   streamingLabel,
   toolGroupLabel,
@@ -19,9 +21,35 @@ describe("Dray extension tool labels", () => {
     expect(toolSummary("libarian", "other", { task: "research the protocol" })).toBe(
       "research the protocol",
     );
-    expect(toolSummary("background_command", "shell", { command: "npm run dev" })).toBe(
-      "npm run dev",
-    );
+    expect(
+      toolSummary("background_command", "shell", { action: "start", command: "npm run dev" }),
+    ).toBe("npm run dev");
+    expect(
+      toolSummary("background_command", "shell", {
+        action: "check",
+        id: "bg-1",
+        command: "must not be shown",
+      }),
+    ).toBe("bg-1");
+  });
+
+  it("only marks background starts with a command argument", () => {
+    expect(
+      runsInBackground("background_command", { action: "start", command: "npm run dev" }),
+    ).toBe(true);
+    expect(
+      runsInBackground("background_command", { action: "check", id: "bg-1", command: "ignored" }),
+    ).toBe(false);
+    expect(runsInBackground("background_command", { action: "check", id: "bg-1" })).toBe(false);
+    expect(runsInBackground("bash", { action: "start", command: "npm run dev" })).toBe(false);
+  });
+
+  it("labels background checks in both tenses", () => {
+    expect(backgroundAction("background_command", { action: "check" })).toBe("check");
+    expect(backgroundAction("bash", { action: "check" })).toBe(null);
+    expect(toolLabel("background_command", true, "check")).toBe("Checking on");
+    expect(toolLabel("background_command", false, "check")).toBe("Checked on");
+    expect(streamingLabel("background_command", "check")).toBe("Checking on a command");
   });
 
   it("uses readable labels for Dray built-ins and extensions", () => {

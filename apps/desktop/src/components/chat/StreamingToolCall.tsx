@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 
 import ToolCallIcon from "@/components/chat/ToolCallIcon";
+import ToolTarget from "@/components/chat/ToolTarget";
 import { streamingLabel, toolLabel } from "@/lib/tools";
 import { streamingCall } from "@/lib/streaming";
 
@@ -22,12 +23,14 @@ export default function StreamingToolCall({
   /// object, so it is read rather than parsed.
   partialJson: string;
 }) {
-  const { target, added } = streamingCall(name, partialJson);
+  const { target, added, action } = streamingCall(name, partialJson);
 
   // The tool's own verb once there is a target to put beside it, matching what
   // the committed row will say. Until then the generic form carries the noun
   // instead, so the row is never just a bare participle.
-  const label = target ? toolLabel(name, true) : streamingLabel(name);
+  const label = target
+    ? toolLabel(name, true, action)
+    : streamingLabel(name, action);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -37,7 +40,16 @@ export default function StreamingToolCall({
         <ToolCallIcon name={name} toolType="other" />
         <span className="flex min-w-0 items-baseline gap-1.5 shimmer-text">
           <span className="shrink-0">{label}</span>
-          {target && <span className="truncate font-mono">{target}</span>}
+          {target && (
+            <ToolTarget
+              target={target}
+              inBackground={name === "background_command" && action === "start"}
+              targetClassName={
+                name === "background_command" ? "text-muted-foreground shimmer-text" : undefined
+              }
+              suffixClassName="shimmer-text"
+            />
+          )}
         </span>
 
         {/* The same `+N` the settled row shows from its diff, in the same slot,

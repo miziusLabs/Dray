@@ -23,6 +23,20 @@ describe("streamingCall", () => {
     });
   });
 
+  it("shows a background check's ID once the complete value arrives", () => {
+    expect(
+      streamingCall("background_command", '{"action":"check","id":"bg-1"'),
+    ).toEqual({ target: "bg-1", action: "check", added: null });
+  });
+
+  it("withholds a background check's ID until its closing quote arrives", () => {
+    expect(streamingCall("background_command", '{"action":"check","id":"bg-1')).toEqual({
+      target: null,
+      action: "check",
+      added: null,
+    });
+  });
+
   it("does not open a line a trailing newline hasn't started", () => {
     expect(streamingCall("Write", '{"file_path":"/a/c.py","content":"one\\ntwo\\n"').added).toBe(2);
   });

@@ -21,7 +21,9 @@ export function toolSummary(
   if (path) return shortenPath(path);
   if (name === "libarian") return field(input, "task");
   if (name === "background_command") {
-    return field(input, "command") ?? field(input, "id");
+    return field(input, "action") === "check"
+      ? field(input, "id")
+      : field(input, "command") ?? field(input, "id");
   }
 
   switch (toolType) {
@@ -45,6 +47,21 @@ export function toolSummary(
     field(input, "prompt") ??
     (name ? null : null)
   );
+}
+
+/// Whether this call starts a command that should be labeled as running in the
+/// background. Status checks target the command ID instead.
+export function runsInBackground(name: string, input: JsonValue): boolean {
+  return (
+    name === "background_command" &&
+    field(input, "action") === "start" &&
+    field(input, "command") !== null
+  );
+}
+
+/// The background action, when this call is from that tool.
+export function backgroundAction(name: string, input: JsonValue): string | null {
+  return name === "background_command" ? field(input, "action") : null;
 }
 
 /// Present/past labels per tool, so a row reads as an action rather than an API
@@ -87,8 +104,12 @@ const TOOL_VERBS: Record<string, Verbs> = {
 
 /// The label for a single tool-call row. `pending` picks the tense — a live call
 /// reads "Reading", a settled one "Read".
-export function toolLabel(name: string, pending: boolean): string {
+export function toolLabel(name: string, pending: boolean, action: string | null = null): string {
   const verbs = TOOL_VERBS[name];
+  if (name === "background_command" && action === "check") {
+    return pending ? "Checking on" : "Checked on";
+  }
+
   if (!verbs) return name;
   return pending ? verbs[0] : verbs[1];
 }
@@ -145,7 +166,8 @@ export function groupLabel(name: string, count: number, pending: boolean): strin
 /// group applies here: there is no command beside it yet to make "Bash" a label.
 /// A tool with no entry gets its own name, which is still better than a blank
 /// row.
-export function streamingLabel(name: string): string {
+export function streamingLabel(name: string, action: string | null = null): string {
+  if (name === "background_command" && action === "check") return "Checking on a command";
   const noun = TOOL_VERBS[name]?.[2];
   if (!noun) return groupVerb(name, true);
   if (noun === "codebase") return `${groupVerb(name, true)} ${noun}`;

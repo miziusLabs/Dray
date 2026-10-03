@@ -134,6 +134,7 @@ export type StreamingCall = {
   /// still arriving would grow character by character, which reads as a glitch
   /// rather than as progress.
   target: string | null;
+  action?: string;
   /// Lines of file content seen so far, for the `+N` the settled row shows from
   /// its diff. Null for a call that writes no file.
   added: number | null;
@@ -142,11 +143,19 @@ export type StreamingCall = {
 /// Reads what can be shown of a tool call named `name` from the fragments so far.
 export function streamingCall(name: string, partialJson: string): StreamingCall {
   let target: string | null = null;
-  for (const [key, isPath] of TARGET_KEYS) {
-    const found = readString(partialJson, key);
-    if (found?.complete) {
-      target = isPath ? shortenPath(found.value) : found.value;
-      break;
+  const actionValue =
+    name === "background_command" ? readString(partialJson, "action") : null;
+  const action = actionValue?.complete ? actionValue.value : null;
+  if (name === "background_command" && action === "check") {
+    const id = readString(partialJson, "id");
+    if (id?.complete) target = id.value;
+  } else {
+    for (const [key, isPath] of TARGET_KEYS) {
+      const found = readString(partialJson, key);
+      if (found?.complete) {
+        target = isPath ? shortenPath(found.value) : found.value;
+        break;
+      }
     }
   }
 
@@ -166,5 +175,5 @@ export function streamingCall(name: string, partialJson: string): StreamingCall 
           : text.split("\n").length;
   }
 
-  return { target, added };
+  return { target, added, ...(action === null ? {} : { action }) };
 }
