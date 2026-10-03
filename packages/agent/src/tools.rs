@@ -19,7 +19,8 @@ pub fn shell(command: &str) -> Command {
         let powershell = Path::new(&system_root)
             .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
         let mut c = Command::new(powershell);
-        c.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+        // Load the user's profile so their tools and PATH customizations are available.
+        c.args(["-NonInteractive", "-Command", command]);
         c.creation_flags(0x08000000);
         c
     };
@@ -291,6 +292,23 @@ pub async fn stop_background() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_shell_uses_powershell_with_user_profile() {
+        let command = shell("Write-Output profile");
+        let command = command.as_std();
+        assert!(command
+            .get_program()
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .ends_with("powershell.exe"));
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(args.join(" "), "-NonInteractive -Command Write-Output profile");
+    }
 
     #[test]
     fn finder_uses_terminal_search_and_librarian_keeps_github_only() {
