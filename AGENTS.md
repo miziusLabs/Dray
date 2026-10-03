@@ -322,5 +322,5 @@ Prefer the smallest verification that covers a change. Documentation-only edits 
 
 ## Version control workflow
 
-- After completing each requested change or task, create a Git commit and push it to the configured remote.
+- After completing each requested change or task, create a Git commit and push it to `main`.
 - Every commit must have a concise title and a descriptive body explaining what changed and why.
