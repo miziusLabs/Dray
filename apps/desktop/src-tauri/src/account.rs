@@ -165,21 +165,38 @@ pub fn status() -> Result<AccountStatus> {
 }
 
 fn account_id_from_claims(claims: &Value) -> Option<String> {
-    claims["https://api.openai.com/auth"]["chatgpt_account_id"]
+    claims["chatgpt_account_id"]
         .as_str()
-        .filter(|id| !id.is_empty())
+        .or_else(|| claims["https://api.openai.com/auth"]["chatgpt_account_id"].as_str())
+        .filter(|id| !id.trim().is_empty())
         .map(str::to_owned)
+        .or_else(|| {
+            claims["organizations"]
+                .as_array()?
+                .iter()
+                .filter_map(|organization| organization["id"].as_str())
+                .find(|id| !id.trim().is_empty())
+                .map(str::to_owned)
+        })
+}
+
+fn jwt_claims(token: &str) -> Option<Value> {
+    let payload = URL_SAFE_NO_PAD.decode(token.split('.').nth(1)?).ok()?;
+    serde_json::from_slice(&payload).ok()
 }
 
 fn verified_claims(id_token: &str) -> Option<Value> {
-    let payload = URL_SAFE_NO_PAD.decode(id_token.split('.').nth(1)?).ok()?;
-    serde_json::from_slice(&payload).ok()
+    jwt_claims(id_token)
 }
 
 // The stored ID token was verified during sign-in. These claims are used only
 // for request routing, never as authorization.
 fn verified_account_id(id_token: &str) -> Option<String> {
     account_id_from_claims(&verified_claims(id_token)?)
+}
+
+fn account_id_from_access_token(access_token: &str) -> Option<String> {
+    account_id_from_claims(&jwt_claims(access_token)?)
 }
 
 fn verified_is_fedramp_account(id_token: &str) -> bool {
@@ -200,6 +217,11 @@ fn account_id_from_credentials(credentials: &Credentials) -> Option<String> {
         .filter(|id| !id.is_empty())
         .map(str::to_owned)
         .or_else(|| verified_account_id(&credentials.id_token))
+        // Older OAuth responses may omit `account_id` and the ID token may not contain
+        // the account claim. Codex access tokens also carry it in their JWT claims.
+        // This is used only to select the account for routing; the bearer token remains
+        // the authorization credential and is still validated by the usage endpoint.
+        .or_else(|| account_id_from_access_token(&credentials.access_token))
 }
 
 pub fn account_id() -> Result<Option<String>> {
