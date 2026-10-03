@@ -242,7 +242,9 @@ export function toolGroupLabel(calls: ToolDescriptor[]): string {
 export function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${seconds % 60}s`;
 }
 
 /// Pretty-prints tool input for the expanded view, dropping the fields the row

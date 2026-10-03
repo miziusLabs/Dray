@@ -61,7 +61,10 @@ describe("tool group labels", () => {
 
   it("formats worked time without decimal noise", () => {
     expect(formatDuration(26_000)).toBe("26s");
+    expect(formatDuration(60_000)).toBe("1m 0s");
     expect(formatDuration(86_000)).toBe("1m 26s");
+    expect(formatDuration(3_600_000)).toBe("1h 0m 0s");
+    expect(formatDuration(3_661_000)).toBe("1h 1m 1s");
   });
 });
 
