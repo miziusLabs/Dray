@@ -27,9 +27,9 @@ function obj(input: JsonValue): Record<string, JsonValue> | null {
 /// The three built-in editors disagree on shape, so each is read on its own
 /// terms rather than through one guessed set of keys:
 ///
-/// - `Edit` sends `old_string`/`new_string` — a fragment of the file, not the
-///   whole thing. The diff is therefore of the replaced region alone, which is
-///   also the only region worth reading.
+/// - `Edit` sends a flat `oldText`/`newText` pair or `old_string`/`new_string`
+///   — a fragment of the file, not the whole thing. The diff is therefore of
+///   the replaced region alone, which is also the only region worth reading.
 /// - `MultiEdit` sends an `edits` array of those same pairs. They apply in
 ///   sequence to one file, so the sides are the concatenation of each end.
 /// - `Write` sends `content` and no prior text. Treated as a creation even when
@@ -60,8 +60,8 @@ export function editSides(input: JsonValue): EditSides | null {
     };
   }
 
-  const oldText = str(root, "old_string");
-  const newText = str(root, "new_string");
+  const oldText = str(root, "old_string") ?? str(root, "oldText");
+  const newText = str(root, "new_string") ?? str(root, "newText");
   if (oldText !== null || newText !== null) {
     return { path, oldText: oldText ?? "", newText: newText ?? "" };
   }

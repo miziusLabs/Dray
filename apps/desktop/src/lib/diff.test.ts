@@ -11,6 +11,25 @@ describe("Dray file edit arguments", () => {
       }),
     ).toEqual({ path: "src/main.ts", oldText: "before", newText: "after" });
   });
+
+  it("understands the built-in Edit tool's flat oldText/newText arguments", () => {
+    expect(
+      editSides({
+        path: "src/main.ts",
+        oldText: "before",
+        newText: "after",
+      }),
+    ).toEqual({ path: "src/main.ts", oldText: "before", newText: "after" });
+  });
+
+  it("keeps Write tool content as an added-file diff", () => {
+    expect(
+      editSides({
+        path: "src/main.ts",
+        content: "new file",
+      }),
+    ).toEqual({ path: "src/main.ts", oldText: null, newText: "new file" });
+  });
 });
 
 describe("diffSide", () => {
