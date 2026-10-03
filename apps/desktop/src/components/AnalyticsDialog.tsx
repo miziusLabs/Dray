@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usageBarColorClass } from "@/lib/usage";
@@ -57,7 +56,7 @@ export default function AnalyticsDialog({ open, onOpenChange, displayMode }: {
       <div className="flex flex-col gap-5">
         <div className="flex items-center justify-between gap-4">
           <div className="text-ui text-muted-foreground">
-            <p>{displayMode === "left" ? "Plan usage remaining" : "Plan usage consumed"}</p>
+            {displayMode === "left" && <p>Plan usage remaining</p>}
             {usage && <p>{usage.signedIn ? [usage.email ?? "Connected to ChatGPT", usage.planType].filter(Boolean).join(" · ") : "Connect to ChatGPT in Settings to view plan usage."}</p>}
           </div>
           <Button variant="outline" size="sm" disabled={loading} onClick={() => void refresh()}><RefreshCw className={loading ? "animate-spin" : undefined} />Refresh</Button>
@@ -66,8 +65,6 @@ export default function AnalyticsDialog({ open, onOpenChange, displayMode }: {
           <UsageBar label="5-hour limit" window={usage?.fiveHour ?? null} displayMode={displayMode} loading={loading} />
           <UsageBar label="Weekly limit" window={usage?.weekly ?? null} displayMode={displayMode} loading={loading} />
         </div>}
-        <p className="text-xs text-muted-foreground">Codex limits for your ChatGPT account. Unavailable limits are shown as —, not estimated from local tokens. {usage?.fromCodexLogin && "Read from your matching local Codex login. Manage Dray’s app allowance in ChatGPT."}</p>
-        <Button variant="outline" onClick={() => void openUrl("https://chatgpt.com/settings/usage")}>View ChatGPT plan usage and limits</Button>
       </div>
     </DialogContent>
   </Dialog>;
