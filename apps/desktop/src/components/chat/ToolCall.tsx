@@ -102,7 +102,7 @@ export default function ToolCall({
   const alarming = failed && !isRoutineError(result?.text);
   const labelTone = alarming ? "text-destructive" : "text-foreground/80";
 
-  // A file edit renders as a diff rather than as its raw arguments. `rawInput`
+  // Writes and edits render as a diff rather than raw arguments. `rawInput`
   // wins when present — it means the call is still streaming and the JSON has
   // not parsed yet, so there is nothing to diff.
   const sides = toolType === "file_edit" && !rawInput ? editSides(input) : null;
@@ -251,7 +251,7 @@ export default function ToolCall({
 
       <CollapsibleContent className="collapsible-smooth">
         <div className="flex flex-col gap-1.5">
-          {sides && <DiffView sides={sides} className="border-0" />}
+          {sides && <DiffView sides={sides} />}
 
           {range && <CodeView range={range} />}
 
