@@ -1147,7 +1147,6 @@ export default function ChatInput({
                           <span className="flex items-center gap-1.5">
                             <KbdGroup>
                               <Kbd>Ctrl</Kbd>
-                              <span>+</span>
                               <Kbd>Enter</Kbd>
                             </KbdGroup>
                             <span>to queue</span>
