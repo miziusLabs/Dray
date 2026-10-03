@@ -399,7 +399,6 @@ pub(crate) async fn execute(name: &str, args: &Value, cwd: &Path) -> Result<Tool
             tokio::fs::write(path, content).await?;
             Ok(ToolOutput::text("File saved."))
         }
-        "ls" => Ok(ToolOutput::text(tools::ls(args, cwd).await?)),
         "background_command" => Ok(ToolOutput::text(tools::background(args, cwd).await?)),
         "ask_user" => Ok(ToolOutput::text(tools::question(args).await?)),
         "bash" => Ok(ToolOutput::text(
@@ -900,9 +899,10 @@ mod tests {
         assert_eq!(body["store"], false);
         assert_eq!(body["stream"], true);
         assert_eq!(body["tools"][0]["type"], "namespace");
-        assert_eq!(body["tools"][0]["tools"].as_array().unwrap().len(), 10);
+        assert_eq!(body["tools"][0]["tools"].as_array().unwrap().len(), 9);
         let definitions = body["tools"][0]["tools"].as_array().unwrap();
         assert!(definitions.iter().any(|tool| tool["name"] == "bash"));
+        assert!(!definitions.iter().any(|tool| tool["name"] == "ls"));
         assert!(!definitions
             .iter()
             .any(|tool| tool["name"] == "github"));
@@ -957,8 +957,8 @@ mod tests {
         assert!(text.contains("Exit status:"));
     }
     #[tokio::test]
-    async fn removed_search_tools_are_not_executable() {
-        for name in ["find", "grep", "github"] {
+    async fn unavailable_tools_are_not_executable() {
+        for name in ["find", "grep", "github", "ls"] {
             let error = execute(name, &json!({"pattern":"anything"}), &std::env::temp_dir())
                 .await
                 .unwrap_err();

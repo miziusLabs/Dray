@@ -43,7 +43,6 @@ fn schema(name: &str, description: &str, properties: Value, required: Value) -> 
 }
 pub fn definitions() -> Vec<Value> {
     vec![
-        schema("ls","List files in a directory.",json!({"path":{"type":"string"}}),json!(["path"])),
         schema("background_command","Manage long-running shell commands with start, check, input, or stop. Check drains new output. Commands are stopped when the session stops.",json!({"action":{"type":"string","enum":["start","check","input","stop"]},"command":{"type":"string"},"id":{"type":"string"},"input":{"type":"string"}}),json!(["action"])),
         schema("finder","Explore the current codebase with a dedicated read-only agent. Use for complex searches by functionality or concept.",json!({"query":{"type":"string"}}),json!(["query"])),
         schema("libarian","Research GitHub repositories with a dedicated read-only agent using the authenticated gh CLI.",json!({"query":{"type":"string"}}),json!(["query"])),
@@ -367,22 +366,31 @@ fn github_definition() -> Value {
     )
 }
 
+fn ls_definition() -> Value {
+    schema(
+        "ls",
+        "List files in a directory.",
+        json!({"path":{"type":"string"}}),
+        json!(["path"]),
+    )
+}
+
 fn research_tools(name: &str) -> Vec<Value> {
     if name == "libarian" {
         return vec![github_definition()];
     }
 
-    super::tools()
+    let mut definitions = super::tools()
         .as_array()
         .unwrap()
         .iter()
-        .filter(|tool| {
-            ["read", "ls", "bash"]
-                .iter()
-                .any(|allowed| tool["name"] == *allowed)
-        })
+        .filter(|tool| ["read", "bash"].iter().any(|allowed| tool["name"] == *allowed))
         .cloned()
-        .collect()
+        .collect::<Vec<_>>();
+    if name == "finder" {
+        definitions.push(ls_definition());
+    }
+    definitions
 }
 
 pub async fn research(
@@ -437,6 +445,10 @@ pub async fn research(
                     github(&args, cwd)
                         .await
                         .map(|text| super::ToolOutput::text(text))
+                } else if name == "ls" {
+                    ls(&args, cwd)
+                        .await
+                        .map(super::ToolOutput::text)
                 } else {
                     super::execute(name, &args, cwd).await
                 }
