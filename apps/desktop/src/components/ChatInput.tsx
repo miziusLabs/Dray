@@ -690,13 +690,18 @@ export default function ChatInput({
     );
   }
 
+  const textareaPlaceholder = isNewTask
+    ? "Describe a task. @files. $skills and /commands."
+    : menuOpen
+      ? "Send follow-up"
+      : "";
   const promptShortcutHint = !menuOpen && (isNewTask || !message.trim()) && (
     <div
       className={cn(
-        "flex items-center gap-1",
+        "flex items-end gap-1",
         isNewTask
           ? "pt-2 text-ui text-muted-foreground/60"
-          : "pointer-events-none absolute inset-0 px-1 text-composer text-foreground/80",
+          : "pointer-events-none absolute inset-0 px-1 pb-1 text-composer text-foreground/80",
       )}
     >
       Press
@@ -897,9 +902,9 @@ export default function ChatInput({
             </div>
           )}
 
-          {/* Keep the send control centered against the input row, including
-              after the bar's vertical padding changes. */}
-          <div className={cn("flex items-center gap-1 py-2", isNewTask ? "px-0" : "px-3")}>
+          {/* The textarea and button share a height on one line, so bottom alignment
+              keeps it centered on one line and anchored as the textarea grows. */}
+          <div className={cn("flex items-end gap-1 py-2", isNewTask ? "px-0" : "px-3")}>
             <div className="relative min-w-0 flex-1">
               <textarea
                 ref={textareaRef}
@@ -911,13 +916,7 @@ export default function ChatInput({
                   const mirror = mirrorRef.current;
                   if (mirror) mirror.scrollTop = e.currentTarget.scrollTop;
                 }}
-                placeholder={
-                  isNewTask
-                    ? "Describe a task. @files. $skills and /commands."
-                    : menuOpen
-                      ? "Send follow-up"
-                      : ""
-                }
+                placeholder={textareaPlaceholder}
                 onChange={(e) => {
                   setMessage(e.currentTarget.value);
                   setStashMenuOpen(false);
@@ -1032,7 +1031,7 @@ export default function ChatInput({
                 // token setting the flex item's floor and pushing the buttons off
                 // the row.
                 className={cn(
-                  "block w-full resize-none overflow-y-auto bg-transparent placeholder:text-muted-foreground focus:outline-none",
+                  "block w-full resize-none overflow-y-auto bg-transparent placeholder:text-transparent focus:outline-none",
                   TEXT_BOX,
                   isNewTask ? "px-0" : "px-1",
                   // Hands the glyphs to the overlay only while there is something
@@ -1042,6 +1041,18 @@ export default function ChatInput({
                   highlighted ? "text-transparent caret-foreground" : "text-foreground",
                 )}
               />
+
+              {message.length === 0 && textareaPlaceholder && (
+                <div
+                  aria-hidden
+                  className={cn(
+                    "pointer-events-none absolute inset-0 flex items-end pb-1 text-composer text-muted-foreground",
+                    isNewTask ? "px-0" : "px-1",
+                  )}
+                >
+                  <span className="min-w-0">{textareaPlaceholder}</span>
+                </div>
+              )}
 
               {!isNewTask && !message.trim() && promptShortcutHint}
 
