@@ -66,7 +66,7 @@ export default function AnalyticsDialog({ open, onOpenChange, displayMode }: {
           <UsageBar label="5-hour limit" window={usage?.fiveHour ?? null} displayMode={displayMode} loading={loading} />
           <UsageBar label="Weekly limit" window={usage?.weekly ?? null} displayMode={displayMode} loading={loading} />
         </div>}
-        <p className="text-xs text-muted-foreground">Account-wide Codex limits for your ChatGPT plan, shared across apps. Unavailable limits are shown as —, not estimated from local tokens.</p>
+        <p className="text-xs text-muted-foreground">Codex limits for your ChatGPT account. Unavailable limits are shown as —, not estimated from local tokens. {usage?.fromCodexLogin && "Read from your matching local Codex login. Manage Dray’s app allowance in ChatGPT."}</p>
         <Button variant="outline" onClick={() => void openUrl("https://chatgpt.com/settings/usage")}>View ChatGPT plan usage and limits</Button>
       </div>
     </DialogContent>

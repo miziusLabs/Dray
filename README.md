@@ -52,8 +52,9 @@ never overwritten. Use YAML frontmatter with `name` and `description`, followed
 by the skill instructions. Select a skill in the composer or invoke it with
 `$name`. Project skills override global skills with the same name.
 
-The embedded system prompt is `packages/agent/SYSTEM.md`. Usage shows tokens
-recorded by Dray; follow the ChatGPT usage link for subscription limits.
+The embedded system prompt is `packages/agent/SYSTEM.md`. Usage shows ChatGPT
+Codex limits when available, using a matching local Codex login if needed.
+Follow the ChatGPT usage link to manage Dray’s app allowance.
 
 ## Tech stack
 

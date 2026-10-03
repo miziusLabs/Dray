@@ -201,6 +201,7 @@ Files in `src-tauri/src/`:
 - `harness/dray/mapper.rs` — maps native runtime events into the normalized event model.
 - `harness/dray/commands.rs` — account model catalog and `.agents/skills` discovery.
 - `account.rs` — loopback OAuth, PKCE, identity verification, serialized refresh, credential storage, cancellation, and revocation. `account/credential_store.rs` splits Windows credentials into bounded OS credential entries, publishing each complete generation through a manifest while retaining compatibility with older single-entry credentials.
+- `usage/codex.rs` — read-only local Codex usage credentials from `CODEX_HOME/auth.json` (default `~/.codex`) or the native Codex credential store on macOS/Windows; requires a matching Dray email and any known workspace ID. Codex owns refresh and persistence.
 - `usage.rs` — account-wide Codex plan limits from `/backend-api/wham/usage`, following the official Codex client with backend-only ChatGPT OAuth credentials; exposes five-hour and weekly windows.
 
 The frontend-facing Tauri command surface covers session send/read/control, attachments, models, commands/skills, file search, projects, branches, Git diffs/history/status, session flags/forks/deletion, notifications, PR operations, and quit confirmation. Add new native capabilities through a narrow command in `lib.rs` and keep implementation in the owning module.
@@ -242,7 +243,7 @@ grouped across model requests until visible non-tool output appears.
 Use the documented direct Sign in with ChatGPT token-sharing flow. Models and
 reasoning levels come from the account catalog; do not hardcode supported models.
 Plan usage follows the official Codex client's usage GET; do not probe unrelated
-private quota endpoints. Missing or denied plan limits must remain unavailable.
+private quota endpoints. SIWC tokens may be denied by the Codex usage endpoint. On HTTP 401/403 only, usage can read a matching local Codex login without refreshing or modifying it; label that source and distinguish Codex account limits from Dray’s per-app allowance. Missing, stale, mismatched, or denied plan limits must remain unavailable.
 Model discovery sends a catalog compatibility `client_version` independently
 of the app version, so newer account models are included. Reasoning preferences
 are keyed by provider and model, and unsupported choices resolve to each model's

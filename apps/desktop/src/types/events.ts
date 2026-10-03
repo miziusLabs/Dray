@@ -406,7 +406,7 @@ model: string, inputTokens: number | null, outputTokens: number | null, cachedIn
  */
 contextWindow: number | null, maxOutputTokens: number | null, };
 
-export type PlanUsage = { signedIn: boolean, email: string | null, planType: string | null, fiveHour: PlanUsageWindow | null, weekly: PlanUsageWindow | null, };
+export type PlanUsage = { signedIn: boolean, email: string | null, planType: string | null, fromCodexLogin: boolean, fiveHour: PlanUsageWindow | null, weekly: PlanUsageWindow | null, };
 
 /**
  * Codex rate-limit window, with the reset timestamp in Unix milliseconds.

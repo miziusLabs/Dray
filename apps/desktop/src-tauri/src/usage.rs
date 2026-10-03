@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use ts_rs::TS;
 
+mod codex;
+
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_ORIGINATOR: &str = "codex_cli_rs";
 
@@ -14,6 +16,8 @@ pub struct PlanUsage {
     pub signed_in: bool,
     pub email: Option<String>,
     pub plan_type: Option<String>,
+    // True when limits were read using a matching local Codex login.
+    pub from_codex_login: bool,
     pub five_hour: Option<PlanUsageWindow>,
     pub weekly: Option<PlanUsageWindow>,
 }
@@ -68,12 +72,9 @@ fn usage_request(
     }
 }
 
-fn unavailable_message(status: reqwest::StatusCode, account_id: Option<&str>) -> String {
-    if status == reqwest::StatusCode::UNAUTHORIZED && account_id.is_none() {
-        return "ChatGPT plan usage is unavailable (HTTP 401). This ChatGPT connection did not provide an account routing ID. Reconnect in Settings to refresh the account metadata; if it remains unavailable, view plan usage in ChatGPT.".into();
-    }
+fn unavailable_message(status: reqwest::StatusCode) -> String {
     format!(
-        "ChatGPT plan usage is unavailable (HTTP {}). This connection may not have access to Codex plan limits. View usage in ChatGPT or try reconnecting in Settings.",
+        "ChatGPT plan usage is unavailable (HTTP {}). Dray's ChatGPT connection may not support reading Codex limits. Sign in to Codex with the same ChatGPT account, then refresh, or view usage in ChatGPT.",
         status.as_u16()
     )
 }
@@ -120,15 +121,30 @@ pub async fn fetch() -> Result<PlanUsage> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()?;
-    let response = usage_request(&client, &token, account_id.as_deref(), fedramp_account)
+    let mut response = usage_request(&client, &token, account_id.as_deref(), fedramp_account)
         .send()
         .await
         .context("Could not fetch ChatGPT plan usage")?;
+    // SIWC tokens authorize api.openai.com, but are not necessarily admitted to
+    // the Codex usage endpoint. Codex owns its credentials and refresh lifecycle.
+    if matches!(response.status().as_u16(), 401 | 403) {
+        let credentials = codex::load(usage.email.as_deref(), account_id.as_deref())?;
+        response = usage_request(
+            &client,
+            &credentials.access_token,
+            Some(&credentials.account_id),
+            credentials.fedramp_account,
+        )
+        .send()
+        .await
+        .context("Could not fetch usage with the local Codex login")?;
+        usage.from_codex_login = true;
+        if matches!(response.status().as_u16(), 401 | 403) {
+            anyhow::bail!("The local Codex login cannot read usage (HTTP {}). Open Codex to refresh its login, then refresh here, or view usage in ChatGPT.", response.status().as_u16());
+        }
+    }
     if !response.status().is_success() {
-        anyhow::bail!(
-            "{}",
-            unavailable_message(response.status(), account_id.as_deref())
-        );
+        anyhow::bail!("{}", unavailable_message(response.status()));
     }
     let response: UsageResponse = response
         .json()
@@ -211,16 +227,19 @@ mod tests {
     }
 
     #[test]
-    fn unauthorized_without_account_routing_id_gives_reconnection_guidance() {
-        let error = unavailable_message(reqwest::StatusCode::UNAUTHORIZED, None);
-        assert!(error.contains("did not provide an account routing ID"));
-        assert!(error.contains("Reconnect in Settings"));
+    fn unavailable_guidance_does_not_blame_missing_routing_metadata() {
+        let error = unavailable_message(reqwest::StatusCode::UNAUTHORIZED);
+        assert!(error.contains("same ChatGPT account"));
+        assert!(!error.contains("Reconnect in Settings"));
+    }
 
-        let routed_error =
-            unavailable_message(reqwest::StatusCode::UNAUTHORIZED, Some("account-123"));
-        assert!(!routed_error.contains("did not provide an account routing ID"));
-
-        let forbidden = unavailable_message(reqwest::StatusCode::FORBIDDEN, None);
-        assert!(!forbidden.contains("did not provide an account routing ID"));
+    /// Explicitly opt in: reads local credentials and makes read-only usage GETs.
+    #[tokio::test]
+    #[ignore = "requires a connected ChatGPT account and matching local Codex login"]
+    async fn live_plan_usage() {
+        let usage = fetch().await.unwrap();
+        assert!(usage.signed_in);
+        assert!(usage.plan_type.is_some());
+        assert!(usage.five_hour.is_some() || usage.weekly.is_some());
     }
 }
