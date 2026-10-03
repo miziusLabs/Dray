@@ -61,7 +61,7 @@ Top-level components in `src/components/`:
 - `ChatInput.tsx` — composer text input, send/stop behavior, command/file menus, queued-send behavior, error state, and attachment integration.
 - `Sidebar.tsx` — task/session navigation, project grouping, search, nesting, session status, PR markers, pin/settle actions, row menus, and settings entry point.
 - `PrStateIcon.tsx` — compact pull request state iconography.
-- `SettingsDialog.tsx` — General, Account, Models, and Updates tabs; account connection controls and profile picture, settled-session toggle, model-cycle configuration, and title-generation model configuration.
+- `SettingsDialog.tsx` — General, Providers, Models, and Updates tabs; account connection controls and profile picture, settled-session toggle, model-cycle configuration, and title-generation model configuration.
 - `NoticeStack.tsx` — transient in-app notices.
 - `UpdateNotice.tsx` — startup update check, background download progress, retry, and install/restart action.
 - `QuitDialog.tsx` — quit confirmation for active work.

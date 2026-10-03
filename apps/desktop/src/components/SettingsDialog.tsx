@@ -45,7 +45,7 @@ type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
 const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
   general: "General",
-  account: "Account",
+  account: "Providers",
   models: "Models",
   updates: "Updates",
 };
