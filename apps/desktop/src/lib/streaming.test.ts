@@ -37,6 +37,32 @@ describe("streamingCall", () => {
     });
   });
 
+  it("shows background input and stop IDs once their values are complete", () => {
+    expect(streamingCall("background_command", '{"action":"input","id":"bg-2"')).toEqual({
+      target: "bg-2",
+      action: "input",
+      added: null,
+    });
+    expect(streamingCall("background_command", '{"action":"stop","id":"bg-3"')).toEqual({
+      target: "bg-3",
+      action: "stop",
+      added: null,
+    });
+  });
+
+  it("withholds background input and stop IDs until their closing quotes arrive", () => {
+    expect(streamingCall("background_command", '{"action":"input","id":"bg-2')).toEqual({
+      target: null,
+      action: "input",
+      added: null,
+    });
+    expect(streamingCall("background_command", '{"action":"stop","id":"bg-3')).toEqual({
+      target: null,
+      action: "stop",
+      added: null,
+    });
+  });
+
   it("does not open a line a trailing newline hasn't started", () => {
     expect(streamingCall("Write", '{"file_path":"/a/c.py","content":"one\\ntwo\\n"').added).toBe(2);
   });

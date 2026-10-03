@@ -31,6 +31,21 @@ describe("Dray extension tool labels", () => {
         command: "must not be shown",
       }),
     ).toBe("bg-1");
+    expect(
+      toolSummary("background_command", "shell", {
+        action: "input",
+        id: "bg-2",
+        input: "yes\n",
+        command: "must not be shown",
+      }),
+    ).toBe("bg-2");
+    expect(
+      toolSummary("background_command", "shell", {
+        action: "stop",
+        id: "bg-3",
+        command: "must not be shown",
+      }),
+    ).toBe("bg-3");
   });
 
   it("only marks background starts with a command argument", () => {
@@ -50,6 +65,15 @@ describe("Dray extension tool labels", () => {
     expect(toolLabel("background_command", true, "check")).toBe("Checking on");
     expect(toolLabel("background_command", false, "check")).toBe("Checked on");
     expect(streamingLabel("background_command", "check")).toBe("Checking on a command");
+  });
+
+  it("labels background input and stop actions in both tenses", () => {
+    expect(toolLabel("background_command", true, "input")).toBe("Sending input to");
+    expect(toolLabel("background_command", false, "input")).toBe("Sent input to");
+    expect(streamingLabel("background_command", "input")).toBe("Sending input to a command");
+    expect(toolLabel("background_command", true, "stop")).toBe("Stopping");
+    expect(toolLabel("background_command", false, "stop")).toBe("Stopped");
+    expect(streamingLabel("background_command", "stop")).toBe("Stopping a command");
   });
 
   it("uses readable labels for Dray built-ins and extensions", () => {

@@ -21,7 +21,8 @@ export function toolSummary(
   if (path) return shortenPath(path);
   if (name === "libarian") return field(input, "task");
   if (name === "background_command") {
-    return field(input, "action") === "check"
+    const action = field(input, "action");
+    return action === "check" || action === "input" || action === "stop"
       ? field(input, "id")
       : field(input, "command") ?? field(input, "id");
   }
@@ -49,8 +50,8 @@ export function toolSummary(
   );
 }
 
-/// Whether this call starts a command that should be labeled as running in the
-/// background. Status checks target the command ID instead.
+/// Whether this is a background start whose command should be labeled as
+/// running in the background.
 export function runsInBackground(name: string, input: JsonValue): boolean {
   return (
     name === "background_command" &&
@@ -106,8 +107,17 @@ const TOOL_VERBS: Record<string, Verbs> = {
 /// reads "Reading", a settled one "Read".
 export function toolLabel(name: string, pending: boolean, action: string | null = null): string {
   const verbs = TOOL_VERBS[name];
-  if (name === "background_command" && action === "check") {
-    return pending ? "Checking on" : "Checked on";
+  if (name === "background_command") {
+    switch (action) {
+      case "check":
+        return pending ? "Checking on" : "Checked on";
+      case "input":
+        return pending ? "Sending input to" : "Sent input to";
+      case "stop":
+        return pending ? "Stopping" : "Stopped";
+      default:
+        break;
+    }
   }
 
   if (!verbs) return name;
@@ -167,7 +177,19 @@ export function groupLabel(name: string, count: number, pending: boolean): strin
 /// A tool with no entry gets its own name, which is still better than a blank
 /// row.
 export function streamingLabel(name: string, action: string | null = null): string {
-  if (name === "background_command" && action === "check") return "Checking on a command";
+  if (name === "background_command") {
+    switch (action) {
+      case "check":
+        return "Checking on a command";
+      case "input":
+        return "Sending input to a command";
+      case "stop":
+        return "Stopping a command";
+      default:
+        break;
+    }
+  }
+
   const noun = TOOL_VERBS[name]?.[2];
   if (!noun) return groupVerb(name, true);
   if (noun === "codebase") return `${groupVerb(name, true)} ${noun}`;

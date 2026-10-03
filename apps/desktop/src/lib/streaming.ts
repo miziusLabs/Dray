@@ -130,9 +130,9 @@ const CONTENT_KEY_BY_TOOL: Record<string, string> = {
 };
 
 export type StreamingCall = {
-  /// Null until the stream has carried the whole value. A path printed while
-  /// still arriving would grow character by character, which reads as a glitch
-  /// rather than as progress.
+  /// Null until the stream has carried the complete target. Showing a path, ID,
+  /// or command before its closing quote would make the label grow character by
+  /// character, which reads as a glitch rather than progress.
   target: string | null;
   action?: string;
   /// Lines of file content seen so far, for the `+N` the settled row shows from
@@ -146,7 +146,10 @@ export function streamingCall(name: string, partialJson: string): StreamingCall 
   const actionValue =
     name === "background_command" ? readString(partialJson, "action") : null;
   const action = actionValue?.complete ? actionValue.value : null;
-  if (name === "background_command" && action === "check") {
+  const targetsBackgroundId =
+    name === "background_command" &&
+    (action === "check" || action === "input" || action === "stop");
+  if (targetsBackgroundId) {
     const id = readString(partialJson, "id");
     if (id?.complete) target = id.value;
   } else {
