@@ -46,9 +46,11 @@ stay in the native backend and operating system credential store on Windows
 and macOS. Dray never imports Pi authentication.
 
 Skills live in `~/.agents/skills/<name>/SKILL.md` or a project's
-`.agents/skills/<name>/SKILL.md`. Use YAML frontmatter with `name` and `description`,
-followed by the skill instructions. Select a skill in the composer or invoke it
-with `$name`. Project skills override global skills with the same name.
+`.agents/skills/<name>/SKILL.md`. Dray's bundled skills are installed in the
+global directory so they can be read like other skills; existing files are
+never overwritten. Use YAML frontmatter with `name` and `description`, followed
+by the skill instructions. Select a skill in the composer or invoke it with
+`$name`. Project skills override global skills with the same name.
 
 The embedded system prompt is `packages/agent/SYSTEM.md`. Usage shows tokens
 recorded by Dray; follow the ChatGPT usage link for subscription limits.

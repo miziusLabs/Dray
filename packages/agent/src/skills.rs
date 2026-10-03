@@ -1,4 +1,9 @@
-use std::path::{Path, PathBuf};
+use anyhow::Context;
+use std::{
+    fs::OpenOptions,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 const BUILTIN_SKILLS: &[&str] = &[
     include_str!("../skills/github/SKILL.md"),
@@ -28,14 +33,44 @@ fn bundled_skills() -> impl Iterator<Item = Skill> {
         .filter_map(|contents| parse_skill(contents, None))
 }
 
-pub fn discover(cwd: &Path) -> Vec<Skill> {
+fn install_bundled_skills_at(root: &Path) -> anyhow::Result<()> {
+    for skill in bundled_skills() {
+        let path = root.join(&skill.name).join("SKILL.md");
+        std::fs::create_dir_all(path.parent().context("missing skill directory")?)?;
+        let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => file,
+            // Keep user-installed skills with the same name intact.
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "could not create bundled skill at {}",
+                        path.display()
+                    )
+                })
+            }
+        };
+        file.write_all(skill.contents.as_bytes())
+            .with_context(|| format!("could not write bundled skill at {}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// Install embedded skills into the standard global skill directory so they
+/// can be inspected and loaded like any other `SKILL.md` file.
+pub fn install_bundled() -> anyhow::Result<()> {
+    let home = dirs::home_dir().context("could not resolve user home directory")?;
+    install_bundled_skills_at(&home.join(".agents/skills"))
+}
+
+fn discover_from(cwd: &Path, home: Option<&Path>) -> Vec<Skill> {
     let mut skills = std::collections::BTreeMap::new();
     for skill in bundled_skills() {
         skills.insert(skill.name.clone(), skill);
     }
 
     let mut roots = Vec::new();
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home {
         roots.push(home.join(".agents/skills"));
     }
     let mut ancestors: Vec<_> = cwd.ancestors().collect();
@@ -59,6 +94,17 @@ pub fn discover(cwd: &Path) -> Vec<Skill> {
         }
     }
     skills.into_values().collect()
+}
+
+pub fn discover(cwd: &Path) -> Vec<Skill> {
+    let home = dirs::home_dir();
+    if let Some(home) = &home {
+        // Discovery remains usable when the home directory is read-only: the
+        // embedded copy is retained as a fallback, while normal installs expose
+        // every bundled skill from ~/.agents/skills/<name>/SKILL.md.
+        let _ = install_bundled_skills_at(&home.join(".agents/skills"));
+    }
+    discover_from(cwd, home.as_deref())
 }
 
 fn metadata(contents: &str) -> Option<(String, String)> {
@@ -120,21 +166,31 @@ mod tests {
     }
 
     #[test]
-    fn discovers_project_skills_from_agents_directory_not_dray() {
+    fn discovers_global_and_project_skills_from_agents_directories_not_dray() {
         let root = std::env::temp_dir().join(format!("dray-skills-{}", uuid::Uuid::new_v4()));
+        let home = root.join("home");
         let cwd = root.join("nested/project");
-        let new_name = format!("new-{}", uuid::Uuid::new_v4());
+        let global_name = format!("global-{}", uuid::Uuid::new_v4());
+        let project_name = format!("project-{}", uuid::Uuid::new_v4());
         let old_name = format!("old-{}", uuid::Uuid::new_v4());
-        let new_skill_path = root
+        let global_skill_path = home
             .join(".agents/skills")
-            .join(&new_name)
+            .join(&global_name)
             .join("SKILL.md");
-        let old_skill_path = root
+        let project_skill_path = root
+            .join(".agents/skills")
+            .join(&project_name)
+            .join("SKILL.md");
+        let old_skill_path = home
             .join(".dray/skills")
             .join(&old_name)
             .join("SKILL.md");
 
-        for (path, name) in [(&new_skill_path, &new_name), (&old_skill_path, &old_name)] {
+        for (path, name) in [
+            (&global_skill_path, &global_name),
+            (&project_skill_path, &project_name),
+            (&old_skill_path, &old_name),
+        ] {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(
                 path,
@@ -143,35 +199,59 @@ mod tests {
             .unwrap();
         }
 
-        let skills = discover(&cwd);
-        let discovered = skills.iter().find(|skill| skill.name == new_name).unwrap();
-        assert_eq!(discovered.path.as_deref(), Some(new_skill_path.as_path()));
+        let skills = discover_from(&cwd, Some(&home));
+        let global = skills
+            .iter()
+            .find(|skill| skill.name == global_name)
+            .unwrap();
+        let project = skills
+            .iter()
+            .find(|skill| skill.name == project_name)
+            .unwrap();
+        assert_eq!(global.path.as_deref(), Some(global_skill_path.as_path()));
+        assert_eq!(project.path.as_deref(), Some(project_skill_path.as_path()));
         assert!(!skills.iter().any(|skill| skill.name == old_name));
 
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn discovers_bundled_commit_and_push_skill_with_requested_format() {
-        let skill = bundled_skills()
-            .find(|skill| skill.name == "commit-and-push")
-            .expect("the commit-and-push skill is bundled with the agent");
-        assert!(skill.path.is_none());
-        assert!(skill.contents.contains("non-technical description"));
-        assert!(skill.contents.contains("detailed description"));
-        assert!(discover(Path::new("."))
-            .iter()
-            .any(|skill| skill.name == "commit-and-push"));
+    fn installs_and_discovers_bundled_skills_from_the_global_agents_directory() {
+        let root = std::env::temp_dir().join(format!("dray-skills-{}", uuid::Uuid::new_v4()));
+        let home = root.join("home");
+        let skill_root = home.join(".agents/skills");
+        install_bundled_skills_at(&skill_root).unwrap();
+
+        let skills = discover_from(&root.join("project"), Some(&home));
+        for (name, marker) in [
+            ("commit-and-push", "detailed description"),
+            ("github", "gh auth status"),
+        ] {
+            let skill = skills.iter().find(|skill| skill.name == name).unwrap();
+            let path = skill_root.join(name).join("SKILL.md");
+            assert_eq!(skill.path.as_deref(), Some(path.as_path()));
+            assert!(skill.contents.contains(marker));
+            assert_eq!(std::fs::read_to_string(path).unwrap(), skill.contents);
+        }
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn discovers_bundled_github_skill() {
-        let github = bundled_skills()
-            .find(|skill| skill.name == "github")
-            .expect("the GitHub skill is bundled with the agent");
-        assert!(github.path.is_none());
-        assert!(github.contents.contains("gh auth status"));
-        assert!(github.contents.contains("gh pr view"));
-        assert!(discover(Path::new(".")).iter().any(|skill| skill.name == "github"));
+    fn installing_bundled_skills_does_not_overwrite_existing_global_skills() {
+        let root = std::env::temp_dir().join(format!("dray-skills-{}", uuid::Uuid::new_v4()));
+        let skill_root = root.join(".agents/skills");
+        let path = skill_root.join("github/SKILL.md");
+        let custom = concat!(
+            "---\nname: github\ndescription: My GitHub workflow.\n---\n",
+            "Custom instructions."
+        );
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, custom).unwrap();
+
+        install_bundled_skills_at(&skill_root).unwrap();
+
+        assert_eq!(std::fs::read_to_string(path).unwrap(), custom);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
