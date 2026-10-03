@@ -25,9 +25,9 @@ import ComposerToolbar from "@/components/composer/ComposerToolbar";
 import AppShell from "@/components/layout/AppShell";
 import SessionHeader from "@/components/layout/SessionHeader";
 import {
-  DEFAULT_CYCLE_EFFORTS,
   modelsForKeys,
   nextEffort,
+  resolveCycleEfforts,
 } from "@/components/composer/ModelSelector";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { pickAttachments } from "@/hooks/useAttachments";
@@ -331,7 +331,7 @@ function App() {
               (m.agentModel?.provider === agentModel?.provider && m.agentModel?.id === agentModel?.id)),
         ),
         effort,
-        cycleEfforts ?? DEFAULT_CYCLE_EFFORTS,
+        resolveCycleEfforts(cycleEfforts),
       );
       if (next) handleModelChange(modelId, next, agentModel);
     },

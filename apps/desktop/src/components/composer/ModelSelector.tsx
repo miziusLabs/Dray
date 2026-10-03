@@ -37,14 +37,23 @@ export const EFFORTS: Effort[] = ["off", "none", "minimal", "low", "medium", "hi
 // cycle levels.
 export const DEFAULT_CYCLE_EFFORTS: Effort[] = ["medium", "high", "xhigh", "max"];
 
+/// An unset cycle preserves the original defaults. An explicit empty selection
+/// means every reasoning level is included, so the shortcut cannot be disabled.
+export function resolveCycleEfforts(selectedEfforts: readonly Effort[] | null): readonly Effort[] {
+  if (selectedEfforts === null) return DEFAULT_CYCLE_EFFORTS;
+  return selectedEfforts.length === 0 ? EFFORTS : selectedEfforts;
+}
+
 export { modelKey } from "@/lib/models";
 
 export const modelLabel = (model: Model) => model.label || model.agentModel?.id || model.id;
 
-/// `null` means the catalog is unconfigured, so every discovered model is
-/// shown. Stable keys let an explicit selection survive catalog refreshes.
+/// `null` or an empty selection means every discovered model is shown. Stable
+/// keys let a nonempty selection survive catalog refreshes.
 export function modelsForKeys(models: Model[], selectedKeys: readonly string[] | null): Model[] {
-  return selectedKeys ? models.filter((model) => selectedKeys.includes(modelKey(model))) : models;
+  return selectedKeys?.length
+    ? models.filter((model) => selectedKeys.includes(modelKey(model)))
+    : models;
 }
 
 /// Model and effort completions use the same ranking shape as commands: an

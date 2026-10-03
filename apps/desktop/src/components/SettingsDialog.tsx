@@ -11,12 +11,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import ModelSelector, {
-  DEFAULT_CYCLE_EFFORTS,
   EFFORT_LABELS,
   EFFORTS,
   modelKey,
   modelLabel,
   modelsForKeys,
+  resolveCycleEfforts,
 } from "@/components/composer/ModelSelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -390,7 +390,7 @@ function ModelSelectionRow({
   description: ReactNode;
 }) {
   const id = useId();
-  const resolvedKeys = selectedKeys ?? models.map(modelKey);
+  const resolvedKeys = selectedKeys?.length ? selectedKeys : models.map(modelKey);
   const selectedCount = models.filter((model) => resolvedKeys.includes(modelKey(model))).length;
   const summary =
     selectedCount === models.length
@@ -445,7 +445,7 @@ function CycleEffortsRow({
   onChange: (next: Effort[]) => void;
 }) {
   const id = useId();
-  const resolvedEfforts = selectedEfforts ?? DEFAULT_CYCLE_EFFORTS;
+  const resolvedEfforts = resolveCycleEfforts(selectedEfforts);
   const selectedCount = EFFORTS.filter((effort) => resolvedEfforts.includes(effort)).length;
   const summary =
     selectedCount === EFFORTS.length
