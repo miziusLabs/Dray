@@ -222,9 +222,9 @@ Use `DRAY_CLOUD_IMAGE` to override the Docker image tag. `GITHUB_TOKEN` or an au
 
 `packages/agent/src/lib.rs` owns the persistent request/tool loop, SSE parsing,
 queued follow-ups, interruption checkpoints, prompt caching, and compaction.
-`tools.rs` provides directory listing, processes, questions, read-only research,
-and GitHub retrieval; file discovery and text searches use the terminal (including
-in the finder subagent), not dedicated find/grep tools. `process.rs` cleans up
+`tools.rs` provides directory listing, bounded read-only file discovery/content
+search, research, and GitHub retrieval; the finder has dedicated native `find`
+and `grep` tools instead of shell access. `process.rs` cleans up
 shell descendants. `skills.rs` discovers
 standard SKILL.md files in global and applicable ancestor `.agents/skills`
 directories. The embedded `SYSTEM.md` is the supplied personal Pi system prompt;

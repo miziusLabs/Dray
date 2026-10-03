@@ -112,6 +112,186 @@ pub async fn ls(args: &Value, cwd: &Path) -> Result<String> {
     Ok(names.into_iter().take(1000).collect::<Vec<_>>().join("\n"))
 }
 
+const MAX_SEARCH_ENTRIES: usize = 10_000;
+const MAX_SEARCH_RESULTS: usize = 200;
+const MAX_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_SEARCH_LINE_CHARS: usize = 1000;
+
+fn search_files(path: &Path) -> Result<(Vec<std::path::PathBuf>, bool)> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.is_file() {
+        return Ok((vec![path.to_path_buf()], false));
+    }
+    if !metadata.is_dir() {
+        bail!("Search path is not a file or directory: {}", path.display());
+    }
+
+    let mut directories = vec![path.to_path_buf()];
+    let mut files = Vec::new();
+    let mut entries_seen = 0;
+    let mut truncated = false;
+    while let Some(directory) = directories.pop() {
+        let directory_entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if directory == path => return Err(error.into()),
+            Err(_) => continue,
+        };
+        let mut entries = Vec::new();
+        for entry in directory_entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            entries_seen += 1;
+            if entries_seen > MAX_SEARCH_ENTRIES {
+                truncated = true;
+                break;
+            }
+            entries.push(entry);
+        }
+        entries.sort_by_key(|entry| entry.file_name());
+        let mut child_directories = Vec::new();
+        for entry in entries {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if !matches!(
+                    entry.file_name().to_str(),
+                    Some(".git" | "node_modules" | "target")
+                ) {
+                    child_directories.push(entry.path());
+                }
+            } else if kind.is_file() {
+                files.push(entry.path());
+            }
+        }
+        if truncated {
+            break;
+        }
+        directories.extend(child_directories.into_iter().rev());
+    }
+    files.sort();
+    Ok((files, truncated))
+}
+
+fn search_display_path(path: &Path, cwd: &Path) -> String {
+    path.strip_prefix(cwd).unwrap_or(path).display().to_string()
+}
+
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    let pattern = pattern.chars().collect::<Vec<_>>();
+    let name = name.chars().collect::<Vec<_>>();
+    let mut previous = vec![false; name.len() + 1];
+    previous[0] = true;
+    for token in pattern {
+        let mut current = vec![false; name.len() + 1];
+        if token == '*' {
+            current[0] = previous[0];
+            for index in 1..=name.len() {
+                current[index] = previous[index] || current[index - 1];
+            }
+        } else {
+            for index in 1..=name.len() {
+                current[index] = previous[index - 1] && (token == '?' || token == name[index - 1]);
+            }
+        }
+        previous = current;
+    }
+    previous[name.len()]
+}
+
+fn find(args: &Value, cwd: &Path) -> Result<String> {
+    let path = cwd.join(super::text(args, "path")?);
+    let pattern = args["pattern"].as_str().unwrap_or_default();
+    let (files, mut truncated) = search_files(&path)?;
+    let mut matches = Vec::new();
+    for file in files {
+        let name = file
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_default();
+        if !pattern.is_empty() && !glob_matches(pattern, &name) {
+            continue;
+        }
+        if matches.len() == MAX_SEARCH_RESULTS {
+            truncated = true;
+            break;
+        }
+        matches.push(search_display_path(&file, cwd));
+    }
+    let mut output = if matches.is_empty() {
+        "No files found.".to_string()
+    } else {
+        matches.join("\n")
+    };
+    if truncated {
+        output.push_str(&format!("\nResults limited; refine the path or pattern (maximum {MAX_SEARCH_RESULTS} results and {MAX_SEARCH_ENTRIES} entries)."));
+    }
+    Ok(output)
+}
+
+fn grep(args: &Value, cwd: &Path) -> Result<String> {
+    let pattern = super::text(args, "pattern")?;
+    if pattern.is_empty() {
+        bail!("Search pattern cannot be empty");
+    }
+    let path = cwd.join(super::text(args, "path")?);
+    let case_sensitive = args["case_sensitive"].as_bool().unwrap_or(true);
+    let needle = if case_sensitive {
+        pattern.to_string()
+    } else {
+        pattern.to_lowercase()
+    };
+    let (files, mut truncated) = search_files(&path)?;
+    let mut matches = Vec::new();
+    'files: for file in files {
+        if std::fs::metadata(&file)
+            .is_ok_and(|metadata| metadata.len() > MAX_SEARCH_FILE_BYTES)
+        {
+            continue;
+        }
+        let Ok(contents) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        if contents.as_bytes().contains(&0) {
+            continue;
+        }
+        for (line_number, line) in contents.lines().enumerate() {
+            let is_match = if case_sensitive {
+                line.contains(needle.as_str())
+            } else {
+                line.to_lowercase().contains(needle.as_str())
+            };
+            if is_match {
+                if matches.len() == MAX_SEARCH_RESULTS {
+                    truncated = true;
+                    break 'files;
+                }
+                let mut chars = line.trim_end().chars();
+                let mut excerpt = chars.by_ref().take(MAX_SEARCH_LINE_CHARS).collect::<String>();
+                if chars.next().is_some() {
+                    excerpt.push('…');
+                }
+                matches.push(format!(
+                    "{}:{}:{}",
+                    search_display_path(&file, cwd),
+                    line_number + 1,
+                    excerpt
+                ));
+            }
+        }
+    }
+    let mut output = if matches.is_empty() {
+        "No matches found.".to_string()
+    } else {
+        matches.join("\n")
+    };
+    if truncated {
+        output.push_str(&format!("\nResults limited; refine the path or pattern (maximum {MAX_SEARCH_RESULTS} matches and {MAX_SEARCH_ENTRIES} entries)."));
+    }
+    Ok(output)
+}
+
 async fn github(args: &Value, cwd: &Path) -> Result<String> {
     let endpoint = super::text(args, "endpoint")?;
     if !endpoint.starts_with("repos/")
@@ -310,15 +490,50 @@ mod tests {
     }
 
     #[test]
-    fn finder_uses_terminal_search_and_librarian_keeps_github_only() {
+    fn finder_has_dedicated_search_tools_and_librarian_keeps_github_only() {
         let names = |name| {
             research_tools(name)
                 .into_iter()
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(names("finder"), ["read", "bash", "ls"]);
+        assert_eq!(names("finder"), ["read", "ls", "find", "grep"]);
         assert_eq!(names("libarian"), ["github"]);
+    }
+
+    #[test]
+    fn filename_globs_match_wildcards_without_crossing_directory_names() {
+        assert!(glob_matches("*.rs", "main.rs"));
+        assert!(glob_matches("m?in.rs", "main.rs"));
+        assert!(!glob_matches("*.rs", "main.ts"));
+        assert!(!glob_matches("main.rs", "src/main.rs"));
+    }
+
+    #[tokio::test]
+    async fn finder_find_and_grep_search_files_without_shell_access() {
+        let dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let source = dir.join("src");
+        tokio::fs::create_dir_all(&source).await.unwrap();
+        tokio::fs::write(source.join("main.rs"), "first line\nFinderNeedle here\n")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.join("README.md"), "no match\n")
+            .await
+            .unwrap();
+
+        let found = find(&json!({"path":".","pattern":"*.rs"}), &dir).unwrap();
+        assert!(found.contains("main.rs"));
+        assert!(!found.contains("README.md"));
+
+        let matched = grep(
+            &json!({"path":".","pattern":"finderneedle","case_sensitive":false}),
+            &dir,
+        )
+        .unwrap();
+        assert!(matched.contains("main.rs:2:FinderNeedle here"));
+        assert!(!matched.contains("README.md"));
+
+        tokio::fs::remove_dir_all(dir).await.unwrap();
     }
 
     #[tokio::test]
@@ -375,6 +590,24 @@ fn ls_definition() -> Value {
     )
 }
 
+fn find_definition() -> Value {
+    schema(
+        "find",
+        "Recursively find files under a path. An optional filename glob supports * and ?; common generated directories (.git, node_modules, target) are skipped. Results are bounded.",
+        json!({"path":{"type":"string"},"pattern":{"type":"string"}}),
+        json!(["path"]),
+    )
+}
+
+fn grep_definition() -> Value {
+    schema(
+        "grep",
+        "Search files under a path for literal text and return matching file paths and line numbers. Directories are searched recursively; binary and files larger than 1 MiB are skipped. Results are bounded.",
+        json!({"pattern":{"type":"string"},"path":{"type":"string"},"case_sensitive":{"type":"boolean"}}),
+        json!(["pattern", "path"]),
+    )
+}
+
 fn research_tools(name: &str) -> Vec<Value> {
     if name == "libarian" {
         return vec![github_definition()];
@@ -384,11 +617,15 @@ fn research_tools(name: &str) -> Vec<Value> {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|tool| ["read", "bash"].iter().any(|allowed| tool["name"] == *allowed))
+        .filter(|tool| tool["name"] == "read")
         .cloned()
         .collect::<Vec<_>>();
     if name == "finder" {
-        definitions.push(ls_definition());
+        definitions.extend([
+            ls_definition(),
+            find_definition(),
+            grep_definition(),
+        ]);
     }
     definitions
 }
@@ -449,6 +686,10 @@ pub async fn research(
                     ls(&args, cwd)
                         .await
                         .map(super::ToolOutput::text)
+                } else if name == "find" {
+                    find(&args, cwd).map(super::ToolOutput::text)
+                } else if name == "grep" {
+                    grep(&args, cwd).map(super::ToolOutput::text)
                 } else {
                     super::execute(name, &args, cwd).await
                 }
