@@ -247,23 +247,13 @@ export default function ToolCall({
           {range && <CodeView range={range} />}
 
           {shellDetail && (
-        <div className="rounded-xl bg-surface-raised px-3 py-2.5 text-muted-foreground">
-          <div className="mb-2 text-chat">Shell</div>
-          <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-tool">
-            $ {summary}
-            {shown && `\n\n${shown}`}
-          </pre>
-          <div
-            className={cn(
-              "mt-2 flex items-center justify-end gap-1 text-chat",
-              failed && "text-destructive",
-            )}
-          >
-            {!failed && <Check className="size-4" />}
-            {failed ? "Error" : "Success"}
-          </div>
-        </div>
-      )}
+            <div className="rounded-xl bg-surface-raised px-3 py-2.5 text-muted-foreground">
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-tool">
+                $ {summary}
+                {shown && `\n\n${shown}`}
+              </pre>
+            </div>
+          )}
 
           {body && !shellDetail && (
         <pre className="overflow-x-auto rounded-md bg-surface-raised px-2.5 py-2 font-mono text-tool text-muted-foreground">
