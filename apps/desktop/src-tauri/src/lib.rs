@@ -23,6 +23,7 @@ pub mod agent_updates;
 pub mod analytics;
 pub mod apps;
 pub mod attachments;
+pub mod auto_continue;
 pub mod binpath;
 #[cfg(all(feature = "cef", target_os = "macos"))]
 #[path = "cef/cef.rs"]
@@ -238,6 +239,7 @@ async fn send_msg(
             // own; only the orchestration socket sets either — or hides one.
             None,
             false,
+            None,
             None,
             None,
             &sink,
