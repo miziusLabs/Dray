@@ -19,6 +19,57 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.28.0-beta.1 · 2026-10-12 · notify
+
+### New
+
+- **Sessions keep running when Dray quits.** They run in a background
+  server on this Mac now. Quit offers Quit, or Quit and stop sessions.
+  macOS shows a "Background item added" notice once; it is Dray's
+  server, listed under Login Items.
+- **Reach a server without SSH.** `dray server tunnel on` on a Linux
+  server gives it a public address; add it in Settings → Servers by
+  address and token. A server added over SSH keeps that address and
+  falls back to it when SSH is down.
+- **Share this Mac.** Remote access on the This Mac row in Settings →
+  Servers puts the same address in front of this Mac, so another Mac
+  connects to it.
+- **A Mac with no Dray app can be a server too.** `dray server install`
+  on it, then add it from another Mac. Runs while that user is logged in.
+- **The CLI reads noun-verb now.** `dray session new|ls|send|rename|stop|settle|set-aside`,
+  `dray server install|start|stop|tunnel`, `dray machine add|ls|rm` for
+  the app's server list, `dray share start|stop|ls`. Old spellings
+  still work. Pairs with CLI 0.11.0.
+- **A session continues when its usage limit resets.** A Claude Code
+  turn stopped by the limit sends `continue` a minute after the reset.
+  The notice above the composer says when, and Cancel turns it off.
+- **Links in a transcript open in Dray's browser.** Click opens the page
+  in the Browser view; ⌘-click still leaves for the system browser.
+- **Tabs in the titlebar.** Chat, Diff, Files, browser pages and open
+  files are one draggable tab row: ⌘1–⌘9 by position, ⌘T new tab, ⌘W
+  closes.
+- **Set sessions aside.** Row menu → Set aside; rows untouched for three
+  days go on their own. Any message brings one back.
+- **Drafts have their own sidebar view.** Toggled beside settled;
+  right-click to delete.
+- **GitHub sign-in from the app.** Settings → Accounts has a GitHub row
+  for this Mac and every server.
+
+### Improved
+
+- The default appearance follows the system; ⌘⌥L toggles light and dark.
+- ⌘⇧↑/↓ opens every session it steps to.
+- A ⋯ button on each sidebar row opens its menu.
+- A session tag in a sent prompt is a button that opens that session.
+- A fresh Linux server puts `~/.local/bin` on PATH, so its console finds
+  `dray`, `gh` and `claude`.
+
+### Fixed
+
+- Notification banners no longer pin the CPU; each times out after a
+  minute.
+- Switching from the Browser tab to Chat no longer blanks the page area.
+
 ## 0.27.0-beta.2 · 2026-10-07
 
 ### New
