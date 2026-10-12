@@ -180,6 +180,9 @@ async fn send_msg(
     branch: Option<&str>,
     use_worktree: bool,
     worktree_name: Option<&str>,
+    // A draft `dray draft new --base` saved, opened and sent from the
+    // composer. `None` for everything else the composer sends.
+    base_ref: Option<&str>,
     is_new_session: bool,
     sink: Sink,
 ) -> Result<SendOutcome, Fail> {
@@ -198,6 +201,13 @@ async fn send_msg(
     // the day active with nobody in the room. A Tauri command is reachable from
     // the webview alone, so getting here means somebody pressed send.
     analytics::track_active_day();
+
+    // A draft keeps its base as written, a session id among the spellings, so
+    // it is resolved here the way `dray draft start` resolves it.
+    let base_ref = match base_ref {
+        Some(base) if is_new_session => Some(orchestration::resolve_base(base, cwd).await?),
+        _ => None,
+    };
 
     Ok(manager()
         .send_msg(
@@ -218,15 +228,17 @@ async fn send_msg(
             branch,
             use_worktree,
             worktree_name,
-            // The composer offers no base ref: a worktree session created there
-            // is one the reader is starting fresh, and the picker already hides
-            // the branch list in worktree mode because `-w` would not honour it.
-            None,
+            // The composer offers no base ref of its own: a worktree session
+            // created there is one the reader is starting fresh, and the picker
+            // hides the branch list in worktree mode because `-w` would not
+            // honour it. Only a draft carrying one hands it through.
+            base_ref.as_deref(),
             is_new_session,
             // The composer never has a parent, and its prompts are the user's
             // own; only the orchestration socket sets either — or hides one.
             None,
             false,
+            None,
             None,
             &sink,
         )

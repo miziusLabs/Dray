@@ -1,5 +1,5 @@
-//! `dray setup`, `dray service` and `dray serve`: what makes a machine a Dray
-//! server. See apps/desktop/SETUP-PLAN.md.
+//! `dray server`: what makes a machine a Dray server. `setup`, `service` and
+//! `serve` are its spellings before, still answered. See apps/desktop/SETUP-PLAN.md.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -11,12 +11,47 @@ use std::process::{Command, Stdio};
 use clap::{Args, Subcommand};
 
 #[derive(Args)]
-pub struct Setup {
+pub struct Install {
     /// Install these without asking, which is how a run with no terminal
     /// installs anything: git, gh, claude_code, codex, pi, fx, grok, and on
     /// Linux browser, ffmpeg and cloudflared.
-    #[arg(long, value_delimiter = ',', value_name = "TOOL")]
-    install: Vec<String>,
+    #[arg(long, alias = "install", value_delimiter = ',', value_name = "TOOL")]
+    tools: Vec<String>,
+}
+
+/// Caddy's split: `run` in this terminal, `start` in the background.
+#[derive(Subcommand)]
+pub enum ServerCommand {
+    /// Install what this machine is missing to run Dray, then start the
+    /// server in the background.
+    Install(Install),
+    /// Run the server in the background, surviving logout and reboot. On a
+    /// Mac, only where the Dray app is not installed.
+    Start,
+    /// Run the server in this terminal. On a Mac, only where the Dray app is
+    /// not installed.
+    Run(Run),
+    /// Stop the server and remove it from the background.
+    Stop,
+    /// Show whether the server is running, and its tunnel address.
+    Status,
+    /// Keep a public address in front of the server, through a Cloudflare
+    /// quick tunnel, or take it down. Linux only.
+    Tunnel {
+        #[arg(value_enum)]
+        state: OnOff,
+    },
+}
+
+pub fn server(command: ServerCommand) -> Result<(), String> {
+    match command {
+        ServerCommand::Install(args) => setup(args),
+        ServerCommand::Start => service(ServiceCommand::Start),
+        ServerCommand::Run(args) => serve(args),
+        ServerCommand::Stop => service(ServiceCommand::Uninstall),
+        ServerCommand::Status => service(ServiceCommand::Status),
+        ServerCommand::Tunnel { state } => service(ServiceCommand::Tunnel { state }),
+    }
 }
 
 #[derive(Subcommand)]
@@ -49,7 +84,7 @@ pub struct Tunnel {
 }
 
 #[derive(Args)]
-pub struct Serve {
+pub struct Run {
     /// Passed to dray-serve, such as --port.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
@@ -181,9 +216,9 @@ fn find(bin: &str) -> Option<PathBuf> {
         .find(|p| p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
 }
 
-pub fn setup(args: Setup) -> Result<(), String> {
+pub fn setup(args: Install) -> Result<(), String> {
     let all = tools();
-    if let Some(bad) = args.install.iter().find(|n| !all.iter().any(|t| t.id == *n)) {
+    if let Some(bad) = args.tools.iter().find(|n| !all.iter().any(|t| t.id == *n)) {
         let names: Vec<_> = all.iter().map(|t| t.id).collect();
         return Err(format!("unknown tool {bad}; pick from {}", names.join(", ")));
     }
@@ -196,8 +231,8 @@ pub fn setup(args: Setup) -> Result<(), String> {
     }
 
     let tty = OpenOptions::new().read(true).write(true).open("/dev/tty").ok();
-    let picked: Vec<&Tool> = if missing.is_empty() || !args.install.is_empty() {
-        missing.into_iter().filter(|t| args.install.iter().any(|n| n == t.id)).collect()
+    let picked: Vec<&Tool> = if missing.is_empty() || !args.tools.is_empty() {
+        missing.into_iter().filter(|t| args.tools.iter().any(|n| n == t.id)).collect()
     } else if let Some(tty) = &tty {
         let items: Vec<(String, bool)> = missing
             .iter()
@@ -205,7 +240,7 @@ pub fn setup(args: Setup) -> Result<(), String> {
                 "git" => (format!("git {DIM}(Dray needs it){RESET}"), true),
                 "browser" => (format!("Browser for agents {DIM}(system libraries for dray browser){RESET}"), false),
                 "ffmpeg" => (format!("ffmpeg {DIM}(dray browser record){RESET}"), false),
-                "cloudflared" => (format!("cloudflared {DIM}(public links to dev servers, dray tunnel){RESET}"), false),
+                "cloudflared" => (format!("cloudflared {DIM}(public links: dray share, dray server tunnel){RESET}"), false),
                 _ => (t.name.to_string(), false),
             })
             .collect();
@@ -214,7 +249,7 @@ pub fn setup(args: Setup) -> Result<(), String> {
     } else {
         let names: Vec<_> = missing.iter().map(|t| t.id).collect();
         warn(&format!(
-            "Not installed: {}\n{BAR}  {DIM}No terminal to ask in. Run dray setup, or name them with --install{RESET}",
+            "Not installed: {}\n{BAR}  {DIM}No terminal to ask in. Run dray server install, or name them with --tools{RESET}",
             names.join(", ")
         ));
         Vec::new()
@@ -431,7 +466,7 @@ fn output(cmd: &str, args: &[&str]) -> Option<String> {
     (out.status.success() && !text.is_empty()).then_some(text)
 }
 
-pub fn serve(args: Serve) -> Result<(), String> {
+pub fn serve(args: Run) -> Result<(), String> {
     may_serve()?;
     let bin = beside("dray-serve")?;
     let err = Command::new(&bin).args(args.args).exec();
@@ -595,7 +630,7 @@ fn tunnel_off() -> Result<(), String> {
     Ok(())
 }
 
-const NO_CLOUDFLARED: &str = "cloudflared is not installed. dray setup offers it: dray setup --install cloudflared";
+const NO_CLOUDFLARED: &str = "cloudflared is not installed: dray server install --tools cloudflared";
 
 /// The Dray directory, `DRAY_HOME` where set, as the server reads it.
 fn dray_home() -> Result<PathBuf, String> {
@@ -606,7 +641,7 @@ fn dray_home() -> Result<PathBuf, String> {
         .ok_or_else(|| "could not resolve your home directory".into())
 }
 
-/// cloudflared where `dray setup` or a package manager put it, or where an
+/// cloudflared where `dray server install` or a package manager put it, or where an
 /// earlier `dray share` downloaded it.
 fn cloudflared() -> Option<PathBuf> {
     let downloaded = dray_home().ok()?.join("cloudflared").join(dray_proto::CLOUDFLARED_VERSION).join("cloudflared");
@@ -624,7 +659,7 @@ fn serve_token() -> Result<String, String> {
         .ok()
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
-        .ok_or_else(|| "the server has no token yet; start it first: dray service start".into())
+        .ok_or_else(|| "the server has no token yet; start it first: dray server start".into())
 }
 
 /// What the reader reads off a terminal: the address, and the line Add server
@@ -646,14 +681,15 @@ fn connect_text(url: &str) -> Result<String, String> {
 
 /// `dray tunnel`: a Cloudflare quick tunnel in front of this machine's
 /// server, in the foreground. Writes the address where the app's SSH connect
-/// reads it, and removes it once the tunnel is down.
+/// reads it, and removes it once the tunnel is down. Hidden from `--help`:
+/// what runs it is the unit `dray server tunnel on` writes.
 pub fn tunnel(args: Tunnel) -> Result<(), String> {
     use std::io::{BufRead, BufReader};
     use std::sync::atomic::Ordering;
 
     serve_token()?;
     if std::net::TcpStream::connect(("127.0.0.1", args.port)).is_err() {
-        return Err(format!("no Dray server on port {}. Start it first: dray service start", args.port));
+        return Err(format!("no Dray server on port {}. Start it first: dray server start", args.port));
     }
     let exe = cloudflared().ok_or(NO_CLOUDFLARED)?;
     let mut child = Command::new(exe)
@@ -782,7 +818,7 @@ fn service_start() -> Result<String, String> {
     }
     if !systemctl(true, &["show-environment"]) {
         return Err("No systemd user session here, so nothing can keep the server running. \
-                    Start it yourself under tmux or nohup: dray serve"
+                    Start it yourself under tmux or nohup: dray server run"
             .into());
     }
     let serve = beside("dray-serve")?;
@@ -805,7 +841,7 @@ fn service_start() -> Result<String, String> {
         return Err("The server did not stay up. See why: journalctl --user -u dray -n 20".into());
     }
 
-    let mut note = String::from("dray service status");
+    let mut note = String::from("dray server status");
     if !linger() {
         let user = output("id", &["-un"]).unwrap_or_default();
         note += &format!(
@@ -834,7 +870,7 @@ pub fn installed_restart() -> Option<String> {
 }
 
 /// On a Mac, a reload rather than `kickstart -k`, which restarts the job as
-/// loaded and so would miss a plist `dray service start` rewrote since.
+/// loaded and so would miss a plist `dray server start` rewrote since.
 fn restart_command() -> String {
     if MAC {
         let plist = agent_plist_path().map(|p| sh_quote(&p.display().to_string())).unwrap_or_default();
@@ -948,7 +984,7 @@ fn agent_start() -> Result<String, String> {
         if !ok {
             return Err(format!(
                 "launchd would not start the server: {said}\n{BAR}  It runs only while you are logged in at \
-                 this Mac. Log in there or turn on automatic login, or run it yourself under tmux: dray serve"
+                 this Mac. Log in there or turn on automatic login, or run it yourself under tmux: dray server run"
             ));
         }
     }
@@ -957,14 +993,14 @@ fn agent_start() -> Result<String, String> {
     if agent_pid().is_none() {
         return Err(format!("The server did not stay up. See why: tail -n 20 {}", log.display()));
     }
-    let mut note = String::from("dray service status");
+    let mut note = String::from("dray server status");
     if was_running {
         note += &already_running();
     }
     Ok(note)
 }
 
-/// `dray service` on a Mac. Uninstall is let through with the app present:
+/// `dray server` on a Mac. Uninstall is let through with the app present:
 /// it is how a server set up before the app arrived hands over to it.
 fn agent_service(command: ServiceCommand) -> Result<(), String> {
     match command {
@@ -981,7 +1017,7 @@ fn agent_service(command: ServiceCommand) -> Result<(), String> {
             }
         }
         ServiceCommand::Tunnel { .. } => {
-            return Err("dray service tunnel runs on Linux for now. On a Mac, run dray tunnel under tmux.".into());
+            return Err("dray server tunnel runs on Linux for now. On a Mac, run dray tunnel under tmux.".into());
         }
         ServiceCommand::Uninstall => {
             let path = agent_plist_path()?;
