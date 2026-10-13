@@ -1,4 +1,5 @@
 import { defineConfig } from "blume";
+import { posthog, script } from "blume/analytics";
 
 export default defineConfig({
   title: "Dray Docs",
@@ -18,6 +19,24 @@ export default defineConfig({
   // With no analytics adapter a rating goes nowhere, so asking for one is a
   // button that does nothing.
   feedback: false,
+  // The site's PostHog project and settings (apps/web instrumentation-client.ts):
+  // cookieless, no autocapture, no recording. `/ingest` is the site's own
+  // rewrite, reachable because the docs are served through drayhq.com.
+  // `source` is registered through the snippet's queue, which replays before
+  // the first pageview fires, so every docs event can be told from the site's.
+  analytics: [
+    posthog({
+      key: "phc_kLtmvfyx2NtnooMrHzqLhxmzRTHxbPEnfKmxbbTNkDdM",
+      host: "/ingest",
+      ui_host: "https://us.posthog.com",
+      persistence: "memory",
+      autocapture: false,
+      disable_session_recording: true,
+      capture_pageview: "history_change",
+      person_profiles: "identified_only",
+    }),
+    script({ content: 'posthog.register({ source: "docs" });' }),
+  ],
   github: { owner: "monorepo-labs", repo: "dray", dir: "apps/docs" },
   footer: {
     copyright: `© ${new Date().getFullYear()} Dray`,
