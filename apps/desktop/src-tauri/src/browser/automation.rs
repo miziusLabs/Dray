@@ -251,6 +251,54 @@ pub fn delete_recordings(session: &str) {
     }
 }
 
+/// What a condemned profile is renamed to before its removal.
+const DISCARDED: &str = ".discarded-";
+
+/// Moves a profile out of its session's name at once, then removes it on a
+/// thread of its own. The rename is what makes it safe: a profile the
+/// session makes again a moment later is a new directory nothing is
+/// deleting. And a profile runs to hundreds of megabytes, which is no
+/// removal to hold the caller on.
+fn discard(dir: std::path::PathBuf) {
+    let Some(name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else { return };
+    // Unique, or a second discard of one session collides with a first still
+    // being removed, and the rename fails with nothing to say so.
+    let gone = dir.with_file_name(format!("{DISCARDED}{name}-{}", uuid::Uuid::new_v4()));
+    if std::fs::rename(&dir, &gone).is_ok() {
+        std::thread::spawn(move || {
+            let _ = std::fs::remove_dir_all(gone);
+        });
+    }
+}
+
+/// Removes a session's browser profile — cookies, cache, history — for settle
+/// and delete. Best effort. Chromium may still hold files open while the
+/// tabs close; unlinking them is fine on macOS and Linux, and a write landing
+/// after finds no directory to recreate.
+pub fn delete_profile(session: &str) {
+    if uuid::Uuid::parse_str(session).is_ok() {
+        discard(browser_dir().join(session));
+    }
+}
+
+/// Removes the profile of every session not in `live`, for the launch sweep,
+/// along with any discard a quit interrupted. Only uuid-named directories are
+/// judged, so `default`, `shots` and `recordings` are never touched. Returns
+/// once the renames are done, so the caller can start serving.
+pub fn sweep_profiles(live: &std::collections::HashSet<String>) {
+    let Ok(entries) = std::fs::read_dir(browser_dir()) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(DISCARDED) {
+            std::thread::spawn(move || {
+                let _ = std::fs::remove_dir_all(entry.path());
+            });
+        } else if uuid::Uuid::parse_str(&name).is_ok() && !live.contains(&name) {
+            discard(entry.path());
+        }
+    }
+}
+
 /// Called from `on_console_message` for every line a page logs.
 pub(super) fn log(tab: i32, error: bool, text: String) {
     let mut guard = CONSOLE.lock().unwrap();

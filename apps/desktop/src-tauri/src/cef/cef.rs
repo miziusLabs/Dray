@@ -26,7 +26,7 @@ use objc2::{msg_send, sel};
 use objc2_app_kit::{NSApplication, NSEvent, NSView};
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 use serde::Serialize;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Mutex, OnceLock};
@@ -35,6 +35,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 #[path = "../browser/automation.rs"]
 pub mod automation;
+#[path = "history.rs"]
+mod history;
 
 const FRAMEWORK: &str = "Chromium Embedded Framework.framework";
 const HELPER: &str = "Dray Helper.app/Contents/MacOS/Dray Helper";
@@ -48,6 +50,15 @@ static TABS: Mutex<Vec<Tab>> = Mutex::new(Vec::new());
 /// Session → its active tab id.
 static ACTIVE: Mutex<Option<HashMap<String, i32>>> = Mutex::new(None);
 static CONTEXTS: Mutex<Option<HashMap<String, RequestContext>>> = Mutex::new(None);
+/// Sessions settled or deleted while their browsers were still closing, so
+/// the last close removes the profile again (`purge_later`).
+static PURGING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+/// Sessions whose `purge_later` has not fired yet, by the token of the
+/// newest one, so an older timer cannot spend a newer purge's turn early.
+static PURGE_DUE: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
+static PURGE_TOKEN: AtomicU64 = AtomicU64::new(0);
+/// Long enough for Chromium's closing writes to land.
+const PURGE_AFTER: Duration = Duration::from_secs(5);
 /// Which session is on screen and where. `None` shows nothing.
 static LAYOUT: Mutex<Option<(String, Layout)>> = Mutex::new(None);
 /// Tab ids. Not CEF's `identifier()`, which a woken tab would come back
@@ -595,6 +606,13 @@ fn session_of(id: i32) -> Option<String> {
     TABS.lock().unwrap().iter().find(|t| t.id == id).map(|t| t.session.clone())
 }
 
+/// The tab's session and the address it is on, for the history record. None
+/// for a closing tab: its session's history was just forgotten, and a late
+/// callback writing to it would load the old list straight back.
+fn history_target(id: i32) -> Option<(String, String)> {
+    TABS.lock().unwrap().iter().find(|t| t.id == id && !t.closing).map(|t| (t.session.clone(), t.url.clone()))
+}
+
 /// A handle to call CEF on, with the lock already released. None for a tab
 /// being discarded, whose browser is on its way out.
 fn browser_of(id: i32) -> Option<Browser> {
@@ -616,6 +634,7 @@ fn context_for(session: &str) -> Option<RequestContext> {
         ..Default::default()
     };
     let ctx = request_context_create_context(Some(&settings), None)?;
+    PURGE_DUE.lock().unwrap().remove(session);
     map.insert(session.to_string(), ctx.clone());
     Some(ctx)
 }
@@ -1135,9 +1154,33 @@ fn settle(session: &str) {
         if let Some(map) = CONTEXTS.lock().unwrap().as_mut() {
             map.remove(session);
         }
+        if PURGING.lock().unwrap().remove(session) {
+            purge_later(session.to_string());
+        }
     }
     apply_layout();
     publish(session);
+}
+
+/// Removes a settled session's profile a second time, once its browsers are
+/// gone. The server removes it at the settle, but Chromium writes into the
+/// profile as its tabs close — measured: `Preferences`, `Cache` and the
+/// network state came back at the old path — so a directory reappears with
+/// the old site settings in it. Unless the session made a profile again
+/// meanwhile (`context_for` takes it out of `PURGE_DUE`), which makes the
+/// directory its new one — whether or not a tab of it is still open.
+fn purge_later(session: String) {
+    let token = PURGE_TOKEN.fetch_add(1, Ordering::Relaxed);
+    PURGE_DUE.lock().unwrap().insert(session.clone(), token);
+    let _ = std::thread::Builder::new().name("cef-purge".into()).spawn(move || {
+        std::thread::sleep(PURGE_AFTER);
+        let mut due = PURGE_DUE.lock().unwrap();
+        if due.get(&session) == Some(&token) {
+            due.remove(&session);
+            drop(due);
+            automation::delete_profile(&session);
+        }
+    });
 }
 
 fn update_tab(id: i32, f: impl FnOnce(&mut Tab)) {
@@ -1193,15 +1236,24 @@ wrap_display_handler! {
                 return;
             }
             let url = url.map(CefString::to_string).unwrap_or_default();
+            if let Some((session, _)) = history_target(self.tab) {
+                history::visit(&session, &url);
+            }
             update_tab(self.tab, |t| t.url = url);
         }
         fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
             let title = title.map(CefString::to_string).unwrap_or_default();
+            if let Some((session, url)) = history_target(self.tab) {
+                history::describe(&session, &url, Some(&title), None);
+            }
             update_tab(self.tab, |t| t.title = title);
         }
 
         fn on_favicon_urlchange(&self, _browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
             let first = icon_urls.and_then(first_string).unwrap_or_default();
+            if let Some((session, url)) = history_target(self.tab) {
+                history::describe(&session, &url, None, Some(&first));
+            }
             update_tab(self.tab, |t| t.favicon = first);
         }
 
@@ -1881,6 +1933,12 @@ pub fn browser_tabs(session_id: String) -> Vec<TabInfo> {
     tabs_of(&session_id)
 }
 
+/// The pages this session's browser visited, newest first.
+#[tauri::command]
+pub fn browser_history(session_id: String) -> Vec<history::Visit> {
+    history::list(&session_id)
+}
+
 #[tauri::command]
 pub fn browser_activate(session_id: String, id: i32) -> Result<(), String> {
     activate(session_id, id, true)
@@ -2027,9 +2085,10 @@ pub fn browser_pick(session_id: String, start: bool) -> Result<(), String> {
     })
 }
 
-/// Closes every tab a session holds, for session delete.
+/// Closes every tab a session holds, for settle and delete.
 pub fn close_session(session_id: &str) {
     automation::drop_recording(session_id);
+    history::forget(session_id);
     let session_id = session_id.to_string();
     let _ = on_main(move || {
         let browsers: Vec<Browser> = {
@@ -2045,6 +2104,8 @@ pub fn close_session(session_id: &str) {
         if browsers.is_empty() {
             set_active(&session_id, None);
             publish(&session_id);
+        } else {
+            PURGING.lock().unwrap().insert(session_id.clone());
         }
         for host in browsers.iter().filter_map(|b| b.host()) {
             host.close_browser(1);
