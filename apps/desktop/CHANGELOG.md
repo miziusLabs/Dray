@@ -19,6 +19,30 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.28.0-beta.2 · 2026-10-13
+
+### New
+
+- **Browser history.** Each session remembers the pages its browser
+  visited: the empty tab lists them and the address bar suggests
+  matches.
+
+### Improved
+
+- A long running turn folds its older rows behind a live "N tool calls"
+  line and keeps the newest five on screen.
+- The Changes tab keeps the last diff when a turn only answers a
+  question, and reads "Latest changes".
+- The quit dialog puts Quit first; Quit completely is a quieter link,
+  so ⌘Q then ⏎ quits and leaves sessions running.
+- The side panel always has its Browser tab.
+- Settling or deleting a session removes its browser profile.
+- Chromium updated to 154.0.8037.98.
+
+### Fixed
+
+- The thinking orb no longer shrinks beside a long line.
+
 ## 0.28.0-beta.1 · 2026-10-12 · notify
 
 ### New
