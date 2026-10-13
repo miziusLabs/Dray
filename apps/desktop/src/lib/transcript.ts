@@ -292,11 +292,17 @@ const RENDERS = new Set([
 /// Whether an item draws a row. A group always does — it is built from tool
 /// calls, which always draw.
 ///
-/// Module-private: the working indicator used to gate on this to mean "nothing
-/// has happened in this turn yet", which only ever described a turn's *first*
-/// wait. It reads `model_request_started` instead now.
-function rendersRow(item: WorkItem): boolean {
-  return isToolGroup(item) || RENDERS.has(item.payload.type);
+/// Not a gate for the working indicator: that once read this as "nothing has
+/// happened in this turn yet", which only ever described a turn's *first* wait.
+/// It reads `model_request_started` instead now.
+export function rendersRow(item: WorkItem): boolean {
+  if (isToolGroup(item)) return true;
+  const { payload } = item;
+  // Reasoning is in `RENDERS` by type, but `Reasoning` draws nothing for an
+  // encrypted or empty block — which Claude Code and Codex both send — so by
+  // content it is no row: it must not split a tool run or take a live slot.
+  if (payload.type === "reasoning") return !payload.encrypted && payload.text.trim() !== "";
+  return RENDERS.has(payload.type);
 }
 
 /// `seq` is the ordering key — most Claude Code events carry no usable `ts`.
