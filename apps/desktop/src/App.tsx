@@ -1502,7 +1502,7 @@ function App() {
   const modelTakesImages =
     models.find((m) => m.id === modelId)?.acceptsImages ?? true;
 
-  const { baseline, head } = useMemo(
+  const { baseline, head, previous } = useMemo(
     () => changeRange(selectedSession?.events ?? []),
     [selectedSession?.events],
   );
@@ -1581,6 +1581,26 @@ function App() {
     panelShown && activeTab === "changes",
     busy,
   );
+  // A turn that has written nothing yet shows the last turn that did, so
+  // sending a question doesn't blank the diff it is asking about — nor does the
+  // turn's end, whose first paint is a live preview that may predate the write.
+  // A finished turn not read at all waits instead: standing the previous diff
+  // in there would flash a turn the reader didn't ask about on a cold open.
+  const currentEmpty = head
+    ? changesData.changes?.files.length === 0
+    : !changesData.changes?.files.length;
+  // Frozen, so this reads once and is cached.
+  const previousData = useChanges(
+    selectedSession?.cwd ?? "",
+    previous?.baseline ?? null,
+    previous?.head ?? null,
+    turnRevision,
+    panelShown && activeTab === "changes" && currentEmpty,
+    false,
+  );
+  // A failed read keeps its own range, so its error isn't hidden.
+  const shownChanges =
+    previousData.changes && !changesData.error && currentEmpty ? previousData : changesData;
 
   // One button, so the tab decides what it re-reads. Subagents has nothing to
   // fetch, so it gets none rather than a button that does nothing.
@@ -2881,7 +2901,7 @@ function App() {
                 cwd={shownSession.cwd}
                 baseline={baseline}
                 onOpenRepo={() => setViewTab("changes")}
-                {...changesData}
+                {...shownChanges}
               />
               </MountOnce>
             </TabBody>

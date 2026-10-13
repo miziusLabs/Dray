@@ -65,15 +65,59 @@ describe("changeRange", () => {
     // the head is the tree the turn finished on, not the tree as of the read.
     const events = [prompt("aaa"), noise(), turnEnd("hhh")];
 
-    expect(changeRange(events)).toEqual({ baseline: "aaa", head: "hhh" });
+    expect(changeRange(events)).toEqual({ baseline: "aaa", head: "hhh", previous: null });
   });
 
   it("leaves the head open while the turn is still running", () => {
     // The previous turn's close sits *before* the newest prompt, so it must
-    // not cap a turn it didn't end — a running turn diffs against "now".
+    // not cap a turn it didn't end — a running turn diffs against "now". That
+    // turn rides along for the panel to show until this one writes something.
     const events = [prompt("aaa"), turnEnd("old"), prompt("bbb"), noise()];
 
-    expect(changeRange(events)).toEqual({ baseline: "bbb", head: null });
+    expect(changeRange(events)).toEqual({
+      baseline: "bbb",
+      head: null,
+      previous: { baseline: "aaa", head: "old" },
+    });
+  });
+
+  it("skips a finished turn that changed nothing", () => {
+    // Head equal to baseline is the same tree: a question about the code
+    // keeps the diff it was asking about.
+    const events = [prompt("aaa"), turnEnd("hhh"), prompt("bbb"), turnEnd("bbb")];
+
+    expect(changeRange(events)).toEqual({ baseline: "aaa", head: "hhh", previous: null });
+  });
+
+  it("looks past unchanged turns for the running turn's stand-in", () => {
+    const events = [prompt("aaa"), turnEnd("h1"), prompt("bbb"), turnEnd("bbb"), prompt("ccc")];
+
+    expect(changeRange(events).previous).toEqual({ baseline: "aaa", head: "h1" });
+  });
+
+  it("keeps the previous turn beside a finished one", () => {
+    // Its first paint is a live preview that may predate the write, so the
+    // panel needs something to stand in until the frozen read lands.
+    const events = [prompt("aaa"), turnEnd("h1"), prompt("bbb"), turnEnd("h2")];
+
+    expect(changeRange(events)).toEqual({
+      baseline: "bbb",
+      head: "h2",
+      previous: { baseline: "aaa", head: "h1" },
+    });
+  });
+
+  it("never offers a turn left open as the previous one", () => {
+    const events = [prompt("aaa"), turnEnd("h1"), prompt("bbb"), prompt("ccc"), turnEnd("h3")];
+
+    expect(changeRange(events).previous).toEqual({ baseline: "aaa", head: "h1" });
+  });
+
+  it("keeps the newest turn when none changed anything", () => {
+    // Otherwise the panel would claim there is no snapshot at all.
+    const events = [prompt("aaa"), turnEnd("aaa"), prompt("bbb"), turnEnd("bbb")];
+
+    expect(changeRange(events)).toEqual({ baseline: "bbb", head: "bbb", previous: null });
   });
 
   it("takes the newest close, so a report-back turn supersedes the prompt's own", () => {
@@ -101,8 +145,9 @@ describe("changeRange", () => {
   it("is null when nothing recorded a snapshot", () => {
     // The ordinary state of a session in a plain directory, and of every
     // prompt logged before the field existed. Not an error.
-    expect(changeRange([prompt(null), noise()])).toEqual({ baseline: null, head: null });
-    expect(changeRange([])).toEqual({ baseline: null, head: null });
+    const none = { baseline: null, head: null, previous: null };
+    expect(changeRange([prompt(null), noise()])).toEqual(none);
+    expect(changeRange([])).toEqual(none);
   });
 });
 
