@@ -483,6 +483,7 @@ const MODES: { id: ThemeMode; label: string }[] = [
 /// what is rendering.
 function ModeRow() {
   const id = useId();
+  useShortcutOverrides();
   const { theme, mode: chosen, setMode } = useTheme();
   const available = hasLightMode(theme);
   // What is drawn: a dark-only theme shows Dark selected, while the reader's own
@@ -494,6 +495,11 @@ function ModeRow() {
       id={id}
       asGroup
       label="Mode"
+      // Hidden where the chord does nothing: a dark-only theme has no light to flip to.
+      trailing={
+        available &&
+        chordFor("mode.toggle") && <ShortcutKeys ids={["mode.toggle"]} />
+      }
       // On a dark-only theme the control gives way to the one fact, rather than
       // three disabled segments under a sentence explaining them. The row stays,
       // so the reader still learns why there is no light here.
@@ -1263,8 +1269,8 @@ function SettingRow({
   description?: ReactNode;
   asGroup?: boolean;
   stacked?: boolean;
-  /// Drawn at the far end of a stacked row's label line — a hint about the
-  /// control, such as the chord that cycles it.
+  /// A hint about the control, such as the chord that cycles it: at the far end
+  /// of a stacked row's label line, beside the control otherwise.
   trailing?: ReactNode;
   children: ReactNode;
 }) {
@@ -1302,7 +1308,10 @@ function SettingRow({
         {labelEl}
         {descriptionEl}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="flex shrink-0 items-center gap-4">
+        {trailing}
+        {children}
+      </div>
     </div>
   );
 }
