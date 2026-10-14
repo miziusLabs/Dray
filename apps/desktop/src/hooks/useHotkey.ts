@@ -1,6 +1,15 @@
 import { useEffect, useRef } from "react";
 
 import { useChord } from "@/hooks/useShortcuts";
+import {
+  DIGIT_CHORDS,
+  type DigitChordId,
+  digitSlot,
+  heldMods,
+  modsFor,
+  registryHolder,
+  sameMods,
+} from "@/lib/digitChords";
 import { IS_MAC } from "@/lib/platform";
 import type { ShortcutId } from "@/lib/shortcuts";
 
@@ -51,6 +60,9 @@ let suspended = false;
 export function setHotkeysSuspended(on: boolean) {
   suspended = on;
 }
+
+/// For a listener outside `useHotkey` that must go quiet under the same page.
+export const hotkeysSuspended = () => suspended;
 
 /// Stands in for a row the reader unbound. The empty key matches no keystroke,
 /// and `useHotkey` registers no listener at all for it.
@@ -117,6 +129,37 @@ export function useHotkey(
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [id, key, meta, shift, alt, code, enabled, platformOnly, skipInTextField]);
+}
+
+/// Binds a modifier set over a run of digits — one listener for a whole row of
+/// `DIGIT_CHORDS` — and hands the handler the 0-based slot pressed. The set is
+/// read at the keystroke, so a rebinding needs no re-registration.
+export function useDigitHotkey(
+  id: DigitChordId,
+  handler: (slot: number) => void,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
+  useEffect(() => {
+    if (!enabled) return;
+    const slots = DIGIT_CHORDS.find((c) => c.id === id)!.slots;
+    // Capture on `window`, ahead of every `useHotkey`: those take ⌃ as ⌘, so a
+    // row on ⌃ would otherwise fire beside whatever ⌘ chord shares its digit.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (suspended) return;
+      const slot = digitSlot(e.code);
+      const mods = modsFor(id);
+      if (slot === null || slot >= slots || !sameMods(heldMods(e), mods)) return;
+      if (registryHolder(mods, slot)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handlerRef.current(slot);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [id, enabled]);
 }
 
 /// Somewhere a caret can be, and therefore somewhere the platform's own text
