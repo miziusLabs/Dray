@@ -19,6 +19,50 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.28.0-beta.3 · 2026-10-15 · notify
+
+### New
+
+- **Update servers from the app.** A row in Settings → Servers says
+  "Update available" when a newer release is out on that server's
+  channel. Update installs it, and the server restarts once its agents
+  finish. The ⋯ menu has Check for updates and Join beta. Restart to
+  update offers to update your servers too. A server on a CLI older than
+  0.12 needs one `dray update` by hand first. Pairs with CLI
+  0.12.0-beta.1.
+- **The sidebar groups sessions by stage.** Needs you, unread and idle
+  first, then open PRs, running checks and merged, across every
+  project.
+- **Jump to a session with ⌃ and a digit.** Hold ⌃ and the first ten
+  rows show 1–0. Change the modifier in Settings → Shortcuts, which now
+  has a search field.
+- **Swipe to switch projects.** A two-finger swipe over the sidebar
+  steps the project filter. Over the side panel it steps the tabs.
+- **Attachments on remote sessions.** Files upload to the server as you
+  add them, up to 100MB each.
+- **See when the agent drives a browser tab.** The tab glows and its
+  icon says what the agent is doing.
+
+### Improved
+
+- The `dray` CLI follows the app's update channel when the app updates.
+  Leaving beta never downgrades it.
+- A remote server that is down shows Reconnecting… above the composer,
+  with Try again. The transcript loads once the server is back. A
+  connection that goes silent is dropped after 45s and retried.
+- A localhost link from a remote session opens the server's port,
+  forwarded over SSH.
+- Starting a task in another project moves the sidebar's filter to it.
+- A remote project dragged in Settings → Spaces stays where you drop it.
+- Settings → Appearance shows the light/dark chord.
+
+### Fixed
+
+- Typing in the composer could crash the app and leave the window
+  empty. It no longer does, and a crash now shows a Reload button.
+- A video player no longer appears for a path that is not a recording.
+- Leaving the drafts view closes the open draft.
+
 ## 0.28.0-beta.2 · 2026-10-13
 
 ### New
