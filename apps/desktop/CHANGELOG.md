@@ -19,6 +19,25 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.28.1 · 2026-10-16
+
+### Improved
+
+- **Public addresses stay the same across restarts.** Remote access and
+  share links now run through OpenTunnel, so a server keeps its address
+  when it restarts, and the relay sees only encrypted traffic. Pairs
+  with CLI 0.12.1.
+- **Issues page fits its rows to the list.** Opening the details pane no
+  longer crushes titles. ↑/↓ step through issues, Return opens one, and
+  ⌘E toggles the pane.
+- **Sessions on a merged PR stay under Merged** unless they need you.
+
+### Fixed
+
+- Shared Next.js dev servers load their JavaScript.
+- Switching projects quickly with the swipe or the chords no longer
+  lags.
+
 ## 0.28.0 · 2026-10-16 · notify
 
 ### New
