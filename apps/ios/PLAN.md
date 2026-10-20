@@ -23,8 +23,12 @@ phone reads and drives it over the same WebSocket the desktop uses
 - **Pull request** sheet from the session view: readiness in the desktop's
   order, checks, comments; merge, mark ready, reopen. Hidden when the branch
   has none.
+- **Dictation**, transcribed on the Mac: the phone records a 16kHz mono WAV,
+  uploads it through `POST /upload` and calls `transcribe_upload`. Only the
+  Mac's server has that command, and its welcome frame says `dictation: true`,
+  so the mic is drawn nowhere else.
 
-Left out: push, attachments, dictation, the Diff/Files/Browser views,
+Left out: push, attachments, the Diff/Files/Browser views,
 forks, settle/pin, the settled list, spaces, issues.
 
 ## Stack
@@ -80,7 +84,8 @@ Commands used: `list_session_index_items`, `get_session_by_id`,
 `answer_questions`, `list_projects`, `agent_availability`, `list_models`,
 `list_branches`, `checkout_branch`, `mark_session_read`, `work_status`,
 `prs_for_branch`, `merge_pr`, `mark_pr_ready`, `reopen_pr`, `set_last_selected_project`,
-`add_project`, `github_repos`, `clone_github_repo`, `recheck_gh`, `pr_marks`.
+`add_project`, `github_repos`, `clone_github_repo`, `recheck_gh`, `pr_marks`,
+`transcribe_upload`.
 
 **New session restates the desktop composer's rules** (`Picks` in
 `NewSessionView.swift`): which stances each harness honours (`permission.ts`),
