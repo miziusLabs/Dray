@@ -1,0 +1,428 @@
+import AppKit
+import Observation
+
+/// One line of the message being built, in the order it was said or typed.
+struct Row: Identifiable, Hashable {
+    let id = UUID()
+    var text: String
+    let said: Bool
+}
+
+enum Target: Hashable {
+    case session(SessionKey)
+    case new
+}
+
+enum Dictation { case idle, starting, recording, transcribing }
+
+/// The panel's layout, the reader's pick from its right-click menu and never
+/// switched for them: compact, one row with the orb beside the input, or voice,
+/// the orb alone in the middle.
+enum InputMode: String, CaseIterable {
+    case compact, expanded
+
+    var label: String { self == .expanded ? "Expanded" : "Compact" }
+}
+
+/// The new-session bar's dropdowns.
+enum MenuID: Hashable { case model, project, stance }
+
+/// The draft and everything the panel does with it.
+@MainActor @Observable
+final class Composer {
+    static let width: CGFloat = 520
+
+    let store: Store
+    let server: UUID
+    // A notice is about the last thing tried, so whatever the reader does next retires it.
+    var rows: [Row] = [] { didSet { notice = nil } }
+    var typing = "" { didSet { if typing != oldValue { notice = nil } } }
+    var target: Target?
+    var dictation = Dictation.idle {
+        didSet {
+            if dictation == .starting { notice = nil }
+            if dictation != .recording { recordingSince = nil } else if oldValue != .recording { recordingSince = Date() }
+            if listening != [.starting, .recording].contains(oldValue) { listeningChanged(listening) }
+        }
+    }
+    var listening: Bool { dictation == .starting || dictation == .recording }
+    /// For the ⌘Esc hot key, held only while the microphone is open.
+    @ObservationIgnored var listeningChanged: (Bool) -> Void = { _ in }
+    /// When the microphone opened, for the timer; `nil` unless recording.
+    var recordingSince: Date?
+    var mode = InputMode(rawValue: UserDefaults.standard.string(forKey: "notch.mode") ?? "") ?? .compact {
+        didSet { UserDefaults.standard.set(mode.rawValue, forKey: "notch.mode") }
+    }
+    var level: Float = 0
+    var notice: String? { didSet { retryPath = nil } }
+    /// The recording a failed transcription kept, offered beside its notice.
+    private(set) var retryPath: String?
+    var sending = false
+    /// Bumped to put focus in the input: every open, and every new task.
+    var opens = 0
+    /// Drawn open; the window lags it on the way out, so the close can animate.
+    var shown = false
+    var notchHeight: CGFloat = 0
+    var placement = Placement(rawValue: UserDefaults.standard.string(forKey: "notch.placement") ?? "") ?? .notch {
+        didSet { UserDefaults.standard.set(placement.rawValue, forKey: "notch.placement") }
+    }
+
+    // A new session's picks.
+    var projects: [Project] = []
+    var projectPath: String?
+    var agents: [AgentAvailability] = []
+    var models: [String: [Model]] = [:]
+    var harness = UserDefaults.standard.string(forKey: "notch.harness") ?? "claude_code" {
+        didSet { UserDefaults.standard.set(harness, forKey: "notch.harness") }
+    }
+    var modelPicks = Prefs.map("models")
+    var effortPicks = Prefs.map("efforts")
+    var stance = UserDefaults.standard.string(forKey: "notch.stance") ?? "auto" {
+        didSet { UserDefaults.standard.set(stance, forKey: "notch.stance") }
+    }
+    /// The reader's worktree pick per project; a project never toggled takes one.
+    private var worktreeByProject = UserDefaults.standard.dictionary(forKey: "notch.worktreeByProject") as? [String: Bool] ?? [:]
+    var worktree: Bool {
+        get { projectPath.flatMap { worktreeByProject[$0] } ?? true }
+        set {
+            guard let projectPath else { return }
+            worktreeByProject[projectPath] = newValue
+            UserDefaults.standard.set(worktreeByProject, forKey: "notch.worktreeByProject")
+        }
+    }
+    var openMenu: MenuID?
+
+    // The session list.
+    /// Hidden until asked for — the title, ⌘F or ↑/↓ — and again once the
+    /// reader picks, types or talks.
+    var listShown = false
+    var search = ""
+    /// Bumped by ⌘F, so the view can focus the search field.
+    var searches = 0
+
+    @ObservationIgnored var hide: () -> Void = {}
+    @ObservationIgnored var reposition: () -> Void = {}
+    @ObservationIgnored private var lastUsed = UserDefaults.standard.string(forKey: "notch.lastSession")
+
+    init(store: Store, server: UUID) {
+        self.store = store
+        self.server = server
+    }
+
+    var key: SessionKey? {
+        if case .session(let k) = target { return k }
+        return nil
+    }
+
+    var prompt: String {
+        (rows.map(\.text) + [typing])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+    }
+
+    var modelId: String {
+        Picks.usableModel(models[harness] ?? [], modelPicks[harness] ?? Picks.defaultModel[harness] ?? "", harness)
+    }
+
+    var model: Model? { models[harness]?.first { $0.id == modelId } }
+    var effort: String? { model.flatMap { Picks.usableEffort($0, effortPicks[modelId]) } }
+
+    /// Newest first, narrowed by the search, set-aside sessions left out by the
+    /// sidebar's rule: flagged, or untouched for three days.
+    /// ponytail: the sidebar keeps a stale parent while a child still moves; this does not.
+    var listed: [(key: SessionKey, item: SessionItem)] {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        // `modified` is RFC3339 UTC with milliseconds, so it orders as a string.
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stale = formatter.string(from: Date().addingTimeInterval(-3 * 24 * 3600))
+        return store.items
+            .filter { _, item in item.hidden != true && item.archived != true && item.aside != true && item.modified > stale }
+            .map { (key: $0.key, item: $0.value) }
+            .filter { q.isEmpty || $0.item.title.lowercased().contains(q) || $0.item.project.lowercased().contains(q) }
+            .sorted { $0.item.modified > $1.item.modified }
+    }
+
+    // MARK: Opening
+
+    /// With nothing picked, the last session picked, else the newest.
+    func opened() {
+        opens += 1
+        notice = nil
+        listShown = false
+        if target == nil || key.map({ store.items[$0] == nil }) == true {
+            target = listed.first { $0.key.id == lastUsed }.map { .session($0.key) }
+                ?? listed.first.map { .session($0.key) }
+                ?? .new
+        }
+        if target == .new { Task { await loadPicks() } }
+    }
+
+    func pick(_ t: Target) {
+        target = t
+        openMenu = nil
+        switch t {
+        case .new:
+            listShown = false
+            opens += 1
+            Task { await loadPicks() }
+        case .session(let k):
+            lastUsed = k.id
+            UserDefaults.standard.set(k.id, forKey: "notch.lastSession")
+        }
+    }
+
+    /// ↑/↓ through the list; from a new session, ↓ lands on the first row.
+    func move(_ delta: Int) {
+        listShown = true
+        let list = listed
+        guard !list.isEmpty else { return }
+        let at = key.flatMap { k in list.firstIndex { $0.key == k } }
+        let next = at.map { min(max($0 + delta, 0), list.count - 1) } ?? (delta > 0 ? 0 : nil)
+        if let next { pick(.session(list[next].key)) }
+    }
+
+    /// Return in the list: the highlighted row, else the search's best match, then back to the input.
+    func choose() {
+        let list = listed
+        if let first = list.first, !list.contains(where: { $0.key == key }) { pick(.session(first.key)) }
+        listShown = false
+        opens += 1
+    }
+
+    func escape() {
+        if openMenu != nil {
+            openMenu = nil
+            return
+        }
+        if listShown {
+            listShown = false
+            return
+        }
+        // Mid-sentence Esc does nothing (the key monitor's rule), so a recording never ends here.
+        hide()
+    }
+
+    /// Throws away what is being said: ⌘Esc, or quitting. A start still in
+    /// flight sees `.idle` on landing and cancels itself, since this cancel may
+    /// reach the server first.
+    func cancelDictation() async {
+        dictation = .idle
+        _ = try? await store.call(server, "cancel_transcription", as: JSON.self)
+    }
+
+    // MARK: New session
+
+    /// Read on every new task: the notch outlives Dray, where projects get attached.
+    func loadPicks() async {
+        do {
+            async let p: [Project] = store.call(server, "list_projects")
+            async let a: [AgentAvailability] = store.call(server, "agent_availability")
+            (projects, agents) = try await (p, a)
+            if !projects.contains(where: { $0.path == projectPath }) {
+                projectPath = projects.max { $0.lastSelected < $1.lastSelected }?.path
+            }
+            // The track draws the first installed agent for a missing pick, so send that one too.
+            if let first = agents.first(where: \.available), !agents.contains(where: { $0.harness == harness && $0.available }) {
+                harness = first.harness
+            }
+            await loadModels()
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    func loadModels() async {
+        let h = harness
+        guard models[h] == nil else { return }
+        // A failure caches nothing, or a read made before the socket was up
+        // would leave the picker empty for the life of the process.
+        do {
+            models[h] = try await store.call(server, "list_models", ["harness": .string(h)])
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    func pickModel(_ id: String) {
+        modelPicks[harness] = id
+        Prefs.set(modelPicks, "models")
+    }
+
+    /// The desktop's shortlist before the reader stars anything: every row not
+    /// marked secondary, and the current pick whatever it is.
+    var shortlist: [Model] {
+        (models[harness] ?? []).filter { !($0.secondary ?? false) || $0.id == modelId }
+    }
+
+    func pickEffort(_ level: String, for model: String) {
+        effortPicks[model] = level
+        Prefs.set(effortPicks, "efforts")
+    }
+
+    // MARK: Sending
+
+    func send() async -> Bool {
+        // The words still being spoken belong to this message, so a failed
+        // transcription keeps the draft open, its notice and Retry with it.
+        if dictation == .recording, !(await stopDictation()) { return false }
+        guard dictation == .idle else { return false }
+        let text = prompt
+        guard !text.isEmpty, !sending, let target else { return false }
+        sending = true
+        defer { sending = false }
+        // Only what went out is cleared: the draft stays editable while the request runs.
+        let sentRows = Set(rows.map(\.id)), sentTyping = typing
+        let sent: SessionKey?
+        switch target {
+        case .session(let k):
+            sent = await store.send(k, text) ? k : nil
+            if sent == nil { notice = store.lastError }
+        case .new:
+            sent = await create(text)
+        }
+        guard let sent else { return false }
+        rows.removeAll { sentRows.contains($0.id) }
+        if typing == sentTyping { typing = "" }
+        lastUsed = sent.id
+        UserDefaults.standard.set(sent.id, forKey: "notch.lastSession")
+        self.target = .session(sent)
+        return true
+    }
+
+    /// `useSessions.ts`'s argument set for a new session, from the bar's picks.
+    private func create(_ text: String) async -> SessionKey? {
+        guard let cwd = projectPath else {
+            notice = "Pick a project first."
+            return nil
+        }
+        let id = UUID().uuidString.lowercased()
+        do {
+            let outcome: SendOutcome = try await store.call(server, "send_msg", [
+                "sessionId": .string(id),
+                "prompt": .string(text),
+                "attachmentPaths": [],
+                "harness": .string(harness),
+                "model": .string(modelId),
+                "effort": JSON(effort),
+                "permissionMode": .string(Picks.stanceFor(harness, stance)),
+                "fast": .bool(false),
+                "cwd": .string(cwd),
+                // No branch picker here, so the server reads the checkout's own at creation.
+                "branch": nil,
+                "useWorktree": .bool(worktree),
+                "worktreeName": nil,
+                "baseRef": nil,
+                "isNewSession": true,
+            ])
+            if let item = outcome.snapshot { store.created(server, item) }
+            return SessionKey(server: server, id: id)
+        } catch {
+            notice = error.localizedDescription
+            return nil
+        }
+    }
+
+    func addTyped() {
+        let text = typing.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        rows.append(Row(text: text, said: false))
+        typing = ""
+    }
+
+    // MARK: Dictation
+
+    private struct Refusal: Decodable { let kind: String }
+    private struct Outcome: Decodable {
+        let kind: String
+        let value: JSON?
+    }
+
+    /// Through the server to Dray's own recorder and model: one place sets up dictation.
+    func startDictation() async {
+        guard dictation == .idle else { return }
+        dictation = .starting
+        do {
+            let refusal: Refusal? = try await store.call(server, "start_transcription")
+            guard dictation == .starting else {
+                if refusal == nil { _ = try? await store.call(server, "cancel_transcription", as: JSON.self) }
+                return
+            }
+            if let refusal {
+                dictation = .idle
+                notice = refusal.kind == "needsModel"
+                    ? "Pick a dictation model in Dray → Settings → Transcription."
+                    : "Dray needs the microphone. Allow it in System Settings → Privacy & Security → Microphone."
+                return
+            }
+            dictation = .recording
+            listShown = false
+            Sound.start?.play()
+            Task { await pollLevel() }
+        } catch {
+            dictation = .idle
+            notice = error.localizedDescription
+        }
+    }
+
+    /// Whether the model answered: words, or a verdict that there were none.
+    @discardableResult
+    func stopDictation() async -> Bool {
+        guard dictation == .recording else { return false }
+        return await transcribe("stop_transcription", [:])
+    }
+
+    /// Runs the model again over the recording a failed run kept, so the words need not be said twice.
+    func retryDictation() async {
+        guard dictation == .idle, let path = retryPath else { return }
+        await transcribe("retry_transcription", ["path": .string(path)])
+    }
+
+    @discardableResult
+    private func transcribe(_ cmd: String, _ args: [String: JSON]) async -> Bool {
+        dictation = .transcribing
+        defer { dictation = .idle }
+        do {
+            let o: Outcome = try await store.call(server, cmd, args, timeout: .seconds(180))
+            switch o.kind {
+            case "text":
+                if let text = o.value?.string, !text.isEmpty {
+                    rows.append(Row(text: text, said: true))
+                    Sound.stop?.play()
+                }
+                return true
+            case "empty":
+                notice = "No words heard."
+                return true
+            case "needsModel": notice = "Pick a dictation model in Dray → Settings → Transcription."
+            case "noAudio": notice = "Dray heard nothing. Check the microphone."
+            default: notice = o.value?["message"]?.string ?? "Dictation failed."
+            }
+            // Set after the notice, whose own setter clears it.
+            retryPath = o.value?["audioPath"]?.string
+        } catch {
+            notice = error.localizedDescription
+        }
+        return false
+    }
+
+    func toggleDictation() async {
+        if dictation == .recording { await stopDictation() } else { await startDictation() }
+    }
+
+    /// Polled rather than pushed, as the composer's is: a missed reading is a dropped frame.
+    private func pollLevel() async {
+        while dictation == .recording {
+            level = (try? await store.call(server, "transcription_level", as: Float.self)) ?? 0
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        level = 0
+    }
+}
+
+/// Dray's own dictation tones, so the two dictate alike.
+enum Sound {
+    static let start = NSSound(named: "dictate-start")
+    static let stop = NSSound(named: "dictate-stop")
+}

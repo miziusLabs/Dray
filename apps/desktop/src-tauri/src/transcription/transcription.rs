@@ -327,6 +327,8 @@ pub enum StartRefusal {
 pub async fn start_transcription(
     state: State<'_, TranscriptionState>,
 ) -> Result<Option<StartRefusal>, String> {
+    // Whoever starts last owns the recorder; `answer_host` claims it back after this.
+    HOST_OWNS.store(false, std::sync::atomic::Ordering::SeqCst);
     if ready_model().await.is_none() {
         return Ok(Some(StartRefusal::NeedsModel));
     }
@@ -355,6 +357,69 @@ pub async fn start_transcription(
     warm_selected(state.engine.clone());
 
     Ok(None)
+}
+
+static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+
+/// The dictation commands the server hands to the app, for [`answer_host`].
+pub const HOSTED: [&str; 5] =
+    ["start_transcription", "stop_transcription", "transcription_level", "cancel_transcription", "retry_transcription"];
+
+/// Lets [`answer_host`] reach the recorder, which lives in the app's managed state.
+pub fn serve_host(app: &AppHandle) {
+    let _ = APP.set(app.clone());
+}
+
+/// Whether the recorder holds the Notch's recording rather than the app's own.
+/// There is one recorder and two clients, so neither may stop or read the
+/// other's: a start from the app hands it back to the app.
+static HOST_OWNS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Dictation asked for through the server rather than the webview — the
+/// Notch panel's route, since it holds no microphone or model of its own.
+/// `None` where `cmd` is not dictation.
+pub async fn answer_host(cmd: &str, args: &serde_json::Value) -> Option<Result<serde_json::Value, String>> {
+    use std::sync::atomic::Ordering::SeqCst;
+    use tauri::Manager;
+    fn json(v: impl Serialize) -> Result<serde_json::Value, String> {
+        serde_json::to_value(v).map_err(|e| e.to_string())
+    }
+    if !HOSTED.contains(&cmd) {
+        return None;
+    }
+    let Some(app) = APP.get() else { return Some(Err("Dictation is not ready yet.".into())) };
+    let state = app.state::<TranscriptionState>();
+    let owns = HOST_OWNS.load(SeqCst);
+    Some(match cmd {
+        // A Notch recording found here is one the Notch lost — it starts only
+        // when idle, so a restarted Notch would otherwise be locked out for good.
+        "start_transcription" if !owns && state.recording.lock().await.is_some() => {
+            Err("Dray is already dictating.".into())
+        }
+        "start_transcription" => {
+            let started = start_transcription(state).await;
+            // A refused start replaced nothing, so a lost recording it found is
+            // still the Notch's to stop.
+            HOST_OWNS.store(owns || matches!(started, Ok(None)), SeqCst);
+            started.and_then(json)
+        }
+        "stop_transcription" if !owns => Err("Dictation moved to Dray's window.".into()),
+        "stop_transcription" => {
+            HOST_OWNS.store(false, SeqCst);
+            stop_transcription(state).await.and_then(json)
+        }
+        "transcription_level" if !owns => json(0.0),
+        "transcription_level" => transcription_level(state).await.and_then(json),
+        "cancel_transcription" if !owns => json(()),
+        "cancel_transcription" => {
+            HOST_OWNS.store(false, SeqCst);
+            cancel_transcription(state).await.and_then(json)
+        }
+        _ => match args["path"].as_str() {
+            Some(path) => retry_transcription(state, path.to_string()).await.and_then(json),
+            None => Err("retry_transcription wants a path".into()),
+        },
+    })
 }
 
 /// Runs the model over audio already parked on disk.

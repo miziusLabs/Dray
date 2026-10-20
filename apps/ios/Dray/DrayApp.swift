@@ -219,14 +219,6 @@ struct SessionRow: View {
     }
 }
 
-func parseDate(_ s: String) -> Date? {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let d = f.date(from: s) { return d }
-    f.formatOptions = [.withInternetDateTime]
-    return f.date(from: s)
-}
-
 struct ServersView: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss

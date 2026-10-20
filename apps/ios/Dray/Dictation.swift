@@ -1,11 +1,6 @@
 import AVFoundation
 import SwiftUI
 
-/// The server's first frame, for the one field the phone reads off it.
-struct Welcome: Decodable {
-    let dictation: Bool?
-}
-
 /// `transcription.rs`'s `TranscribeOutcome`. An unknown kind reads as a failure naming it.
 enum TranscribeOutcome: Decodable {
     case text(String)

@@ -106,6 +106,19 @@ struct EventFrame<T: Decodable>: Decodable {
 
 /// One index entry. Fields the phone does not read are left undecoded, so a
 /// newer server adding some costs nothing.
+func parseDate(_ s: String) -> Date? {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let d = f.date(from: s) { return d }
+    f.formatOptions = [.withInternetDateTime]
+    return f.date(from: s)
+}
+
+/// The server's first frame, for the one field the phone reads off it.
+struct Welcome: Decodable {
+    let dictation: Bool?
+}
+
 struct SessionItem: Decodable, Hashable {
     let sessionId: String
     let harness: String
@@ -123,6 +136,7 @@ struct SessionItem: Decodable, Hashable {
     let worktreeName: String?
     let worktreeRemoved: Bool?
     let hidden: Bool?
+    /// Set aside by the reader: started, not wanted now.
     let aside: Bool?
     let parentSessionId: String?
 
