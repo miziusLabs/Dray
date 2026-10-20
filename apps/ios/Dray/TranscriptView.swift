@@ -48,6 +48,7 @@ struct TranscriptView: View {
         .navigationBarTitleDisplayMode(.inline)
         .modifier(LocalServersButton(key: key))
         .task { await store.open(key) }
+        .prPanel(key)
     }
 }
 
