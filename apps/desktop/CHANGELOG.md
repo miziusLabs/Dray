@@ -19,6 +19,31 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.0 · 2026-10-21 · notify
+
+### New
+
+- **Dray Island.** A composer that floats over every app, at the notch
+  or above the Dock. Tap Control on its own to open it, tap again to
+  dictate. Typed and spoken lines build one prompt, sent to a pinned
+  session or a new one. It lists your sessions with their marks, and
+  permission and question cards land there while it runs. Turn it off
+  or pick another key in Settings → Island.
+
+  ![](changelog/dray-island.png)
+- **Screenshots and drawings in the Island.** ⌘⇧2 takes a region of
+  the screen into the draft. While dictating, hold Shift to draw on the
+  live screen; each drawing joins the prompt where you were speaking.
+  Drop files on the Island to attach them.
+
+### Improved
+
+- **Dictation is faster.** Pauses are trimmed before the model reads
+  the audio, and streaming models (Parakeet Unified, Nemotron)
+  transcribe while you talk, so stopping takes a fraction of a second.
+- **Jump to session is ⌥ + digit**, so tapping Control no longer
+  flashes the badges.
+
 ## 0.28.1 · 2026-10-16
 
 ### Improved
