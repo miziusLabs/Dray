@@ -113,6 +113,28 @@ pub struct TranscriptionState {
     /// The recording's live decode, beside it for its whole life.
     live: Mutex<Option<Live>>,
     engine: Engine,
+    /// What [`stop_on_sleep`] made of a recording it closed, waiting for that
+    /// client's stop: the window's first, the Island's second. One each, so a
+    /// later sleep under the other client cannot overwrite it.
+    interrupted: [Mutex<Option<Interruption>>; 2],
+    /// Held by a start from its ownership check to its open.
+    starting: Mutex<()>,
+}
+
+/// Resolves once the audio is parked; a stop arriving sooner waits for it.
+type Interruption = tauri::async_runtime::JoinHandle<TranscribeOutcome>;
+
+/// Bumped by each sleep, so a start that was opening the microphone as the
+/// Mac went down drops it rather than holding it through the sleep.
+static SLEEPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The interrupted recording, where it is this client's.
+async fn take_interrupted(state: &TranscriptionState, host: bool) -> Option<TranscribeOutcome> {
+    let interruption = state.interrupted[host as usize].lock().await.take()?;
+    Some(interruption.await.unwrap_or_else(|e| TranscribeOutcome::Failed {
+        message: format!("the Mac went to sleep, and the recording was lost: {e}"),
+        audio_path: None,
+    }))
 }
 
 /// The selected model, if one is picked *and* still on disk.
@@ -303,8 +325,29 @@ pub enum StartRefusal {
 pub async fn start_transcription(
     state: State<'_, TranscriptionState>,
 ) -> Result<Option<StartRefusal>, String> {
+    // Held across the check and the open, so an Island start landing at the same
+    // moment waits rather than both passing an empty recorder and one replacing
+    // the other.
+    let _starting = state.starting.lock().await;
+    // Refused rather than taken over, as the Island refuses the window's: the
+    // Island would go on drawing a recording that had been moved out from under it.
+    if HOST_OWNS.load(std::sync::atomic::Ordering::SeqCst) && state.recording.lock().await.is_some() {
+        return Err("The Island is dictating. Stop it there first.".into());
+    }
+    open_recorder(&state, false).await
+}
+
+/// Opens the microphone for the window, or for the Island where `host`.
+async fn open_recorder(
+    state: &TranscriptionState,
+    host: bool,
+) -> Result<Option<StartRefusal>, String> {
+    use std::sync::atomic::Ordering::SeqCst;
+    let sleeps = SLEEPS.load(SeqCst);
     // Whoever starts last owns the recorder; `answer_host` claims it back after this.
-    HOST_OWNS.store(false, std::sync::atomic::Ordering::SeqCst);
+    HOST_OWNS.store(false, SeqCst);
+    // A sleep this client never stopped for is not its answer to a new recording.
+    *state.interrupted[host as usize].lock().await = None;
     let Some(model) = ready_model().await else {
         return Ok(Some(StartRefusal::NeedsModel));
     };
@@ -314,7 +357,9 @@ pub async fn start_transcription(
     }
 
     let stored = settings::read().await.transcription;
-    let recording = Recording::start(stored.device.as_deref()).map_err(|e| e.to_string())?;
+    // `{:#}`, or the reader sees "could not open the microphone" with the
+    // CoreAudio reason that would say why cut off behind it.
+    let recording = Recording::start(stored.device.as_deref()).map_err(|e| format!("{e:#}"))?;
 
     // The load starts here and runs under the reader's own talking; a model
     // that streams then decodes while they talk. It used to start at launch
@@ -325,8 +370,15 @@ pub async fn start_transcription(
 
     // Replaces whatever was there, which stops it: two live streams would both
     // be filling buffers and only one could ever be read.
-    *state.recording.lock().await = Some(recording);
+    let mut slot = state.recording.lock().await;
+    // Under the lock [`stop_on_sleep`] takes after counting the sleep, so a sleep
+    // landing during the open is either seen here or finds this recording there.
+    if SLEEPS.load(SeqCst) != sleeps {
+        return Err("The Mac went to sleep.".into());
+    }
+    *slot = Some(recording);
     *state.live.lock().await = Some(live);
+    drop(slot);
 
     // After the microphone is open, never before: a refusal must leave the
     // machine's sound exactly as it found it. The start tone the frontend
@@ -381,25 +433,33 @@ pub async fn answer_host(cmd: &str, args: &serde_json::Value) -> Option<Result<s
     }
     let Some(app) = APP.get() else { return Some(Err("Dictation is not ready yet.".into())) };
     let state = app.state::<TranscriptionState>();
-    let owns = HOST_OWNS.load(SeqCst);
-    Some(match cmd {
+    if cmd == "start_transcription" {
+        // Held across the check and the open; see `start_transcription`.
+        let _starting = state.starting.lock().await;
+        let owns = HOST_OWNS.load(SeqCst);
         // An Island recording found here is one the Island lost — it starts only
         // when idle, so a restarted Island would otherwise be locked out for good.
-        "start_transcription" if !owns && state.recording.lock().await.is_some() => {
-            Err("Dray is already dictating.".into())
+        if !owns && state.recording.lock().await.is_some() {
+            return Some(Err("Dray is already dictating.".into()));
         }
-        "start_transcription" => {
-            let started = start_transcription(state).await;
-            // A refused start replaced nothing, so a lost recording it found is
-            // still the Island's to stop.
-            HOST_OWNS.store(owns || matches!(started, Ok(None)), SeqCst);
-            started.and_then(json)
-        }
-        "stop_transcription" if !owns => Err("Dictation moved to Dray's window.".into()),
-        "stop_transcription" => {
-            HOST_OWNS.store(false, SeqCst);
-            stop_transcription(state).await.and_then(json)
-        }
+        let started = open_recorder(&state, true).await;
+        // A refused start replaced nothing, so a lost recording it found is
+        // still the Island's to stop.
+        HOST_OWNS.store(owns || matches!(started, Ok(None)), SeqCst);
+        return Some(started.and_then(json));
+    }
+    let owns = HOST_OWNS.load(SeqCst);
+    Some(match cmd {
+        // Ahead of the ownership check: the window may have started since the
+        // sleep, and the Island's interrupted words are still the Island's.
+        "stop_transcription" => match take_interrupted(&state, true).await {
+            Some(outcome) => json(outcome),
+            None if !owns => Err("Dictation moved to Dray's window.".into()),
+            None => {
+                HOST_OWNS.store(false, SeqCst);
+                finish_recording(&state, true).await.and_then(json)
+            }
+        },
         "cut_transcription" if !owns => Err("Dictation moved to Dray's window.".into()),
         "cut_transcription" => cut_transcription(&state).await.and_then(json),
         "transcription_level" if !owns => json(0.0),
@@ -487,6 +547,15 @@ async fn transcribe_audio(
 pub async fn stop_transcription(
     state: State<'_, TranscriptionState>,
 ) -> Result<TranscribeOutcome, String> {
+    finish_recording(&state, false).await
+}
+
+/// The stop, for the window or for the Island where `host`. A recording the
+/// Mac's sleep closed answers first: the client is stopping what it started.
+async fn finish_recording(state: &TranscriptionState, host: bool) -> Result<TranscribeOutcome, String> {
+    if let Some(outcome) = take_interrupted(state, host).await {
+        return Ok(outcome);
+    }
     let recording = state.recording.lock().await.take();
     let live = state.live.lock().await.take();
 
@@ -631,6 +700,78 @@ pub async fn cancel_transcription(state: State<'_, TranscriptionState>) -> Resul
     restore_other_audio().await;
 
     Ok(())
+}
+
+/// Closes a recording when the Mac goes to sleep, and parks what was said.
+///
+/// A recording left open across sleeps once held the built-in mic for thirteen
+/// hours, and closing it then crashed coreaudiod's mic: no app could record until
+/// coreaudiod was restarted (#582). Nobody dictates through a sleep, so the
+/// stream closes inside the notification, before the machine goes down. The
+/// resample and the save follow on a task, held for the owning client's stop,
+/// which answers with a Retry; `transcription_interrupted` tells the window to
+/// ask, and the Island asks when the reader presses stop.
+#[cfg(target_os = "macos")]
+pub fn stop_on_sleep(app: &AppHandle) {
+    use std::ptr::NonNull;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use block2::RcBlock;
+    use objc2_app_kit::{NSWorkspace, NSWorkspaceWillSleepNotification};
+    use objc2_foundation::NSNotification;
+    use tauri::{Emitter, Manager};
+
+    let app = app.clone();
+    let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+        // Counted before the lock, so a start between its open and its store
+        // either sees the count or leaves its recording here to be taken.
+        SLEEPS.fetch_add(1, SeqCst);
+        let state = app.state::<TranscriptionState>();
+        // The main thread is outside the runtime, so blocking on the lock is allowed.
+        let Some(recording) = state.recording.blocking_lock().take() else { return };
+        let tap = recording.close();
+        let live = state.live.blocking_lock().take();
+        let host = HOST_OWNS.load(SeqCst);
+        // Held while the task is spawned, so a stop the event prompts cannot
+        // look before the outcome is in the slot.
+        let mut slot = state.interrupted[host as usize].blocking_lock();
+        let app = app.clone();
+        let outcome = tauri::async_runtime::spawn(async move {
+            drop(live);
+            restore_other_audio().await;
+            let outcome = match tauri::async_runtime::spawn_blocking(move || tap.take()).await {
+                Ok(Ok((Some(audio), _))) => TranscribeOutcome::Failed {
+                    message: "the Mac went to sleep".into(),
+                    audio_path: recordings::save(&audio)
+                        .await
+                        .ok()
+                        .map(|p| p.to_string_lossy().into_owned()),
+                },
+                Ok(Ok((None, _))) => TranscribeOutcome::NoAudio,
+                _ => TranscribeOutcome::Failed {
+                    message: "the Mac went to sleep, and the recording was lost".into(),
+                    audio_path: None,
+                },
+            };
+            let _ = app.emit("transcription_interrupted", ());
+            outcome
+        });
+        *slot = Some(outcome);
+    });
+    let center = NSWorkspace::sharedWorkspace().notificationCenter();
+    // SAFETY: the name is AppKit's own constant, no object filter, and a nil
+    // queue runs the block on the posting thread, which for workspace
+    // notifications is the main thread.
+    let observer = unsafe {
+        center.addObserverForName_object_queue_usingBlock(
+            Some(NSWorkspaceWillSleepNotification),
+            None,
+            None,
+            &block,
+        )
+    };
+    // Lives as long as the app; nothing ever removes it.
+    std::mem::forget(observer);
 }
 
 /// Both halves of the muting run `osascript`, which is a spawn and a wait —
