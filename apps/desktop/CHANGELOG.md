@@ -19,6 +19,20 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.2 · 2026-10-21
+
+### Improved
+
+- **The Island tells you when a session is done**, in place of Dray's
+  banner. Alerts wait while you're typing in it, and ⌘S saves a draft.
+
+### Fixed
+
+- Dictation closes the mic when the Mac sleeps, so other apps can
+  still record. A recording cut short by sleep offers Retry.
+- Queuing a prompt no longer folds away a tool that is still running.
+- Arrow keys keep switching Settings tabs past Shortcuts.
+
 ## 0.29.1 · 2026-10-21 · notify
 
 ### New
