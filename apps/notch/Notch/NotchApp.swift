@@ -27,6 +27,11 @@ enum Placement: String, CaseIterable {
     var label: String { self == .notch ? "Notch" : "Bottom" }
 }
 
+/// Answers the first click, so the pill opens on one press while the panel is not key.
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// A panel that takes keys without making Dray Notch the active app, so the
 /// app the reader is working in keeps its place in the window order.
 final class NotchPanel: NSPanel {
@@ -39,7 +44,8 @@ final class Delegate: NSObject, NSApplicationDelegate {
     private var composer: Composer?
     private var hotkey: ModifierTap?
     private var keys: Any?
-    /// ⌥Esc closes the panel from anywhere: bare Esc only reaches it while it has focus.
+    /// ⌘Esc from anywhere, held while the panel is open: bare Esc only reaches it while it has focus,
+    /// and AppKit never hands ⌘Esc to the key monitor at all.
     private var closeKey: HotKey?
     /// ⌘⇧2, beside macOS's own ⌘⇧3/4/5: a screenshot into the draft from anywhere.
     private var captureKey: HotKey?
@@ -50,6 +56,13 @@ final class Delegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         waitForServer()
         restartWhenReplaced()
+        // Open PRs' checks move on their own; read them while the panel is up, as the phone does on screen.
+        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let composer = self?.composer, composer.shown else { return }
+                Task { await composer.store.pollMarks() }
+            }
+        }
     }
 
     /// The recorder is Dray's, so quitting mid-dictation would leave its
@@ -95,9 +108,17 @@ final class Delegate: NSObject, NSApplicationDelegate {
         composer.hide = { [weak self, weak composer] in
             composer?.shown = false
             self?.closeKey?.held = false
-            // After the close animation, and only if nothing reopened it meanwhile.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                if composer?.shown == false { self?.panel?.orderOut(nil) }
+            self?.settle()
+        }
+        composer.present = { [weak self] in self?.show() }
+        composer.pillChanged = { [weak self] in
+            guard let self, let composer = self.composer, !composer.shown else { return }
+            if !composer.attention.isEmpty {
+                place()
+                // Drawn, never key: the pill must not take keys from the app being typed in.
+                panel?.orderFrontRegardless()
+            } else {
+                settle()
             }
         }
         composer.reposition = { [weak self] in self?.place() }
@@ -118,7 +139,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         // The cards draw their own; a window shadow would trace the clear window.
         panel.hasShadow = false
-        panel.contentView = NSHostingView(rootView: NotchView(composer: composer).environment(composer.store))
+        panel.contentView = FirstClickHostingView(rootView: NotchView(composer: composer).environment(composer.store))
         self.panel = panel
         // The panel's keys, here rather than on views, which answer only
         // while focus sits inside them. Key codes: Escape 53, N 45, F 3, ↓ 125, ↑ 126.
@@ -130,6 +151,13 @@ final class Delegate: NSObject, NSApplicationDelegate {
             // Throwing away speech takes ⌘Esc, the hot key below: a bare Esc is too easy a slip mid-sentence.
             case (53, _) where composer.listening: break
             case (53, _): composer.escape()
+            // A card takes Return to submit its answers, and digits to pick a permission option.
+            case (36, []) where composer.isQuestions: composer.submits += 1
+            case (36, []) where composer.ask == nil:
+                if composer.listShown { composer.choose() } else { Task { await composer.send() } }
+            // Unless the caret is in a card's text box, where a digit is typed.
+            case (let code, []) where composer.ask != nil && Self.digits[code] != nil && !(panel?.firstResponder is NSText):
+                composer.pickOption(Self.digits[code]!)
             case (45, .command): composer.pick(.new)
             case (3, .command): composer.searches += 1
             case (36, .command): composer.addTyped()
@@ -143,14 +171,12 @@ final class Delegate: NSObject, NSApplicationDelegate {
         }
 
         hotkey = ModifierTap { [weak self] in self?.pressed() }
-        // ⌘Esc, which AppKit never hands the panel's key monitor.
-        let cancel = HotKey(key: kVK_Escape, mods: cmdKey) { [weak composer] in Task { await composer?.cancelDictation() } }
-        closeKey = HotKey(key: kVK_Escape, mods: optionKey) { [weak composer] in
-            // Mid-sentence it is as inert as bare Esc.
-            guard let composer, !composer.listening else { return }
-            composer.hide()
+        // One chord to remember: mid-recording it throws the speech away, and
+        // the next press closes the panel.
+        closeKey = HotKey(key: kVK_Escape, mods: cmdKey) { [weak composer] in
+            guard let composer else { return }
+            if composer.listening { Task { await composer.cancelDictation() } } else { composer.hide() }
         }
-        composer.listeningChanged = { cancel.held = $0 }
         composer.recordingChanged = { [weak self] recording in
             if recording { self?.startAnnotation() } else { self?.endAnnotation() }
         }
@@ -167,21 +193,12 @@ final class Delegate: NSObject, NSApplicationDelegate {
     /// A tap opens the panel; a tap on an open one starts or stops dictating.
     /// So a double tap opens it listening, with no timer to wait out.
     private func pressed() {
-        guard panel != nil, let composer else { return }
+        guard let composer else { return }
         if composer.shown {
             Task { await composer.toggleDictation() }
         } else {
-            open()
+            show()
         }
-    }
-
-    private func open() {
-        guard let panel, let composer else { return }
-        composer.opened()
-        place()
-        panel.makeKeyAndOrderFront(nil)
-        composer.shown = true
-        closeKey?.held = true
     }
 
     /// The shot flies into the notch and joins the draft. Mid-recording the
@@ -220,7 +237,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
             }
             panel.level = annotation == nil ? .statusBar : Self.overOverlay
             panel.ignoresMouseEvents = false
-            if recording { panel.makeKeyAndOrderFront(nil) } else if wasShown { open() } else { place() }
+            if recording { panel.makeKeyAndOrderFront(nil) } else if wasShown { show() } else { place() }
             if let shot { await Capture.fly(shot.image, from: shot.frame, to: flyTarget()) }
             // The cut transcribes while the overlay is up; its words go first.
             await cut?.value
@@ -229,6 +246,29 @@ final class Delegate: NSObject, NSApplicationDelegate {
             if let failed { composer.notice = failed }
         }
     }
+
+    private func show() {
+        guard let panel, let composer, !composer.shown else { return }
+        composer.opened()
+        place()
+        panel.makeKeyAndOrderFront(nil)
+        composer.shown = true
+        closeKey?.held = true
+    }
+
+    /// Takes the window down once the close animation has run, and only if
+    /// nothing reopened it or put a pill up meanwhile.
+    private func settle() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, let panel, let composer, !composer.shown else { return }
+            // Ordered out even with a pill to draw, since that is what hands the keys back.
+            panel.orderOut(nil)
+            if !composer.attention.isEmpty { panel.orderFrontRegardless() }
+        }
+    }
+
+    /// Key codes of 1 through 9, which are not in order on the keyboard.
+    private static let digits: [UInt16: Int] = [18: 0, 19: 1, 20: 2, 21: 3, 23: 4, 22: 5, 26: 6, 28: 7, 25: 8]
 
     /// Where a shot flies: into the open card's rows, or into the notch itself
     /// while the panel is away.
