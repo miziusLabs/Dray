@@ -218,7 +218,6 @@ export default function ShortcutsSettings({ onOpenIsland }: { onOpenIsland: () =
         placeholder="Search shortcuts"
         aria-label="Search shortcuts"
         spellCheck={false}
-        autoFocus
       />
       {islandShown && (
         <p className="text-ui text-muted-foreground">
