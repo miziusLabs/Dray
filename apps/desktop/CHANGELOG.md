@@ -23,18 +23,13 @@ reads:
 
 ### New
 
-- **Dray Island.** A composer that floats over every app, at the notch
-  or above the Dock. Tap Control on its own to open it, tap again to
-  dictate. Typed and spoken lines build one prompt, sent to a pinned
-  session or a new one. It lists your sessions with their marks, and
-  permission and question cards land there while it runs. Turn it off
-  or pick another key in Settings → Island.
+- **Dray Island.** A composer that floats over every app. Tap Control
+  to open it, tap again to dictate. Change the key or turn it off in
+  Settings → Island.
 
   ![](changelog/dray-island.png)
-- **Screenshots and drawings in the Island.** ⌘⇧2 takes a region of
-  the screen into the draft. While dictating, hold Shift to draw on the
-  live screen; each drawing joins the prompt where you were speaking.
-  Drop files on the Island to attach them.
+- **Screenshots in the Island.** ⌘⇧2 grabs part of the screen into
+  your prompt. Hold Shift while dictating to draw on the screen.
 
 ### Improved
 
