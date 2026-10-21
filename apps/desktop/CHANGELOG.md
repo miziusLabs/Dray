@@ -19,7 +19,7 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
-## 0.29.0 · 2026-10-21 · notify
+## 0.29.1 · 2026-10-21 · notify
 
 ### New
 
