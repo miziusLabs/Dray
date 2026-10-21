@@ -4,7 +4,7 @@ enum Field { case input, search }
 
 /// Two cards: the composer, hanging from the notch or sitting above the Dock,
 /// and the session list on its far side. The transcript is Dray's.
-struct NotchView: View {
+struct IslandView: View {
     @Bindable var composer: Composer
     @Environment(Store.self) private var store
     @FocusState private var focus: Field?
@@ -137,7 +137,7 @@ struct NotchView: View {
             }
             .pickerStyle(.inline)
             Divider()
-            Button("Quit Dray Notch") { NSApp.terminate(nil) }
+            Button("Quit Dray Island") { NSApp.terminate(nil) }
         }
         // A panel opened before the socket was up read nothing; read again once it is.
         .task(id: store.serverState[composer.server] == .connected) {
