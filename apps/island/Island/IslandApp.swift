@@ -119,7 +119,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
             if !composer.attention.isEmpty {
                 place()
                 // Drawn, never key: the pill must not take keys from the app being typed in.
-                panel?.orderFrontRegardless()
+                self.panel?.orderFrontRegardless()
             } else {
                 settle()
             }
