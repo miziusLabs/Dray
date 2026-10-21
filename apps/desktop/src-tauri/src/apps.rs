@@ -370,6 +370,29 @@ pub async fn island_running() -> bool {
         .is_ok_and(|out| out.status.success())
 }
 
+/// Hands a finished session to Dray Island, which shows it in place of the
+/// banner. A Darwin notification carries no payload, so each session is an
+/// empty file named for it in `island_done_dir`: the island deletes only the
+/// files it read, where a shared list read and then cleared would drop one
+/// written between the two.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub async fn island_done(session_id: String) -> Result<(), String> {
+    // The id names a file, so nothing that could step out of the directory.
+    if session_id.is_empty() || !session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("not a session id".into());
+    }
+    let dir = island_done_dir().ok_or("no home directory")?;
+    tokio::fs::create_dir_all(&dir).await.map_err(|err| format!("could not reach the island: {err}"))?;
+    tokio::fs::write(dir.join(&session_id), b"").await.map_err(|err| format!("could not reach the island: {err}"))?;
+    tokio::process::Command::new("notifyutil").args(["-p", "com.yogesh.dray.island.done"]).output().await.ok();
+    Ok(())
+}
+
+/// The island's inbox for finished sessions; `Delegate.doneDir` in the island names it too.
+fn island_done_dir() -> Option<std::path::PathBuf> {
+    Some(std::env::home_dir()?.join("Library/Caches/com.yogesh.dray.island/done"))
+}
+
 /// The island preferences Settings draws. The island's own right-click menu
 /// writes the first two as well, so they are read back rather than kept here,
 /// and `captureTaken` is the island's alone: the chord it could not register.

@@ -2,11 +2,14 @@ import AppKit
 import Carbon
 import SwiftUI
 
+// The status demo compiles the island's views with a `@main` of its own.
+#if !ISLAND_DEMO
 @main
 struct IslandApp: App {
     @NSApplicationDelegateAdaptor(Delegate.self) private var delegate
     var body: some Scene { Settings { EmptyView() } }
 }
+#endif
 
 /// This Mac's server, as `serve-port` and `serve-token` in Dray's home name it.
 /// Read at every connect, since a restarted server listens on a fresh port.
@@ -41,6 +44,8 @@ final class IslandPanel: NSPanel {
 @MainActor
 final class Delegate: NSObject, NSApplicationDelegate {
     private var panel: IslandPanel?
+    /// The pills' own window, beside the panel and never key; see `PillsView`.
+    private var pills: NSPanel?
     private var composer: Composer?
     private var hotkey: ModifierTap?
     private var keys: Any?
@@ -111,18 +116,14 @@ final class Delegate: NSObject, NSApplicationDelegate {
         composer.hide = { [weak self, weak composer] in
             composer?.shown = false
             self?.closeKey?.held = false
+            self?.showPills()
             self?.settle()
         }
         composer.present = { [weak self] in self?.show() }
         composer.pillChanged = { [weak self] in
             guard let self, let composer = self.composer, !composer.shown else { return }
-            if !composer.attention.isEmpty {
-                place()
-                // Drawn, never key: the pill must not take keys from the app being typed in.
-                self.panel?.orderFrontRegardless()
-            } else {
-                settle()
-            }
+            if composer.hasPill { place() }
+            showPills()
         }
         composer.reposition = { [weak self] in self?.place() }
         composer.capture = { [weak self] in self?.capture() }
@@ -144,12 +145,23 @@ final class Delegate: NSObject, NSApplicationDelegate {
         panel.hasShadow = false
         panel.contentView = FirstClickHostingView(rootView: IslandView(composer: composer).environment(composer.store))
         self.panel = panel
+        // A plain borderless panel cannot become key, which is the point of it.
+        let pills = NSPanel(contentRect: NSRect(origin: .zero, size: Self.size),
+                            styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
+                            backing: .buffered, defer: false)
+        pills.level = .statusBar
+        pills.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        pills.isOpaque = false
+        pills.backgroundColor = .clear
+        pills.hasShadow = false
+        pills.contentView = FirstClickHostingView(rootView: PillsView(composer: composer).environment(composer.store))
+        self.pills = pills
         // Only losing the keys moves the hint; getting them back waits for the next open, so it never flickers.
         NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak composer] _ in
             MainActor.assumeIsolated { composer?.keyed = false }
         }
         // The panel's keys, here rather than on views, which answer only
-        // while focus sits inside them. Key codes: Escape 53, N 45, F 3, ↓ 125, ↑ 126.
+        // while focus sits inside them. Key codes: Escape 53, N 45, F 3, ↓ 125, ↑ 126, A 0, E 14, T 17, P 35, Tab 48.
         keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak composer, weak panel] e in
             // A capture's overlay holds the keys while it runs: Esc there cancels it, not the panel.
             guard panel?.isVisible == true, let composer, composer.shown, !composer.capturing else { return e }
@@ -168,6 +180,13 @@ final class Delegate: NSObject, NSApplicationDelegate {
             case (45, .command): composer.pick(.new)
             case (3, .command): composer.searches += 1
             case (36, .command): composer.addTyped()
+            case (1, .command) where composer.ask == nil: Task { await composer.saveDraft() }
+            // The app's composer chords, only where the bar they drive is drawn.
+            case (0, [.command, .shift]) where composer.target == .new: composer.nextAgent()
+            case (14, [.command, .shift]) where composer.target == .new: composer.nextEffort()
+            case (17, [.command, .shift]) where composer.target == .new: composer.worktree.toggle()
+            case (35, [.command, .shift]) where composer.target == .new: composer.nextProject()
+            case (48, .shift) where composer.target == .new: composer.nextModel()
             // A closed list opens on an arrow only over an empty input; over
             // text, the arrows belong to the caret.
             case (125, []) where composer.openMenu == nil && (composer.listShown || composer.typing.isEmpty): composer.move(1)
@@ -205,9 +224,32 @@ final class Delegate: NSObject, NSApplicationDelegate {
                 }
             }
         }, "com.yogesh.dray.island.show" as CFString, nil, .deliverImmediately)
+        // A session finished where Dray would have posted its banner. The ids
+        // queue under `island.done`, since a Darwin notification carries none.
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { Delegate.shared?.sessionsDone() }
+            }
+        }, "com.yogesh.dray.island.done" as CFString, nil, .deliverImmediately)
         // The tap's twin for other processes: Dray.app, or a script driving the panel.
         DistributedNotificationCenter.default().addObserver(forName: .init("com.yogesh.dray.island.tap"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.pressed() }
+        }
+    }
+
+    /// Dray's inbox of finished sessions, one empty file each; `island_done_dir` in apps.rs names it too.
+    static let doneDir = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Caches/com.yogesh.dray.island/done")
+
+    /// Takes the finished sessions Dray dropped, oldest first, deleting only
+    /// the files read, so one landing meanwhile waits for its own notification.
+    func sessionsDone() {
+        let fm = FileManager.default
+        let files = (try? fm.contentsOfDirectory(at: Self.doneDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        func stamp(_ url: URL) -> Date { (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast }
+        for file in files.sorted(by: { stamp($0) < stamp($1) }) {
+            try? fm.removeItem(at: file)
+            composer?.finished(file.lastPathComponent)
         }
     }
 
@@ -242,7 +284,12 @@ final class Delegate: NSObject, NSApplicationDelegate {
     /// at every press like the key, so a stray tap never puts the panel up.
     private func pressed() {
         guard let composer else { return }
-        if composer.shown {
+        if composer.shown, composer.sent {
+            // Under Sent the panel is on its way out, so a tap opens it afresh
+            // rather than dictating; the new visit cancels the pending close.
+            composer.opened()
+            panel?.makeKeyAndOrderFront(nil)
+        } else if composer.shown {
             Task { await composer.toggleDictation() }
         } else if UserDefaults.standard.string(forKey: "island.tap") == "double",
                   lastTap.map({ Date().timeIntervalSince($0) > 0.4 }) ?? true {
@@ -308,14 +355,27 @@ final class Delegate: NSObject, NSApplicationDelegate {
         closeKey?.held = true
     }
 
-    /// Takes the window down once the close animation has run, and only if
-    /// nothing reopened it or put a pill up meanwhile.
+    /// Takes the window down once the close animation has run, unless
+    /// something reopened it meanwhile; leaving is what hands the keys back.
     private func settle() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self, let panel, let composer, !composer.shown else { return }
-            // Ordered out even with a pill to draw, since that is what hands the keys back.
             panel.orderOut(nil)
-            if !composer.attention.isEmpty { panel.orderFrontRegardless() }
+        }
+    }
+
+    /// The pill window up while there is a pill to draw, and away otherwise.
+    /// Drawn, never key: a pill must not take keys from the app being typed in.
+    private func showPills() {
+        guard let pills, let composer else { return }
+        if composer.hasPill {
+            pills.orderFrontRegardless()
+        } else {
+            // After the pill's own exit, which the view animates.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, let composer = self.composer, !composer.hasPill else { return }
+                self.pills?.orderOut(nil)
+            }
         }
     }
 
@@ -371,6 +431,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
         }
         composer.notchHeight = composer.placement == .notch ? screen.safeAreaInsets.top : 0
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        pills?.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 
     /// A Dock that hides itself reserves nothing in `visibleFrame`, so the panel
