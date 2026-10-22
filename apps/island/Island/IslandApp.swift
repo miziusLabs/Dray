@@ -59,6 +59,10 @@ final class Delegate: NSObject, NSApplicationDelegate {
     private static weak var shared: Delegate?
     /// The first of a double tap, while the panel is shut.
     private var lastTap: Date?
+    /// A tap is waiting on Dray's selection; another meanwhile must not open twice.
+    private var askingApp = false
+    /// A tap landed while asking, which is the double tap that opens listening.
+    private var dictateOnOpen = false
     private var annotation: Annotation?
     /// Over a capture's or a drawing's overlay, so dictation stays in sight and in reach.
     private static let overOverlay = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
@@ -212,6 +216,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
         composer.recordingChanged = { [weak self] recording in
             if recording { self?.startAnnotation() } else { self?.endAnnotation() }
         }
+        composer.takeKeys = { [weak self] in self?.panel?.makeKeyAndOrderFront(nil) }
         registerCapture()
         // Dray's Settings writes the picks and then says so, through `notifyutil -p`.
         // A C callback captures nothing, so it finds the delegate through a static;
@@ -297,12 +302,32 @@ final class Delegate: NSObject, NSApplicationDelegate {
             panel?.makeKeyAndOrderFront(nil)
         } else if composer.shown {
             Task { await composer.toggleDictation() }
+        } else if askingApp {
+            // The panel is on its way up, so this is the tap that dictates.
+            dictateOnOpen.toggle()
         } else if UserDefaults.standard.string(forKey: "island.tap") == "double",
                   lastTap.map({ Date().timeIntervalSince($0) > 0.4 }) ?? true {
             lastTap = Date()
         } else {
             lastTap = nil
+            open()
+        }
+    }
+
+    /// A tap over Dray's window opens on the session that window has open,
+    /// asked before the panel shows so the title never flips under the reader.
+    /// The app answers nothing unless its window has focus, so every tap asks.
+    private func open() {
+        guard let composer, !askingApp else { return }
+        askingApp = true
+        Task {
+            await composer.adoptAppSelection()
+            askingApp = false
             show()
+            if dictateOnOpen {
+                dictateOnOpen = false
+                await composer.toggleDictation()
+            }
         }
     }
 
