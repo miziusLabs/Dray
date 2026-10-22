@@ -19,6 +19,13 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.4 · 2026-10-22
+
+### Fixed
+
+- After an update, the Island restarts on the new version when Dray opens,
+  instead of running the old one until you quit it.
+
 ## 0.29.3 · 2026-10-22
 
 ### Improved
