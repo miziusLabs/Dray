@@ -69,7 +69,6 @@ final class Delegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         waitForServer()
-        restartWhenReplaced()
         // Open PRs' checks move on their own; read them while the panel is up, as the phone does on screen.
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -90,21 +89,33 @@ final class Delegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
+    private static func binaryDate() -> Date? {
+        (try? Bundle.main.executableURL?.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+    private let startedOn = Delegate.binaryDate()
+    /// Dray launched while the panel was open or a screenshot ran; the restart waits for it to end.
+    private var updatePending = false
+    /// The replacement is launching; a second ping meanwhile would start a second one.
+    private var restarting = false
+
     /// An update swaps the bundle under a running island, and Dray's `open` only
-    /// finds this one still up, so it moves itself onto the new binary — while
-    /// hidden, never under the reader's hands.
-    private func restartWhenReplaced() {
-        let modified = { (try? Bundle.main.executableURL?.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate }
-        let started = modified()
-        Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard self?.panel?.isVisible != true, let now = modified(), now != started else { return }
-                let config = NSWorkspace.OpenConfiguration()
-                config.createsNewApplicationInstance = true
-                config.environment = ProcessInfo.processInfo.environment
-                NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, error in
-                    if error == nil { DispatchQueue.main.async { NSApp.terminate(nil) } }
-                }
+    /// finds this one still up, so every Dray launch pings it and it moves itself
+    /// onto the new binary — while hidden, never under the reader's hands. A
+    /// screenshot hides the panel without being done with it, so it waits too.
+    private func updateIfReplaced() {
+        guard !restarting, let now = Self.binaryDate(), now != startedOn else { return }
+        guard panel?.isVisible != true, composer?.capturing != true else {
+            updatePending = true
+            return
+        }
+        updatePending = false
+        restarting = true
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        config.environment = ProcessInfo.processInfo.environment
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, error in
+            DispatchQueue.main.async {
+                if error == nil { NSApp.terminate(nil) } else { self.restarting = false }
             }
         }
     }
@@ -242,6 +253,11 @@ final class Delegate: NSObject, NSApplicationDelegate {
                 MainActor.assumeIsolated { Delegate.shared?.sessionsDone() }
             }
         }, "com.yogesh.dray.island.done" as CFString, nil, .deliverImmediately)
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { Delegate.shared?.updateIfReplaced() }
+            }
+        }, "com.yogesh.dray.island.update" as CFString, nil, .deliverImmediately)
         // The tap's twin for other processes: Dray.app, or a script driving the panel.
         DistributedNotificationCenter.default().addObserver(forName: .init("com.yogesh.dray.island.tap"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.pressed() }
@@ -357,6 +373,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
                 composer.capturing = false
                 // Dictation may have stopped during the flight or the cut, where `endAnnotation` left the level to this.
                 panel.level = annotation == nil ? .statusBar : Self.overOverlay
+                if updatePending { updateIfReplaced() }
             }
             var shot: Capture.Shot?
             var failed: String?
@@ -393,6 +410,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self, let panel, let composer, !composer.shown else { return }
             panel.orderOut(nil)
+            if updatePending { updateIfReplaced() }
         }
     }
 
