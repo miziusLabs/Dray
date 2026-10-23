@@ -9,6 +9,7 @@ import AgentBeam from "@/components/browser/AgentBeam";
 import Favicon, { hostOf } from "@/components/browser/Favicon";
 import FileIcon from "@/components/FileIcon";
 import GlobeFilledIcon from "@/components/icons/GlobeFilledIcon";
+import Orb from "@/components/Orb";
 import ShortcutKeys from "@/components/ShortcutKeys";
 import TabMenu from "@/components/browser/TabMenu";
 import { ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -118,7 +119,11 @@ export default function ViewTabs({
   cwd,
   alignX = 0,
   rename,
+  working = false,
 }: {
+  /// Mid-turn: off Chat, the chat tab's icon says so, since the transcript
+  /// that would is not on screen.
+  working?: boolean;
   sessionId: string;
   /// The session's own title and how to change it; absent where the chat
   /// stands for a group rather than one session.
@@ -167,7 +172,12 @@ export default function ViewTabs({
   const present: Item[] = [
     {
       key: "chat",
-      icon: <ChatBubbleOvalLeftIcon className={MARK} />,
+      icon:
+        working && tab !== "chat" ? (
+          <Orb state="working" label="Working" size={16} />
+        ) : (
+          <ChatBubbleOvalLeftIcon className={MARK} />
+        ),
       label: title,
       active: tab === "chat",
       pick: () => onChange("chat"),

@@ -2934,6 +2934,7 @@ function App() {
               }
               tab={viewTab}
               onChange={setViewTab}
+              working={busy}
               branch={prBranch}
               cwd={shownSession.cwd}
               // Not past a parent's breadcrumb, whose width the lead leaves out.
