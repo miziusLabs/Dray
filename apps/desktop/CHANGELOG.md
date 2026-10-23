@@ -19,6 +19,14 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.7 · 2026-10-23
+
+### Fixed
+
+- The Island no longer crashes when it closes right after a send.
+- A message sent from the Island is no longer followed by an old
+  "done" alert for that session.
+
 ## 0.29.6 · 2026-10-23
 
 ### Fixed
