@@ -19,6 +19,17 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.5 · 2026-10-23
+
+### Improved
+
+- **Duplicate a browser tab.** It's in the tab's right-click menu.
+- The Chat tab shows the working orb while you're on another view.
+- A link opened in the browser shows its address straight away, with a
+  load line under the toolbar while the page loads.
+- Sending from the Island says Sent at once, and answering a card plays
+  the send sound.
+
 ## 0.29.4 · 2026-10-22
 
 ### Fixed
