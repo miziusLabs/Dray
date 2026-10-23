@@ -19,6 +19,13 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.6 · 2026-10-23
+
+### Fixed
+
+- The Island shows on every desktop and over fullscreen apps again,
+  instead of sometimes staying on one desktop.
+
 ## 0.29.5 · 2026-10-23
 
 ### Improved
