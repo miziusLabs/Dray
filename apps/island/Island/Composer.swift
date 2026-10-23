@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Observation
 
 /// One line of the message being built, in the order it was said or typed,
@@ -96,6 +97,7 @@ final class Composer {
     var shown = false {
         didSet {
             if oldValue, !shown { released() } else if !oldValue, shown { leaving = nil; coverDone() }
+            if shown != oldValue { Sound.keepAwake(shown) }
         }
     }
     /// Whether the panel has held the keys since it opened, which is when a bare Esc reaches it.
@@ -269,7 +271,7 @@ final class Composer {
 
     /// Dray in front sounds its own notice, so a chime here would double it.
     private func chime() {
-        if !Self.drayInFront { Sound.done?.play() }
+        if !Self.drayInFront { Sound.done?.playInBackground() }
     }
 
     /// The panel shut: what was held is shown now, as the pill, with its one sound.
@@ -692,27 +694,66 @@ final class Composer {
         guard dictation == .idle else { return false }
         let text = prompt, files = attachments
         guard canSend, !sending, !saving, let target else { return false }
+        if target == .new, projectPath == nil {
+            notice = "Pick a project first."
+            return false
+        }
         sending = true
         defer { sending = false }
-        // Only what went out is cleared: the draft stays editable while the request runs.
-        let sentRows = Set(rows.map(\.id)), sentTyping = typing
+        // Sent is said here and the request runs behind it: the server answers
+        // only after a session read and a git snapshot, ~200ms the reader would
+        // otherwise watch. The message leaves the draft whole first, so nothing
+        // typed after Return can join it.
+        let sentRows = rows, sentTyping = typing
+        rows = []
+        typing = ""
+        Sound.send?.playInBackground()
+        flash("Sent")
         let sent: SessionKey?
+        var failure: String?
         switch target {
         case .session(let k):
             sent = await store.send(k, text, attachments: files) ? k : nil
-            if sent == nil { notice = store.lastError }
+            if sent == nil { failure = store.lastError }
         case .new:
             sent = await create(text, files)
+            if sent == nil { failure = notice }
         }
-        guard let sent else { return false }
-        rows.removeAll { sentRows.contains($0.id) }
-        if typing == sentTyping { typing = "" }
+        guard let sent else {
+            restore(sentRows, sentTyping, to: target, failure ?? "Couldn't send.")
+            return false
+        }
         lastUsed = sent.id
         UserDefaults.standard.set(sent.id, forKey: "island.lastSession")
-        self.target = .session(sent)
-        Sound.send?.play()
-        flash("Sent")
+        // A pick made while the request ran is the reader's, and outranks this one.
+        if self.target == target { self.target = .session(sent) }
         return true
+    }
+
+    /// A send that failed behind its Sent comes back as the draft, on the
+    /// session it was for, the panel open on it if the flash already closed it.
+    /// A draft begun since for somewhere else is the reader's and is left
+    /// alone, so the failed message goes to the clipboard instead of into it,
+    /// each file as its path, since a label like `[Image 1]` would lose it.
+    private func restore(_ sentRows: [Row], _ sentTyping: String, to dest: Target, _ why: String) {
+        var why = why
+        if target == dest || (rows.isEmpty && typing.isEmpty) {
+            target = dest
+            rows = sentRows + rows
+            typing = typing.isEmpty ? sentTyping : sentTyping + " " + typing
+        } else {
+            NSPasteboard.general.clearContents()
+            let text = (sentRows.map { $0.file ?? $0.text } + [sentTyping])
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            NSPasteboard.general.setString(text, forType: .string)
+            why += " The message is on the clipboard."
+        }
+        sent = false
+        present()
+        // Last: the draft's setters and opening the panel both clear it.
+        notice = why
     }
 
     /// Says it went, then closes the panel, or turns to a card held while the
@@ -856,7 +897,7 @@ final class Composer {
             }
             dictation = .recording
             listShown = false
-            Sound.start?.play()
+            Sound.start?.playInBackground()
             Task { await pollLevel() }
         } catch {
             dictation = .idle
@@ -939,7 +980,7 @@ final class Composer {
         case "text":
             if let text = o.value?.string, !text.isEmpty {
                 rows.append(Row(text: text, said: true))
-                Sound.stop?.play()
+                Sound.stop?.playInBackground()
             }
             return true
         case "empty":
@@ -975,4 +1016,29 @@ enum Sound {
     static let done = NSSound(named: "notification")
     /// Shimmer lift from `demo/send-sound.html`, rendered at 25%.
     static let send = NSSound(named: "send")
+
+    /// Silence playing while the panel is open. macOS powers the output down
+    /// a few seconds after the last sound, and waking it put the send sound a
+    /// beat behind its Sent; the panel is the only place that sound can come from.
+    private static let silence: AVAudioEngine = {
+        let engine = AVAudioEngine()
+        _ = engine.mainMixerNode
+        return engine
+    }()
+
+    static func keepAwake(_ on: Bool) {
+        NSSound.queue.async {
+            if on { try? silence.start() } else { silence.stop() }
+        }
+    }
+}
+
+extension NSSound {
+    fileprivate static let queue = DispatchQueue(label: "island.sound", qos: .userInteractive)
+
+    /// `play()` blocks until the output device is awake — 774ms measured on a
+    /// send — so it runs off the main thread, where it held up the Sent it rang for.
+    func playInBackground() {
+        Self.queue.async { self.stop(); self.play() }
+    }
 }
