@@ -15,16 +15,19 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  version:
+  prepare:
+    name: Prepare
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
-      changed: ${{ steps.version.outputs.changed }}
+      bumped: ${{ steps.version.outputs.bumped }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the version bump
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - id: version
+      - name: Read and validate the version
+        id: version
         env:
           BEFORE: ${{ github.event.before }}
         run: |
@@ -53,19 +56,22 @@ jobs:
               echo "::error::Tag $tag already points to a different commit"
               exit 1
             fi
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
           fi
 
   build:
-    needs: version
-    if: needs.version.outputs.changed == 'true'
+    name: Build (macOS)
+    needs: prepare
+    if: needs.prepare.outputs.bumped == 'true'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the release commit
+        uses: actions/checkout@v4
 
-      - id: channel
+      - name: Select the release channel
+        id: channel
         env:
-          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           if [[ "$RELEASE_TAG" == *-* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
@@ -73,9 +79,11 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: ./.github/actions/desktop-setup
+      - name: Set up the desktop build
+        uses: ./.github/actions/desktop-setup
 
-      - uses: apple-actions/import-codesign-certs@v3
+      - name: Import signing certificate
+        uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -87,7 +95,8 @@ jobs:
           brew install xcodegen
           apps/island/build.sh apps/desktop/src-tauri/target/island
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build and upload release artifacts
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -103,9 +112,23 @@ jobs:
           POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
         with:
           projectPath: apps/desktop
-          tagName: ${{ needs.version.outputs.tag }}
-          releaseName: ${{ needs.version.outputs.tag }}
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: ${{ needs.prepare.outputs.tag }}
           releaseCommitish: ${{ github.sha }}
+          releaseDraft: true
           prerelease: ${{ steps.channel.outputs.prerelease }}
           generateReleaseNotes: true
           args: --target universal-apple-darwin --features cef --config src-tauri/tauri.cef.conf.json --config src-tauri/tauri.island.conf.json
+
+  publish:
+    name: Publish
+    needs: [prepare, build]
+    if: needs.prepare.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false
