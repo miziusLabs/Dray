@@ -193,7 +193,7 @@ export default function AttachProjectDialog({
               title's end, and the description keeps its full measure. Drawn
               only once a server is added — with none there is no choice. */}
           <div className="flex min-h-7 items-center gap-2">
-            <DialogTitle>Attach project</DialogTitle>
+            <DialogTitle>Select project</DialogTitle>
             {remotes.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

@@ -1,4 +1,4 @@
-import { Folder, FolderPlus } from "lucide-react";
+import { Folder } from "lucide-react";
 import { useState } from "react";
 
 import AttachProjectDialog from "@/components/composer/AttachProjectDialog";
@@ -71,8 +71,8 @@ export default function ProjectSelector({
           onClick={onAttach}
           className="gap-1.5 px-1.5 text-ui text-muted-foreground"
         >
-          <FolderPlus className="size-3.5 shrink-0" />
-          Attach project
+          <Folder className="size-3.5 shrink-0" />
+          Select project
         </Button>
         {dialog}
       </>
@@ -97,7 +97,7 @@ export default function ProjectSelector({
                     open shape reads as a shard rather than a folder. */}
                 <Folder className="size-3.5 shrink-0 fill-current" />
                 <span className="truncate">
-                  {value ? basename(displayPath(value)) : "Attach project"}
+                  {value ? basename(displayPath(value)) : "Select project"}
                   {value && serverOfPath(value) !== LOCAL && (
                     <span className="text-muted-foreground/50">-{serverName(serverOfPath(value))}</span>
                   )}
@@ -144,8 +144,8 @@ export default function ProjectSelector({
           </DropdownMenuRadioGroup>
   
           <DropdownMenuItem onSelect={onAttach} className="text-ui">
-            <FolderPlus />
-            Attach project…
+            <Folder />
+            Select project…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
