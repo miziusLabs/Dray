@@ -19,6 +19,18 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.11 · 2026-10-27
+
+### Improved
+
+- Codex sessions use full access on iOS.
+- The project selector uses clearer names.
+
+### Fixed
+
+- Sidebar session cards have proper right padding.
+- Tooltips no longer have borders.
+
 ## 0.29.10 · 2026-10-27
 
 ### New
