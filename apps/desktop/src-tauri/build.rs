@@ -7,6 +7,15 @@ fn main() {
 
     #[cfg(feature = "desktop")]
     desktop();
+
+    // GNU ld gives every exported symbol an ordinal, and a Windows DLL runs out
+    // of them at 65,535 — this crate's own `cdylib` has more than that, so
+    // linking it fails with `export ordinal too large`. Nothing on Windows loads
+    // that library (the app is a binary, and the `cdylib` exists for mobile),
+    // so its export table can be empty here.
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("gnu") {
+        println!("cargo:rustc-link-arg-cdylib=-Wl,--exclude-all-symbols");
+    }
 }
 
 /// `tauri build`'s Windows resource step, with the application manifest moved out
