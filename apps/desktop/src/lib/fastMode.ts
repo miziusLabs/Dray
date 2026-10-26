@@ -10,14 +10,14 @@ import type { AgentEvent, Harness, Model, ModelId } from "@/types/events";
 /// disagreement is a control that does nothing or a setting with no control.
 ///
 /// - `in-place` — Claude Code's `apply_flag_settings`, fx's `fast` config
-///   option, grok's model twin. Each moves a running child.
-/// - `on-spawn` — Codex. `serviceTier` rides the spawn, so a change respawns.
+///   option, grok's model twin and Codex's `serviceTier` on the next
+///   `turn/start`. Each moves a running child.
 /// - `none` — pi, which has no route to one.
-export type FastModeSupport = "none" | "in-place" | "on-spawn";
+export type FastModeSupport = "none" | "in-place";
 
 export const FAST_MODE_BY_HARNESS: Record<Harness, FastModeSupport> = {
   claude_code: "in-place",
-  codex: "on-spawn",
+  codex: "in-place",
   fx: "in-place",
   pi: "none",
   // grok's fast tier is a **model id** (`grok-4.7-build-fast`) rather than a

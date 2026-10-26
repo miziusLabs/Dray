@@ -1115,16 +1115,6 @@ impl SessionManager {
         // the kill would destroy not just a turn in flight but every background
         // task the child is still carrying. The index still records the pick
         // below, so the next idle send is what respawns.
-        // Codex respawns for its model and its stance as well. Not for want of
-        // a per-turn override — `turn/start` carries model, effort and approval
-        // policy, and this restates all three on every turn — but because a
-        // stance is *two* settings and only one of them has a turn-level form.
-        // `sandbox` is thread-level only, so applying a stance change in place
-        // would move the approval policy and leave the sandbox where it was:
-        // exactly the half-applied setting that makes a session more or less
-        // free than the reader asked for. Respawning settles both at once, and
-        // `thread/resume` carries the conversation across it.
-        //
         //
         // A login that ran out is the other reason, and it is not a setting at
         // all — see [`respawn_needed`], which is where the two part company.
@@ -1134,9 +1124,8 @@ impl SessionManager {
             (s.effort != effort && !caps.applies_effort_in_place)
                 || (s.model != model && !caps.applies_model_in_place)
                 || (s.permission_mode != permission_mode && !caps.applies_permission_in_place)
-                // Only the harness whose fast mode rides the spawn. `InPlace`
-                // is applied below without replacing anything.
-                || (s.fast != fast && caps.fast_mode == FastMode::OnSpawn)
+            // No fast-mode arm: every harness that has one moves a running
+            // child, so a pick never replaces anything.
         });
 
         if respawn_needed(auth_failed, turn_in_flight, busy, settings_changed) {
@@ -1531,6 +1520,12 @@ impl SessionManager {
             );
         }
 
+        // `thread/fork` names the parent's thread, so a Codex parent that never
+        // got one has nothing to fork — refused before a row exists.
+        if parent.harness == Harness::Codex && parent.thread_id.is_none() {
+            bail!("this Codex session has no conversation to fork yet");
+        }
+
         // Resolved against the project rather than the parent's own name, so a
         // fork of a fork can't collide with the tree it came from — and against
         // the index as well as disk, since a fork's tree does not exist until
@@ -1568,7 +1563,14 @@ impl SessionManager {
             crate::store::copy_pi_session_file(session_id, fork_id).await?;
         }
 
-        let item = parent.fork(fork_id, worktree_name.as_deref());
+        let mut item = parent.fork(fork_id, worktree_name.as_deref());
+        // The parent's Codex thread, taken now rather than looked up at the
+        // first send: a parent deleted in between would otherwise leave a fork
+        // that fails every send. Safe while `fork_from` stands, since that is
+        // what makes the first spawn fork this thread instead of resuming it.
+        if parent.harness == Harness::Codex {
+            item.thread_id = parent.thread_id.clone();
+        }
         append_session_index_item(item.clone()).await?;
 
         Ok(SessionSnapshot {
@@ -2053,13 +2055,9 @@ impl Session {
                 // makes the tree itself, because Codex has no `-w`. A name
                 // arriving here is a caller that skipped that, and a session
                 // that silently ran in the wrong tree is the failure worth
-                // refusing outright. A fork needs `thread/fork`, and forking
-                // into the parent's own conversation is the same kind of wrong.
+                // refusing outright.
                 if worktree_name.is_some() {
                     bail!("Codex cannot create a worktree — it has to be made first");
-                }
-                if fork_from.is_some() {
-                    bail!("Codex sessions cannot be forked yet");
                 }
 
                 crate::harness::codex::init(
@@ -2071,6 +2069,7 @@ impl Session {
                     cwd,
                     session_cwd,
                     is_new_session,
+                    fork_from,
                     app,
                 )
                 .await
@@ -2440,6 +2439,13 @@ impl Session {
             return Ok(());
         }
 
+        // Codex takes it on the next `turn/start`, which sticks to the thread.
+        if let Transport::Rpc(thread) = &self.stdin {
+            thread.update(|settings| settings.set_model(model));
+            self.model = model.id.clone();
+            return Ok(());
+        }
+
         write_line(
             self.stdin.lines()?,
             &ControlLine::new(ControlRequest::SetModel { model: &model.arg }),
@@ -2469,6 +2475,13 @@ impl Session {
                 .await
                 .context("this session's model is not one grok lists")?;
             crate::harness::grok::set_model(session, &model, fast).await?;
+            self.fast = fast;
+            return Ok(());
+        }
+
+        // Codex's `serviceTier`, on the next `turn/start`.
+        if let Transport::Rpc(thread) = &self.stdin {
+            thread.update(|settings| settings.set_fast(fast));
             self.fast = fast;
             return Ok(());
         }
@@ -2517,6 +2530,14 @@ impl Session {
             if let Some(effort) = effort {
                 crate::harness::pi::set_effort(client, effort).await?;
             }
+            self.effort = effort;
+            return Ok(());
+        }
+
+        // Codex's rides the next `turn/start`. `None` leaves the field off,
+        // which keeps the thread's level until the next respawn.
+        if let Transport::Rpc(thread) = &self.stdin {
+            thread.update(|settings| settings.set_effort(effort));
             self.effort = effort;
             return Ok(());
         }
@@ -2614,6 +2635,14 @@ impl Session {
     pub async fn set_permission_mode(&mut self, mode: ApprovalPolicy) -> Result<()> {
         if let Transport::Fx(session) = &self.stdin {
             crate::harness::fx::set_mode(session, mode).await?;
+            self.permission_mode = mode;
+            return Ok(());
+        }
+
+        // Both of Codex's halves ride the next `turn/start`: the approval
+        // policy and the sandbox as a policy object.
+        if let Transport::Rpc(thread) = &self.stdin {
+            thread.update(|settings| settings.set_stance(mode));
             self.permission_mode = mode;
             return Ok(());
         }
@@ -2974,7 +3003,10 @@ async fn deliver_prompt(
     // and the retry the error invites draws the reader's sentence twice.
     let codex = match transport {
         Transport::Rpc(thread) if send => {
-            Some((thread, crate::harness::codex::turn_input(thread, &text).await?))
+            Some((
+                thread,
+                crate::harness::codex::turn_input(thread, &text, &prepared.images).await?,
+            ))
         }
         _ => None,
     };
@@ -3022,9 +3054,9 @@ async fn deliver_prompt(
     }
 
     // Codex takes a prompt as a request that opens a turn, so the write is the
-    // send rather than a line the child picks up on its own schedule. Images
-    // ride a different shape there and are not wired yet; the text still goes.
-    // Its input was built above, where a failure could still be a no-op.
+    // send rather than a line the child picks up on its own schedule. Its
+    // input was built above, images included, where a failure could still be
+    // a no-op.
     if let Some((thread, input)) = codex {
         crate::harness::codex::start_turn(thread, input).await?;
         return Ok((text, true));

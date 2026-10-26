@@ -146,7 +146,7 @@ impl<'de> Deserialize<'de> for ModelId {
 pub fn default_model_for(harness: Harness) -> Option<ModelId> {
     match harness {
         Harness::ClaudeCode => Some(ModelId::new("opus")),
-        Harness::Codex => Some(ModelId::new("gpt-6-sol")),
+        Harness::Codex => Some(ModelId::new("gpt-6.1-sol")),
         // Multi-provider, both of them, so any constant here might name a model
         // the reader has no key for. Their own settings already say.
         Harness::Pi | Harness::Fx => None,
@@ -349,8 +349,18 @@ pub fn codex_models() -> Vec<Model> {
     // GPT-6 rows are keyed by their wire id rather than an `gpt6_*` spelling:
     // a Codex that listed them before this build named them was already minted
     // under the wire id, so sessions on disk hold `gpt-6-sol` and must keep
-    // finding their row.
+    // finding their row. 6.1 Sol is keyed the same way for the same reason
+    // (Codex 0.164 listed it first), and 5.6 Sol moves under More so the
+    // table's own top level stays the three ⇧⇥ cycles.
     vec![
+        Model::new(
+            "gpt-6.1-sol",
+            "gpt-6.1-sol",
+            "6.1 Sol",
+            with_ultra.clone(),
+            Some(Medium),
+        )
+        .with_fast(),
         Model::new(
             "gpt6_astra",
             "gpt-6-astra",
@@ -374,7 +384,8 @@ pub fn codex_models() -> Vec<Model> {
             with_ultra.clone(),
             Some(Medium),
         )
-        .with_fast(),
+        .with_fast()
+        .under_more(),
         Model::new(
             "gpt-6-luna",
             "gpt-6-luna",
@@ -560,7 +571,7 @@ mod tests {
 
         assert_eq!(
             offered.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(),
-            ["6 Astra", "6 Sol", "5.6 Sol", "6 Luna", "5.6 Terra", "5.6 Luna"]
+            ["6.1 Sol", "6 Astra", "6 Sol", "5.6 Sol", "6 Luna", "5.6 Terra", "5.6 Luna"]
         );
         // Medium, where Claude's default is High. Cheap to state, and the one
         // number a reader would otherwise have to open the picker to learn.
@@ -574,7 +585,7 @@ mod tests {
             .filter(|m| !m.secondary)
             .map(|m| m.label.as_str())
             .collect();
-        assert_eq!(cycled, ["6 Astra", "6 Sol", "5.6 Sol"]);
+        assert_eq!(cycled, ["6.1 Sol", "6 Astra", "6 Sol"]);
     }
 
     /// `ultra` is per model, not per family — Codex reports it on Sol and Terra
@@ -594,6 +605,7 @@ mod tests {
         assert_eq!(
             tops,
             [
+                ("6.1 Sol".to_string(), Some(Effort::Ultra)),
                 ("6 Astra".to_string(), Some(Effort::Ultra)),
                 ("6 Sol".to_string(), Some(Effort::Ultra)),
                 ("5.6 Sol".to_string(), Some(Effort::Ultra)),
@@ -722,6 +734,7 @@ mod tests {
             "fable",
             "haiku",
             "gpt6_astra",
+            "gpt-6.1-sol",
             "gpt-6-sol",
             "gpt-6-luna",
             "gpt56_sol",
@@ -803,7 +816,7 @@ mod tests {
     #[test]
     fn only_the_multi_provider_harnesses_have_no_default_model() {
         assert_eq!(default_model_for(Harness::ClaudeCode), Some(id("opus")));
-        assert_eq!(default_model_for(Harness::Codex), Some(id("gpt-6-sol")));
+        assert_eq!(default_model_for(Harness::Codex), Some(id("gpt-6.1-sol")));
         assert_eq!(default_model_for(Harness::Grok), Some(id("grok-4.7")));
         assert_eq!(default_model_for(Harness::Pi), None);
         assert_eq!(default_model_for(Harness::Fx), None);
