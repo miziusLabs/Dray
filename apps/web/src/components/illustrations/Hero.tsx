@@ -11,7 +11,7 @@ import Panel, {
   Section,
   VercelMark,
 } from "@/components/app/Panel";
-import Sidebar, { GroupBreak, SessionRow, TaskHint } from "@/components/app/Sidebar";
+import Sidebar, { GroupBreak, SessionRow } from "@/components/app/Sidebar";
 import { AddTab, BranchButton, ChatIcon, ItemTab } from "@/components/app/Tabs";
 import { GitHubGlyph } from "@/components/GitHubGlyph";
 import {
@@ -57,7 +57,6 @@ export function Hero({ className, startX = 240 }: { className?: string; startX?:
             <GroupBreak />
             <SessionRow title="Draw placed tags as chips" pr={<PrMergedGlyph />} trailing="2d" />
             <SessionRow title="Clamp long user bubbles" pr={<PrMergedGlyph />} trailing="3d" />
-            <TaskHint />
           </Sidebar>
         }
         tabs={

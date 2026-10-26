@@ -40,7 +40,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import ShortcutKeys, { DigitKeys } from "@/components/ShortcutKeys";
+import ShortcutKeys from "@/components/ShortcutKeys";
 import { useSwipe } from "@/lib/swipe";
 import { playSwipeTick } from "@/lib/tick";
 import { Kbd } from "@/components/ui/kbd";
@@ -1501,12 +1501,6 @@ export default function Sidebar({
   );
 }
 
-/// The ⌘⇧↑/↓ and jump hint, laid out on the session rows' own edges so it reads
-/// as the last row rather than as a caption under the list.
-///
-/// With nothing selected both arrows land on the same place — the newest session
-/// — so showing the pair would offer a choice that isn't one, and one arrow is
-/// drawn.
 function ShortcutHint({
   selected,
   grouped,
@@ -1521,16 +1515,6 @@ function ShortcutHint({
 }) {
   return (
     <>
-      {/* Both ways to move between tasks on one row, at its two ends. No
-          label: beside both sets of keys there was room for one word, and the
-          keys say it. */}
-      <HintRow>
-        <ShortcutKeys
-          ids={selected ? ["session.prev", "session.next"] : ["session.next"]}
-          className={HINT_KEYS}
-        />
-        <DigitKeys id="session.jump" className={HINT_KEYS} />
-      </HintRow>
       {/* The chord steps every heading — projects included — but it is only
           taught where a grid exists. Two chords a keystroke apart in the same
           corner is one too many to read past, and the project jump is the half

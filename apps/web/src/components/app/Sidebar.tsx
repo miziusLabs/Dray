@@ -33,9 +33,7 @@ export function Keys({ caps, className }: { caps: ReactNode[]; className?: strin
   );
 }
 
-/// Held back from the stock keycap: in a hint row the cap *is* the row, so the
-/// default fill makes a hint the loudest thing in the list.
-const HINT_KEYS = "[&_kbd]:bg-muted/40 [&_kbd]:text-muted-foreground/60";
+export const HINT_KEYS = "[&_kbd]:bg-muted/40 [&_kbd]:text-muted-foreground/60";
 
 /// The three strip buttons are drawn as session rows — `/80` text, the same
 /// inset — since the pane is otherwise one list.
@@ -243,42 +241,5 @@ export function SessionRow({
         </span>
       </div>
     </div>
-  );
-}
-
-/// The chord taught at the foot of the list.
-export function HintRow({
-  label,
-  children,
-  className,
-}: {
-  label?: string;
-  children?: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cx(
-        "flex min-h-7 items-center justify-between pr-0.5 pl-2 text-ui text-muted-foreground/60",
-        className,
-      )}
-    >
-      {label}
-      {children}
-    </div>
-  );
-}
-
-export { HINT_KEYS };
-
-/// The foot of the list: both ways to move between tasks on one row, at its
-/// two ends. No label — beside both sets of keys there is room for one word,
-/// and the keys say it.
-export function TaskHint() {
-  return (
-    <HintRow>
-      <Keys caps={["⌘", "Shift", "↑ ↓"]} className={HINT_KEYS} />
-      <Keys caps={["⌃", "1–0"]} className={HINT_KEYS} />
-    </HintRow>
   );
 }
