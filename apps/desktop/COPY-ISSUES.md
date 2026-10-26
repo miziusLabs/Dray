@@ -459,7 +459,7 @@ same word the control at the top of it did. Closing an issue moves to the
 Details pane, which carries the same menu.
 
 **Rows name the number alone under GitHub** — `#121`, not
-`monorepo-labs/dray#121`. Every row is in the one repository, so the slug would
+`miziusLabs/Dray#121`. Every row is in the one repository, so the slug would
 spend the narrowest column saying the same thing over and over. The *tag* that
 lands in the text keeps it whole, since a prompt has no such context and the
 identifier there is an address.
@@ -521,7 +521,7 @@ The first names neither tracker, because this row can be either: a session
 carries both kinds of link, and the page is where both are connected.
 
 **A panel row names the number alone too**, `#108` rather than
-`monorepo-labs/dray#108`: the slug is most of a narrow panel's width spent on
+`miziusLabs/Dray#108`: the slug is most of a narrow panel's width spent on
 the half that is the same for every issue in the repository, and the panel draws
 one issue at a time.
 
@@ -657,7 +657,7 @@ One shape, whoever wrote it — picked from the composer's `#` menu, typed by
 hand, or appended by the CLI's `--issue`:
 
 > #DRA-53 Add issue tracker integration
-> #monorepo-labs/dray#121 Add oh-my-pi as a fourth harness
+> #miziusLabs/Dray#121 Add oh-my-pi as a fourth harness
 
 The title is in the text rather than drawn beside it. That is what lets the
 model read it, the transcript paint it, and the composer's overlay stay in

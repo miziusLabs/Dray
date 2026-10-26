@@ -152,6 +152,20 @@ describe("isFilePath", () => {
 });
 
 describe("absolutePath", () => {
+  it("resolves Windows mentions without prepending the session directory to absolute paths", () => {
+    expect(absolutePath("C:\\work\\a.ts", "D:\\repo")).toBe("C:\\work\\a.ts");
+    expect(absolutePath("\\\\server\\share\\a.ts", "D:\\repo")).toBe("\\\\server\\share\\a.ts");
+    expect(absolutePath("./src/a.ts", "C:\\repo\\")).toBe("C:\\repo\\src\\a.ts");
+  });
+
+  it("finds Windows file references and keeps their line numbers", () => {
+    expect(findFilePaths("See C:\\repo\\a.ts:12 and D:/repo/b.ts#L7").map(({ path, line }) => ({ path, line }))).toEqual([
+      { path: "C:\\repo\\a.ts", line: 12 },
+      { path: "D:/repo/b.ts", line: 7 },
+    ]);
+    expect(findFilePaths("See \\\\server\\share\\a.ts")[0]?.path).toBe("\\\\server\\share\\a.ts");
+    expect(findFilePaths("See https://example.com/a.ts")).toEqual([]);
+  });
   it("passes an absolute path through", () => {
     expect(absolutePath("/Users/me/a.ts", "/repo")).toBe("/Users/me/a.ts");
   });

@@ -4,7 +4,7 @@
 //! environment, not the user's. On macOS that means a `PATH` of roughly
 //! `/usr/bin:/bin:/usr/sbin:/sbin` — none of which holds `claude`, which
 //! installs to `~/.local/bin` or a node version manager's bin directory. So
-//! `Command::new("claude")` resolves under `pnpm tauri dev` and fails from the
+//! `crate::binpath::command("claude")` resolves under `pnpm tauri dev` and fails from the
 //! bundle, which is the same binary behaving differently by how it was started.
 //!
 //! Resolved once into a `OnceCell` and reused: the login-shell probe below costs
@@ -15,11 +15,31 @@ use crate::harness::Harness;
 use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 use tokio::process::Command;
 use tokio::sync::OnceCell;
+
+/// Starts background tools without creating console windows in the Windows app.
+pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    command
+}
+
+/// Applies the same console behavior to synchronous background tools.
+pub fn std_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command
+}
 
 static CLAUDE_PATH: OnceCell<PathBuf> = OnceCell::const_new();
 /// Not a `OnceCell` like the two beside it, because this one caches an
@@ -280,7 +300,7 @@ async fn speaks_app_server(bin: &Path) -> bool {
         .into_iter()
         .chain(node_dir().cloned())
         .collect();
-    let Ok(output) = Command::new(bin)
+    let Ok(output) = crate::binpath::command(bin)
         .arg("--help")
         .env("PATH", child_path(extra))
         .output()
@@ -315,10 +335,21 @@ async fn resolve(bin: &str) -> Option<PathBuf> {
 
 /// Walks the `PATH` this process actually inherited. Covers `tauri dev` and any
 /// launch from a terminal, where nothing further is needed.
+fn binary_candidates(dir: &Path, bin: &str) -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        if Path::new(bin).extension().is_some() { return vec![dir.join(bin)]; }
+        let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".into());
+        extensions.split(';').filter(|ext| !ext.is_empty()).map(|ext| dir.join(format!("{bin}{ext}"))).collect()
+    }
+    #[cfg(not(windows))]
+    vec![dir.join(bin)]
+}
+
 fn search_path(bin: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
-        .map(|dir| dir.join(bin))
+        .flat_map(|dir| binary_candidates(&dir, bin))
         .find(|candidate| is_executable(candidate))
 }
 
@@ -328,7 +359,7 @@ fn known_dirs() -> Vec<PathBuf> {
         return Vec::new();
     };
 
-    vec![
+    let mut dirs = vec![
         home.join(".local/bin"),
         home.join(".claude/local"),
         home.join(".bun/bin"),
@@ -354,7 +385,15 @@ fn known_dirs() -> Vec<PathBuf> {
             .join("bin"),
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
-    ]
+    ];
+    #[cfg(windows)]
+    {
+        for (var, suffix) in [("APPDATA", "npm"), ("LOCALAPPDATA", "Microsoft/WinGet/Links"), ("LOCALAPPDATA", "Programs/claude"), ("LOCALAPPDATA", "pnpm"), ("ProgramFiles", "nodejs"), ("ProgramFiles", "Git/cmd")] {
+            if let Some(root) = std::env::var_os(var) { dirs.push(PathBuf::from(root).join(suffix)); }
+        }
+        dirs.push(home.join("scoop/shims"));
+    }
+    dirs
 }
 
 /// The directory each resolved CLI sits in, for the child's `PATH`.
@@ -435,7 +474,7 @@ fn search_known_dirs(bin: &str) -> Option<PathBuf> {
 
     if let Some(found) = candidates
         .iter()
-        .map(|dir| dir.join(bin))
+        .flat_map(|dir| binary_candidates(&dir, bin))
         .find(|candidate| is_executable(candidate))
     {
         return Some(found);
@@ -495,7 +534,7 @@ fn find_versioned(root: &Path, depth: usize, layouts: &[&str], bin: &str) -> Opt
     dirs.into_iter().rev().find_map(|version| {
         layouts
             .iter()
-            .map(|layout| version.join(layout).join(bin))
+            .flat_map(|layout| binary_candidates(&version.join(layout), bin))
             .find(|candidate| is_executable(candidate))
     })
 }
@@ -513,7 +552,7 @@ async fn login_shell_which(bin: &str) -> Option<PathBuf> {
     }
     let path = slot.as_ref()?.as_ref()?;
     std::env::split_paths(path)
-        .map(|dir| dir.join(bin))
+        .flat_map(|dir| binary_candidates(&dir, bin))
         .find(|candidate| is_executable(candidate))
 }
 
@@ -528,10 +567,11 @@ static LOGIN_PATH_STALE: AtomicBool = AtomicBool::new(false);
 /// `-l` matters more than it looks: without it zsh reads `.zshrc` only, and a
 /// `PATH` exported from `.zprofile` — where the installers write it — stays
 /// invisible.
+#[cfg(unix)]
 async fn login_shell_path() -> Option<OsString> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
-    let output = Command::new(shell)
+    let output = crate::binpath::command(shell)
         // Behind a marker, since an rc file is free to print on its own.
         // `printenv` rather than `$PATH`, which fish expands as a list, and by
         // absolute path, since the `PATH` being read need not hold it.
@@ -551,6 +591,9 @@ async fn login_shell_path() -> Option<OsString> {
     Some(path.trim_end().into())
 }
 
+#[cfg(windows)]
+async fn login_shell_path() -> Option<OsString> { std::env::var_os("PATH") }
+
 #[cfg(unix)]
 fn is_executable(path: &std::path::Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -565,7 +608,7 @@ fn is_executable(path: &std::path::Path) -> bool {
     path.is_file()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
@@ -672,5 +715,22 @@ mod tests {
         assert!(speaks_app_server(&codex).await);
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn finds_executable_and_npm_shims_in_versioned_installs() {
+        let root = std::env::temp_dir().join(format!("dray-binpath-{}", uuid::Uuid::now_v7()));
+        let bin = root.join("22/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("codex.CMD"), "@echo off").unwrap();
+        std::fs::write(bin.join("claude.EXE"), "test").unwrap();
+        assert_eq!(find_versioned(&root, 1, &["bin"], "codex"), Some(bin.join("codex.CMD")));
+        assert_eq!(find_versioned(&root, 1, &["bin"], "claude"), Some(bin.join("claude.EXE")));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -30,7 +30,7 @@ pub mod binpath;
 pub mod cef;
 // Compiled without the feature too: it needs nothing of CEF's, and that is
 // what keeps its types in `events.ts` and its tests in a bare `cargo test`.
-#[cfg(all(feature = "desktop", target_os = "macos"))]
+#[cfg(feature = "desktop")]
 pub mod chromium;
 #[cfg(all(feature = "desktop", target_os = "macos"))]
 mod trackpad;
@@ -65,6 +65,10 @@ pub mod projects;
 #[cfg(feature = "desktop")]
 pub mod quit;
 #[cfg(feature = "desktop")]
+#[cfg(target_os = "macos")]
+pub mod launchd;
+#[cfg(all(feature = "desktop", not(target_os = "macos")))]
+#[path = "background.rs"]
 pub mod launchd;
 // The desktop app serves too, behind Remote access (remote_access.rs).
 #[cfg(any(feature = "serve", feature = "desktop"))]
@@ -727,8 +731,11 @@ pub fn run() {
     // window nobody could report from — is covered like any other.
     analytics::install_panic_hook();
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_macos_permissions::init())
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_macos_permissions::init());
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -937,6 +944,7 @@ pub fn run() {
                 // `AppHandle::restart` relaunches from — so `restart` here is a
                 // quit that never comes back. That was DRA-160; the updater
                 // launches the new bundle itself before asking to exit.
+                #[cfg(target_os = "macos")]
                 unsafe { libc::_exit(0) }
             }
         });

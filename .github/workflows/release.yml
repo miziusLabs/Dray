@@ -35,6 +35,7 @@ jobs:
     outputs:
       channel: ${{ steps.channel.outputs.channel }}
       dmg: ${{ steps.mirror.outputs.dmg }}
+      release_body: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/checkout@v4
 
@@ -217,18 +218,72 @@ jobs:
           put "$(ls "$BUNDLE"/macos/*.app.tar.gz)" "${GITHUB_REF_NAME}/Dray_universal.app.tar.gz"
           echo "dmg=$(basename "$DMG")" >> "$GITHUB_OUTPUT"
 
-  # The manifests live on a branch rather than in the release, because
-  # `/releases/latest/` skips prereleases — so beta would have no fixed URL.
-  # GitHub Pages serves this branch; the artifact URLs inside are rewritten
-  # onto the R2 mirror the build job uploaded to.
-  manifest:
+  windows:
     needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+          POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          prerelease: ${{ needs.build.outputs.channel == 'beta' }}
+          releaseBody: ${{ needs.build.outputs.release_body }}
+          generateReleaseNotes: true
+          args: --config src-tauri/tauri.windows.conf.json
+
+  # The manifests live on a branch rather than in the release, because
+  # `/releases/latest/` skips prereleases. The updater reads the branch files
+  # from raw.githubusercontent.com, and their asset URLs point at the R2 mirror.
+  manifest:
+    needs: [build, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: updates
           fetch-depth: 1
+
+      - name: Prepare the updates branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if remote_ref="$(git ls-remote --heads origin refs/heads/updates)"; then
+            if [ -n "$remote_ref" ]; then
+              git fetch --no-tags origin refs/heads/updates:refs/remotes/origin/updates
+              git switch --track -c updates origin/updates
+            else
+              git switch --orphan updates
+              git rm -rf --ignore-unmatch .
+              git clean -fdx
+            fi
+          else
+            echo "could not query origin for the updates branch" >&2
+            exit 1
+          fi
 
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -244,9 +299,30 @@ jobs:
         run: |
           set -euo pipefail
           : "${DOWNLOADS_URL:?}" "${DMG:?}"
+
+          mkdir -p windows-assets
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern '*-setup.exe*' \
+            --dir windows-assets
+          WINDOWS_SETUP="$(find windows-assets -maxdepth 1 -type f -name '*-setup.exe' -print -quit)"
+          : "${WINDOWS_SETUP:?Windows NSIS setup executable was not found in the release}"
+          WINDOWS_SETUP="$(basename "$WINDOWS_SETUP")"
+          for asset in windows-assets/*; do
+            aws s3 cp "$asset" "s3://${R2_BUCKET}/${GITHUB_REF_NAME}/$(basename "$asset")" \
+              --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+
           gh release download "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --pattern latest.json --output release.json --clobber
+          if ! jq -e --arg setup "$WINDOWS_SETUP" \
+            '[.platforms[] | select((.url | split("/")[-1]) == $setup and (.signature | length) > 0)] | length > 0' \
+            release.json >/dev/null; then
+            echo "latest.json has no signed entry for $WINDOWS_SETUP" >&2
+            exit 1
+          fi
 
           # The signature covers the bytes, not the URL, so moving the host
           # changes nothing the client verifies.
@@ -293,9 +369,6 @@ jobs:
           fi
           rm manifest.json
 
-          # Pages would otherwise run these through Jekyll.
-          touch .nojekyll
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -304,18 +377,22 @@ jobs:
           # the job over a push that had nothing to say.
           git diff --cached --quiet || {
             git commit -m "release ${GITHUB_REF_NAME}"
-            git push
+            git push origin updates
           }
 
-          # The site's download button follows stable.json, so the same guard
-          # that keeps the manifest from moving backwards keeps it too — and
-          # only after the push landed, since a push lost to a concurrent
-          # release means this one did not win. A server-side copy of the key
-          # the build job uploaded; nothing is re-sent.
+          # The site's download buttons follow stable.json, so this guard keeps
+          # the fixed macOS and Windows installer keys on the same version. Copy
+          # them only after the manifest push lands, since a lost concurrent
+          # push means this release did not win.
           if [ "$(jq -r '.version // empty' stable.json 2>/dev/null)" = "$NEW" ]; then
             aws s3 cp "s3://${R2_BUCKET}/${GITHUB_REF_NAME}/${DMG}" "s3://${R2_BUCKET}/Dray_universal.dmg" \
               --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
               --metadata-directive REPLACE \
               --content-type application/x-apple-diskimage \
+              --cache-control "public, max-age=300"
+            aws s3 cp "s3://${R2_BUCKET}/${GITHUB_REF_NAME}/${WINDOWS_SETUP}" "s3://${R2_BUCKET}/Dray_x64-setup.exe" \
+              --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+              --metadata-directive REPLACE \
+              --content-type application/octet-stream \
               --cache-control "public, max-age=300"
           fi

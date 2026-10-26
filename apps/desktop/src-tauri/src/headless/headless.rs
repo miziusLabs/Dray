@@ -20,12 +20,18 @@
 
 #[path = "../browser/automation.rs"]
 pub mod automation;
+/// The reader-facing browser records its pages here too, so the URL bar's
+/// suggestions and the empty state's recent list are not permanently empty.
+#[cfg(windows)]
+#[path = "../browser/history.rs"]
+mod history;
 #[path = "download.rs"]
 mod download;
 
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -41,7 +47,157 @@ pub struct TabInfo {
     pub url: String,
     pub title: String,
     pub active: bool,
+    pub loading: bool,
     pub discarded: bool,
+}
+
+/// One tab as the frontend's strip reads it. The Mac's CEF tabs carry more
+/// (favicon, history arrows, an error line); a headless page has no favicon
+/// and Dray's own pane draws none of the rest.
+#[cfg(windows)]
+fn tab_json(t: TabInfo) -> Value {
+    json!({
+        "id": t.id,
+        "url": t.url,
+        "title": t.title,
+        "favicon": "",
+        "loading": t.loading,
+        "active": t.active,
+        "canGoBack": false,
+        "canGoForward": false,
+        "error": Value::Null,
+        "discarded": t.discarded,
+    })
+}
+
+/// The Windows pane reads the same browser the agent drives, without a public debug port.
+#[cfg(windows)]
+pub async fn browser_view(session_id: String) -> Result<Value, String> {
+    let tabs: Vec<Value> = tabs_of(&session_id).into_iter().map(tab_json).collect();
+    let mut width = 1440;
+    let mut height = 900;
+    let image = if let Some(tab) = active_id(&session_id) {
+        awake(tab).await?;
+        touch(tab);
+        if let Ok(metrics) = automation::cdp(tab, "Page.getLayoutMetrics", json!({})).await {
+            width = metrics["cssLayoutViewport"]["clientWidth"].as_u64().unwrap_or(width);
+            height = metrics["cssLayoutViewport"]["clientHeight"].as_u64().unwrap_or(height);
+        }
+        automation::cdp(tab, "Page.captureScreenshot", json!({ "format": "jpeg", "quality": 70, "captureBeyondViewport": false }))
+            .await?["data"].as_str().map(str::to_string)
+    } else { None };
+    Ok(json!({ "tabs": tabs, "image": image, "width": width, "height": height }))
+}
+
+/// Limits page input to this session's active tab.
+#[cfg(windows)]
+pub async fn browser_input(session_id: String, action: Value) -> Result<Value, String> {
+    match action["action"].as_str() {
+        Some("pointer" | "wheel" | "text") => {
+            let tab = active_id(&session_id).ok_or("no tab is open")?;
+            awake(tab).await?;
+            match action["action"].as_str().unwrap_or_default() {
+                "pointer" => {
+                    let x = action["x"].as_f64().filter(|x| x.is_finite()).ok_or("invalid pointer")?.clamp(0.0, 16384.0);
+                    let y = action["y"].as_f64().filter(|y| y.is_finite()).ok_or("invalid pointer")?.clamp(0.0, 16384.0);
+                    let button = match action["button"].as_str() {
+                        Some("right") => "right",
+                        Some("middle") => "middle",
+                        _ => "left",
+                    };
+                    for kind in ["mousePressed", "mouseReleased"] {
+                        automation::cdp(tab, "Input.dispatchMouseEvent", json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": 1 })).await?;
+                    }
+                }
+                "wheel" => {
+                    let delta = action["delta"].as_f64().filter(|x| x.is_finite()).ok_or("invalid scroll")?.clamp(-1800.0, 1800.0);
+                    automation::cdp(tab, "Input.dispatchMouseEvent", json!({ "type": "mouseWheel", "x": 720, "y": 450, "deltaX": 0, "deltaY": delta })).await?;
+                }
+                _ => {
+                    let text = action["text"].as_str().ok_or("missing text")?;
+                    if text.len() > 1_000_000 { return Err("pasted text is too long".into()); }
+                    automation::cdp(tab, "Input.insertText", json!({ "text": text })).await?;
+                }
+            }
+            Ok(Value::Null)
+        }
+        _ => {
+            let action: dray_proto::BrowserAction = serde_json::from_value(action).map_err(|e| e.to_string())?;
+            automation::run(&session_id, action).await.map(|(_, result)| result)
+        }
+    }
+}
+
+/// The reader's tab strip and URL bar, over the browser this server owns. The
+/// Mac answers these in the app because CEF draws there; on Windows Chromium
+/// lives in the server, so the same commands belong here.
+#[cfg(windows)]
+pub async fn browser_open(session_id: String, url: String, new_tab: bool) -> Result<(), String> {
+    open_url(&session_id, url, new_tab).await
+}
+
+/// The session's tabs, in strip order, shaped as the frontend's `BrowserTab`.
+#[cfg(windows)]
+pub fn browser_tabs(session_id: String) -> Vec<Value> {
+    tabs_of(&session_id).into_iter().map(tab_json).collect()
+}
+
+#[cfg(windows)]
+pub async fn browser_activate(session_id: String, id: i32) -> Result<(), String> {
+    activate_tab(&session_id, id).await
+}
+
+#[cfg(windows)]
+pub async fn browser_close(session_id: String, id: i32) -> Result<(), String> {
+    close_tab(&session_id, id).await
+}
+
+#[cfg(windows)]
+pub async fn browser_nav(session_id: String, action: String) -> Result<(), String> {
+    nav(&session_id, &action).await
+}
+
+/// Moves `id` to place `to` among this session's tabs, leaving every other
+/// session's where they are: `TABS` holds every session's in one list.
+#[cfg(windows)]
+pub fn browser_move(session_id: String, id: i32, to: usize) -> Vec<Value> {
+    {
+        let mut tabs = TABS.lock().unwrap();
+        if let Some(from) = tabs.iter().position(|t| t.id == id && t.session == session_id) {
+            let item = tabs.remove(from);
+            let places: Vec<usize> = (0..tabs.len()).filter(|&i| tabs[i].session == session_id).collect();
+            let at = match places.get(to) {
+                Some(&i) => i,
+                None => places.last().map_or(from, |&i| i + 1),
+            };
+            tabs.insert(at, item);
+        }
+    }
+    browser_tabs(session_id)
+}
+
+/// The pages this session's browser visited, newest first — the same record the
+/// Mac keeps beside a session's profile, written here as pages commit.
+#[cfg(windows)]
+pub fn browser_history(session_id: String) -> Vec<history::Visit> {
+    history::list(&browser_dir(), &session_id)
+}
+
+#[cfg(windows)]
+pub async fn chromium_status() -> Value { download::desktop_status().await }
+
+#[cfg(windows)]
+pub async fn chromium_download() -> Result<(), String> {
+    let _ = download::binary().await;
+    Ok(())
+}
+
+#[cfg(windows)]
+pub async fn chromium_remove() -> Result<(), String> {
+    if !CHROMES.lock().unwrap().is_empty() {
+        return Err("Chromium is in use. Close its tabs and restart the server before removing it.".into());
+    }
+    download::remove_desktop().await
 }
 
 struct Tab {
@@ -54,6 +210,9 @@ struct Tab {
     url: String,
     title: String,
     loading: bool,
+    /// The address last filed in the session's history, so a tab reporting the
+    /// same page twice — its attach, then a title change — counts one visit.
+    recorded: String,
 }
 
 /// One session's Chromium.
@@ -116,6 +275,7 @@ fn tabs_of(session: &str) -> Vec<TabInfo> {
             url: t.url.clone(),
             title: t.title.clone(),
             active: active == Some(t.id),
+            loading: t.loading,
             discarded: t.target.is_none() && !t.loading,
         })
         .collect()
@@ -351,6 +511,7 @@ async fn create_tab(session: &str, url: &str, id: Option<i32>) -> Result<i32, St
                 url: url.to_string(),
                 title: String::new(),
                 loading: true,
+                recorded: String::new(),
             }),
         }
     }
@@ -413,7 +574,10 @@ async fn chrome_for(session: &str) -> Result<(), String> {
     // and dropped, once and for the life of the process, where Chromium says
     // it cannot. Without it a renderer exploit runs as this server's user,
     // which is what the agent's own shell already is.
+    #[cfg(unix)]
     let root = unsafe { libc::geteuid() } == 0;
+    #[cfg(not(unix))]
+    let root = false;
     let sandboxed = !root && !NO_SANDBOX.load(Ordering::Relaxed);
     match launch(session, &exe, sandboxed).await {
         Err(e) if sandboxed && e.contains("No usable sandbox") => {
@@ -436,6 +600,7 @@ async fn launch(session: &str, exe: &Path, sandboxed: bool) -> Result<(), String
         let (r, w) = std::io::pipe().map_err(|e| e.to_string())?;
         (w, r)
     };
+    #[cfg(unix)]
     let (read_fd, write_fd) = (chrome_reads.as_raw_fd(), chrome_writes.as_raw_fd());
     let mut command = tokio::process::Command::new(exe);
     command
@@ -452,6 +617,7 @@ async fn launch(session: &str, exe: &Path, sandboxed: bool) -> Result<(), String
     // fd 3 is what Chromium reads, fd 4 what it writes. Copied clear of 3 and
     // 4 first, since either end may already sit on one of them; the copies
     // are close-on-exec and the dup2'd pair is not.
+    #[cfg(unix)]
     unsafe {
         command.pre_exec(move || {
             let r = libc::fcntl(read_fd, libc::F_DUPFD_CLOEXEC, 10);
@@ -462,7 +628,11 @@ async fn launch(session: &str, exe: &Path, sandboxed: bool) -> Result<(), String
             Ok(())
         });
     }
+    #[cfg(windows)]
+    let inherited = windows_pipes(&mut command, &chrome_reads, &chrome_writes)?;
     let mut child = command.spawn().map_err(|e| format!("could not start Chromium: {e}"))?;
+    #[cfg(windows)]
+    drop(inherited);
     drop((chrome_reads, chrome_writes));
 
     let stderr = Arc::new(Mutex::new(String::new()));
@@ -553,6 +723,44 @@ async fn launch(session: &str, exe: &Path, sandboxed: bool) -> Result<(), String
         return Err(format!("Chromium did not start: {why}"));
     }
     Ok(())
+}
+
+/// Chromium adopts these pipe handles on Windows instead of Unix descriptors 3 and 4.
+#[cfg(windows)]
+fn windows_pipes(
+    command: &mut tokio::process::Command,
+    reads: &std::io::PipeReader,
+    writes: &std::io::PipeWriter,
+) -> Result<InheritedPipes, String> {
+    use std::os::windows::io::AsRawHandle;
+    let handles = [reads.as_raw_handle() as usize, writes.as_raw_handle() as usize];
+    let inherited = InheritedPipes(handles);
+    for handle in handles {
+        if unsafe { SetHandleInformation(handle as *mut _, 1, 1) } == 0 {
+            return Err(format!("could not share Chromium's pipe: {}", std::io::Error::last_os_error()));
+        }
+    }
+    command.arg(format!("--remote-debugging-io-pipes={},{}", handles[0], handles[1]));
+    command.creation_flags(0x08000000);
+    Ok(inherited)
+}
+
+#[cfg(windows)]
+struct InheritedPipes([usize; 2]);
+
+#[cfg(windows)]
+impl Drop for InheritedPipes {
+    fn drop(&mut self) {
+        for handle in self.0 {
+            unsafe { SetHandleInformation(handle as *mut _, 1, 0); }
+        }
+    }
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn SetHandleInformation(handle: *mut std::ffi::c_void, mask: u32, flags: u32) -> i32;
 }
 
 /// The reader reached the end of the pipe: Chromium exited. Its tabs are kept
@@ -690,10 +898,22 @@ fn dispatch(session: &str, message: &Value) {
 /// A target's url and title onto the tab showing it.
 fn retitle(info: &Value) {
     let Some(target) = info["targetId"].as_str() else { return };
-    if let Some(t) = TABS.lock().unwrap().iter_mut().find(|t| t.target.as_deref() == Some(target)) {
+    let Some(mut tabs) = TABS.lock().ok() else { return };
+    if let Some(t) = tabs.iter_mut().find(|t| t.target.as_deref() == Some(target)) {
         t.url = info["url"].as_str().unwrap_or_default().to_string();
         t.title = info["title"].as_str().unwrap_or_default().to_string();
+        record_visit(t);
+        history::describe(&browser_dir(), &t.session, &t.url, Some(&t.title), None);
     }
+}
+
+/// Files the tab's current address in its session's history, once per address.
+fn record_visit(tab: &mut Tab) {
+    if tab.url.is_empty() || tab.recorded == tab.url {
+        return;
+    }
+    tab.recorded = tab.url.clone();
+    history::visit(&browser_dir(), &tab.session, &tab.url);
 }
 
 fn tab_by_cdp(cdp: &str) -> Option<i32> {
@@ -735,6 +955,7 @@ fn attached(session: &str, params: &Value) {
                 url: String::new(),
                 title: String::new(),
                 loading: true,
+                recorded: String::new(),
             });
             id
         });
@@ -743,6 +964,7 @@ fn attached(session: &str, params: &Value) {
             t.cdp = Some(cdp.to_string());
             t.url = info["url"].as_str().unwrap_or_default().to_string();
             t.title = info["title"].as_str().unwrap_or_default().to_string();
+            record_visit(t);
         }
         popup.then_some(id)
     };
@@ -831,6 +1053,7 @@ fn start_sweep() {
 /// Closes a session's Chromium and forgets its tabs, for settle and delete.
 pub fn close_session(session: &str) {
     automation::drop_recording(session);
+    history::forget(&browser_dir(), session);
     CHROMES.lock().unwrap().remove(session);
     let ids: Vec<i32> = TABS.lock().unwrap().iter().filter(|t| t.session == session).map(|t| t.id).collect();
     TABS.lock().unwrap().retain(|t| t.session != session);
@@ -838,4 +1061,36 @@ pub fn close_session(session: &str) {
         automation::forget(id);
     }
     set_active(session, None);
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    /// Exercises inherited Windows handles against Chromium, not a mocked CDP reply.
+    #[tokio::test]
+    #[ignore = "downloads Chromium and starts a real browser"]
+    async fn windows_browser_pipe_and_input() {
+        let temp = std::env::temp_dir().join(format!("dray-browser-{}", uuid::Uuid::new_v4()));
+        std::env::set_var("DRAY_HOME", &temp);
+        let deadline = Instant::now() + Duration::from_secs(180);
+        while download::binary().await.is_err() {
+            assert!(Instant::now() < deadline, "Chromium download did not finish");
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        let session = uuid::Uuid::new_v4().to_string();
+        open_url(&session, "about:blank".into(), true).await.unwrap();
+        let tab = active_id(&session).unwrap();
+        automation::wait_loaded(tab).await.unwrap();
+        automation::cdp(tab, "Runtime.evaluate", json!({"expression": "document.body.innerHTML='<input autofocus>'; document.querySelector('input').focus()"})).await.unwrap();
+        browser_input(session.clone(), json!({"action":"text", "text":"Windows pipe works"})).await.unwrap();
+        let result = automation::cdp(tab, "Runtime.evaluate", json!({"expression":"document.querySelector('input').value", "returnByValue":true})).await.unwrap();
+        assert_eq!(result["result"]["value"], "Windows pipe works");
+        let view = browser_view(session.clone()).await.unwrap();
+        assert!(!view["image"].as_str().unwrap().is_empty());
+        assert_eq!(view["tabs"].as_array().unwrap().len(), 1);
+        close_session(&session);
+        std::env::remove_var("DRAY_HOME");
+        let _ = tokio::fs::remove_dir_all(temp).await;
+    }
 }

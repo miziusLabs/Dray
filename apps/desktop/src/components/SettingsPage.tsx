@@ -81,7 +81,7 @@ import type {
 /// the next person with the same bug can find; a direct message is beside it for
 /// what an issue is too heavy for.
 const CONTACT_URL = "https://x.com/yogesharc";
-const REPO_URL = "https://github.com/monorepo-labs/dray";
+const REPO_URL = "https://github.com/miziusLabs/Dray";
 const ISSUES_URL = `${REPO_URL}/issues/new`;
 // The landing page's own link, so both ask through one door.
 const SPONSOR_URL = "https://www.patreon.com/c/yogesharc/membership";

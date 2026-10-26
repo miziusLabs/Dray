@@ -151,7 +151,7 @@ export default function AttachProjectDialog({
   const shown = (repos ?? []).filter(
     (r) => !needle || r.slug.toLowerCase().includes(needle) || r.description?.toLowerCase().includes(needle),
   );
-  const where = server === LOCAL ? "this Mac" : serverName(server);
+  const where = server === LOCAL ? "this computer" : serverName(server);
   // A pick the search has since hidden is not one the reader can see they
   // are attaching.
   const repo = shown.find((r) => r.slug === picked);
@@ -299,7 +299,7 @@ export default function AttachProjectDialog({
               autoFocus
             />
           ) : (
-            // The folder dialog sees this Mac alone.
+            // The folder dialog sees this computer alone.
             server === LOCAL && (
               <Button type="button" variant="ghost" disabled={!!cloning} onClick={() => void chooseFolder()}>
                 <Folder className="size-3.5 fill-current" />

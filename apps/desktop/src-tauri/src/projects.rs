@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::{fs, io::AsyncReadExt, process::Command, sync::Mutex};
+use tokio::{fs, io::AsyncReadExt, sync::Mutex};
 use ts_rs::TS;
 
 use crate::{
@@ -46,6 +46,21 @@ pub struct Project {
 
 static PROJECTS_LOCK: Mutex<()> = Mutex::const_new(());
 
+/// Rust's `canonicalize` spells Windows paths with the verbatim `\\?\` prefix,
+/// which Git Bash, the sidecar's own tools and the project picker do not
+/// understand. Strip it here, at the one place a project's path is minted.
+#[cfg(windows)]
+fn plain(path: PathBuf) -> String {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        return rest.to_string();
+    }
+    text.into_owned()
+}
+
 /// Resolves symlinks and drops any trailing slash, so `/x/proj` and `/x/proj/`
 /// can't become two projects and split the sidebar's grouping. A leading `~/`
 /// is the reader's home: typing a path on a server, they rarely know its
@@ -62,7 +77,14 @@ async fn canonical(path: &str) -> Result<String> {
         bail!("not a directory: {path}");
     }
 
-    Ok(resolved.to_string_lossy().into_owned())
+    #[cfg(windows)]
+    {
+        Ok(plain(resolved))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(resolved.to_string_lossy().into_owned())
+    }
 }
 
 fn home() -> Result<PathBuf> {
@@ -442,7 +464,7 @@ fn repo_name(slug: &str) -> Option<&str> {
 /// gh and git said, the sentence the reader would have seen in a terminal.
 async fn clone(slug: &str, dir: &Path, sink: &Sink) -> Result<(), String> {
     let bin = binpath::gh().await.ok_or(github::NO_CLI)?;
-    let mut child = Command::new(bin)
+    let mut child = crate::binpath::command(bin)
         .args(["repo", "clone", slug])
         .arg(dir)
         // git writes progress to a terminal alone unless asked.

@@ -16,13 +16,20 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 
-const { APP_COMMANDS, displayPath, fileSrc, invoke, qualify, serverOfSession, splitPath } = await import("./transport");
+const { APP_COMMANDS, displayPath, fileSrc, invoke, noteSession, qualify, serverOfSession, splitPath } = await import("./transport");
+const { IS_WINDOWS } = await import("./platform");
 
 beforeEach(() => {
   calls.length = 0;
 });
 
 describe("paths", () => {
+  it("keeps Windows drive and UNC paths distinct across servers", () => {
+    for (const path of ["C:\\work\\app", "D:/work/app", "\\\\host\\share\\app"]) {
+      expect(splitPath(qualify(path, "windows-server"))).toEqual({ server: "windows-server", path });
+      expect(qualify(path, "local")).toBe(path);
+    }
+  });
   it("round-trips a remote path and leaves a local one alone", () => {
     expect(qualify("/root/app", "vps1")).toBe("dray://vps1/root/app");
     expect(splitPath("dray://vps1/root/app")).toEqual({ server: "vps1", path: "/root/app" });
@@ -51,6 +58,19 @@ describe("invoke", () => {
     const block = lib.slice(lib.indexOf("generate_handler!["), lib.indexOf("])", lib.indexOf("generate_handler![")));
     const registered = [...block.matchAll(/^\s+(?:[a-z_]+::)*([a-z_]+),$/gm)].map((m) => m[1]);
     expect(new Set(registered)).toEqual(APP_COMMANDS);
+  });
+
+  it("sends the browser to whichever process draws it", async () => {
+    // CEF runs in the Mac app; Windows' headless Chromium runs in the local
+    // server, even for a session that lives on a remote one.
+    noteSession("browser-session", "remote-box");
+    await invoke("browser_tabs", { sessionId: "browser-session" });
+    if (IS_WINDOWS) {
+      expect(calls[0].cmd).toBe("server_invoke");
+      expect((calls[0].args as { server: string }).server).toBe("local");
+    } else {
+      expect(calls[0].cmd).toBe("browser_tabs");
+    }
   });
 
   it("routes by a qualified argument and unwraps it", async () => {

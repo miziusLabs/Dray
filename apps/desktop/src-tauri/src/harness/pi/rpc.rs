@@ -320,7 +320,15 @@ mod tests {
     /// a reader that ends on EOF is the only witness to that.
     #[tokio::test]
     async fn close_ends_the_child_rather_than_leaving_it_running() {
-        let mut child = tokio::process::Command::new("/bin/cat")
+        #[cfg(unix)]
+        let mut command = tokio::process::Command::new("/bin/cat");
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = tokio::process::Command::new("powershell.exe");
+            command.args(["-NoProfile", "-Command", "[Console]::In.ReadToEnd() | Out-Null"]);
+            command
+        };
+        let mut child = command
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -334,7 +342,12 @@ mod tests {
 
         client.close();
 
-        let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+        // `cat` answers at once and PowerShell does not: spawning it, loading
+        // its runtime and reaching `ReadToEnd` took longer than five seconds on
+        // a loaded Windows runner, which failed the run while `close` was
+        // working exactly as asked. The timeout is a hang guard, not a speed
+        // assertion, so it is generous enough for a cold PowerShell.
+        let status = tokio::time::timeout(Duration::from_secs(30), child.wait())
             .await
             .expect("the child outlived its EOF")
             .expect("wait");

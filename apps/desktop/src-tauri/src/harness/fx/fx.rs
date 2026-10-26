@@ -34,7 +34,7 @@ use std::sync::Arc;
 use crate::sink::Sink;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{Child, ChildStdout, Command},
+    process::{Child, ChildStdout},
     sync::Mutex,
     time::Duration,
 };
@@ -247,7 +247,7 @@ pub async fn init(
     }
 
     let bin = crate::binpath::fx().await;
-    let mut command = Command::new(&bin);
+    let mut command = crate::binpath::command(&bin);
 
     if let Some(endpoint) = crate::orchestration::child_endpoint() {
         command.env("DRAY_ENDPOINT", endpoint);

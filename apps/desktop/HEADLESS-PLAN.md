@@ -1,6 +1,6 @@
 # Stage 6: the browser on a remote server
 
-monorepo-labs/dray#430. An agent on a VPS gets `dray browser`, driving a
+miziusLabs/Dray#430. An agent on a VPS gets `dray browser`, driving a
 headless Chromium on that VPS. The reader's own browsing stays on the Mac, and
 the two are not connected: screenshots and recordings reach the reader through
 the transcript alone.

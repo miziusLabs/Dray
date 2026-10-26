@@ -35,7 +35,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 #[path = "../browser/automation.rs"]
 pub mod automation;
-#[path = "history.rs"]
+#[path = "../browser/history.rs"]
 mod history;
 
 const FRAMEWORK: &str = "Chromium Embedded Framework.framework";
@@ -1249,14 +1249,14 @@ wrap_display_handler! {
             }
             let url = url.map(CefString::to_string).unwrap_or_default();
             if let Some((session, _)) = history_target(self.tab) {
-                history::visit(&session, &url);
+                history::visit(&browser_dir(), &session, &url);
             }
             update_tab(self.tab, |t| t.url = url);
         }
         fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
             let title = title.map(CefString::to_string).unwrap_or_default();
             if let Some((session, url)) = history_target(self.tab) {
-                history::describe(&session, &url, Some(&title), None);
+                history::describe(&browser_dir(), &session, &url, Some(&title), None);
             }
             update_tab(self.tab, |t| t.title = title);
         }
@@ -1264,7 +1264,7 @@ wrap_display_handler! {
         fn on_favicon_urlchange(&self, _browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
             let first = icon_urls.and_then(first_string).unwrap_or_default();
             if let Some((session, url)) = history_target(self.tab) {
-                history::describe(&session, &url, None, Some(&first));
+                history::describe(&browser_dir(), &session, &url, None, Some(&first));
             }
             update_tab(self.tab, |t| t.favicon = first);
         }
@@ -1958,7 +1958,7 @@ pub fn browser_tabs(session_id: String) -> Vec<TabInfo> {
 /// The pages this session's browser visited, newest first.
 #[tauri::command]
 pub fn browser_history(session_id: String) -> Vec<history::Visit> {
-    history::list(&session_id)
+    history::list(&browser_dir(), &session_id)
 }
 
 #[tauri::command]
@@ -2110,7 +2110,7 @@ pub fn browser_pick(session_id: String, start: bool) -> Result<(), String> {
 /// Closes every tab a session holds, for settle and delete.
 pub fn close_session(session_id: &str) {
     automation::drop_recording(session_id);
-    history::forget(session_id);
+    history::forget(&browser_dir(), session_id);
     let session_id = session_id.to_string();
     let _ = on_main(move || {
         let browsers: Vec<Browser> = {

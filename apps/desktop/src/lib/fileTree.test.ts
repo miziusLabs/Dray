@@ -12,6 +12,11 @@ const dir = (path: string): DirEntry => ({
 
 const file = (path: string): DirEntry => ({ ...dir(path), isDir: false });
 
+it("expands Windows file parents and labels duplicate names by their Windows directories", () => {
+  expect(expandTo("src\\lib\\a.ts")).toEqual(["src", "src\\lib"]);
+  expect(tabLabels(["src\\index.ts", "test\\index.ts"])).toEqual(["index.ts — src", "index.ts — test"]);
+});
+
 describe("flattenTree", () => {
   const listings = new Map<string, DirEntry[]>([
     ["", [dir("src"), dir("src-tauri"), file("README.md")]],

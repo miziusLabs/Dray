@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 use ts_rs::TS;
 
 /// How long any one probe may take before its row reads as unknown.
@@ -498,7 +497,7 @@ impl Said {
 /// all, which is the half of the row worth having.
 async fn run(harness: Harness, args: &[&str], cwd: &str) -> anyhow::Result<Said> {
     let bin = binpath::agent_binary(harness).await;
-    let mut command = Command::new(&bin);
+    let mut command = crate::binpath::command(&bin);
     command
         .args(args)
         .env("PATH", agent_path(&bin))
@@ -1042,7 +1041,7 @@ pub async fn add_agent_account(
 /// nothing before doing it.
 async fn codex_set_key(key: &str) -> Result<(), String> {
     let bin = binpath::agent_binary(Harness::Codex).await;
-    let mut child = Command::new(&bin)
+    let mut child = crate::binpath::command(&bin)
         .args(["login", "--with-api-key"])
         .env("PATH", agent_path(&bin))
         .stdin(Stdio::piped())
@@ -1517,7 +1516,7 @@ mod tests {
                 }
                 // A key-taking option must be one of the two that can take one,
                 // or the field is drawn over a route that ends in a refusal.
-                for option in options.iter().filter(|o| o.needs_key) {
+                for _ in options.iter().filter(|o| o.needs_key) {
                     assert!(
                         matches!(harness, Harness::Codex | Harness::Pi),
                         "{} offers a key field it cannot honour",

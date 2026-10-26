@@ -1,15 +1,17 @@
 //! Each session's browser history: the pages its tabs landed on, newest
 //! first, for the empty state's recent list and the URL bar's suggestions.
 //!
-//! **Kept in the session's own profile directory**, so settling or deleting
-//! the session takes it along with the cookies. **Dray's record, not
+//! Shared by both browsers, which each pass their own root: CEF's profile
+//! directory in the Mac app, and the headless browser's on a server or the
+//! Windows app. **Kept in the session's own profile directory**, so settling or
+//! deleting the session takes it along with the cookies. **Dray's record, not
 //! Chromium's**: Chromium keeps one in the profile's `History`, but that is
 //! SQLite held under an exclusive lock while the profile is open, so reading
 //! it would cost a new dependency and a file copy per read.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -29,34 +31,42 @@ pub struct Visit {
     pub last: u64,
 }
 
-static HISTORY: Mutex<Option<HashMap<String, Vec<Visit>>>> = Mutex::new(None);
+/// Keyed by root and session, since one process can hold two browsers' roots —
+/// the Mac app compiles both, even though only one of them serves a session.
+type Key = (PathBuf, String);
+static HISTORY: Mutex<Option<HashMap<Key, Vec<Visit>>>> = Mutex::new(None);
 /// Sessions whose list changed since the writer last ran.
-static DIRTY: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+static DIRTY: Mutex<BTreeSet<Key>> = Mutex::new(BTreeSet::new());
 static WRITER: OnceLock<mpsc::Sender<()>> = OnceLock::new();
 /// How long the writer gathers changes before it writes, so a page cycling
 /// its title costs one write a second rather than one per title.
 const WRITE_AFTER: Duration = Duration::from_secs(1);
 
-fn path(session: &str) -> PathBuf {
-    super::browser_dir().join(session).join(FILE)
+fn path(root: &Path, session: &str) -> PathBuf {
+    root.join(session).join(FILE)
 }
 
-fn read(session: &str) -> Vec<Visit> {
-    std::fs::read(path(session)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+fn read(root: &Path, session: &str) -> Vec<Visit> {
+    std::fs::read(path(root, session)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-fn with<R>(session: &str, f: impl FnOnce(&mut Vec<Visit>) -> R) -> R {
+fn with<R>(root: &Path, session: &str, f: impl FnOnce(&mut Vec<Visit>) -> R) -> R {
+    let key = (root.to_path_buf(), session.to_string());
     let mut guard = HISTORY.lock().unwrap();
-    let list = guard.get_or_insert_with(HashMap::new).entry(session.to_string()).or_insert_with(|| read(session));
+    let list = guard
+        .get_or_insert_with(HashMap::new)
+        .entry(key)
+        .or_insert_with(|| read(root, session));
     f(list)
 }
 
-/// Marks the list for the writer, which is a thread of its own: these are
-/// called from CEF's display handlers on the main thread, where a disk
-/// write is a pause in the whole window. Changes in the last second before
-/// a quit are lost, which history can afford.
-fn save(session: &str) {
-    DIRTY.lock().unwrap().insert(session.to_string());
+/// Marks the list for the writer, which is a thread of its own: both callers
+/// write from a thread that must not block. CEF's display handlers run on the
+/// main thread, where a disk write is a pause in the whole window, and the
+/// headless browser's pipe reader carries every CDP reply. Changes in the last
+/// second before a quit are lost, which history can afford.
+fn save(root: &Path, session: &str) {
+    DIRTY.lock().unwrap().insert((root.to_path_buf(), session.to_string()));
     let tx = WRITER.get_or_init(|| {
         let (tx, rx) = mpsc::channel::<()>();
         let _ = std::thread::Builder::new().name("browser-history".into()).spawn(move || {
@@ -76,24 +86,24 @@ fn save(session: &str) {
 /// would bring it back. A forgotten session has no list here to write.
 fn flush() {
     let dirty = std::mem::take(&mut *DIRTY.lock().unwrap());
-    for session in dirty {
-        let list = HISTORY.lock().unwrap().as_ref().and_then(|m| m.get(&session).cloned());
+    for key in dirty {
+        let list = HISTORY.lock().unwrap().as_ref().and_then(|m| m.get(&key).cloned());
         if let Some(bytes) = list.and_then(|l| serde_json::to_vec(&l).ok()) {
-            let _ = std::fs::write(path(&session), bytes);
+            let _ = std::fs::write(path(&key.0, &key.1), bytes);
         }
     }
 }
 
 /// A main frame committed `url`. Only web pages count: `about:blank`, a
 /// `data:` page or DevTools is nowhere the reader would go back to.
-pub fn visit(session: &str, url: &str) {
+pub fn visit(root: &Path, session: &str, url: &str) {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return;
     }
     let last = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-    with(session, |list| {
+    with(root, session, |list| {
         record(list, url, last);
-        save(session);
+        save(root, session);
     });
 }
 
@@ -113,8 +123,8 @@ fn record(list: &mut Vec<Visit>, url: &str, last: u64) {
 
 /// The page at `url` reported its title or icon. Written only where it moved,
 /// since a page animating its title would otherwise rewrite the file per frame.
-pub fn describe(session: &str, url: &str, title: Option<&str>, favicon: Option<&str>) {
-    with(session, |list| {
+pub fn describe(root: &Path, session: &str, url: &str, title: Option<&str>, favicon: Option<&str>) {
+    with(root, session, |list| {
         let Some(v) = list.iter_mut().find(|v| v.url == url) else { return };
         let mut moved = false;
         if let Some(t) = title.filter(|t| !t.is_empty() && *t != v.title) {
@@ -126,7 +136,7 @@ pub fn describe(session: &str, url: &str, title: Option<&str>, favicon: Option<&
             moved = true;
         }
         if moved {
-            save(session);
+            save(root, session);
         }
     });
 }
@@ -134,18 +144,20 @@ pub fn describe(session: &str, url: &str, title: Option<&str>, favicon: Option<&
 /// Read from memory where the session has a list there, else from disk
 /// without keeping it: a read landing between `forget` and the profile's
 /// removal would otherwise hold the old list for the session's next life.
-pub fn list(session: &str) -> Vec<Visit> {
-    let cached = HISTORY.lock().unwrap().as_ref().and_then(|m| m.get(session).cloned());
-    cached.unwrap_or_else(|| read(session))
+pub fn list(root: &Path, session: &str) -> Vec<Visit> {
+    let key = (root.to_path_buf(), session.to_string());
+    let cached = HISTORY.lock().unwrap().as_ref().and_then(|m| m.get(&key).cloned());
+    cached.unwrap_or_else(|| read(root, session))
 }
 
 /// Drops the in-memory copy and any write pending for it, for a session
 /// whose profile is being removed, or an unsettled session would be handed
 /// the history it was settled with.
-pub fn forget(session: &str) {
-    DIRTY.lock().unwrap().remove(session);
+pub fn forget(root: &Path, session: &str) {
+    let key = (root.to_path_buf(), session.to_string());
+    DIRTY.lock().unwrap().remove(&key);
     if let Some(map) = HISTORY.lock().unwrap().as_mut() {
-        map.remove(session);
+        map.remove(&key);
     }
 }
 
@@ -171,5 +183,30 @@ mod tests {
         }
         assert_eq!(list.len(), CAP);
         assert_eq!(list[0].url, format!("https://{}.test/", CAP + 4));
+    }
+
+    /// Both callers pass a `PathBuf` for the root and an owned `String` for
+    /// the title, and both file their pages through these four functions. The
+    /// shapes are pinned here so a signature change fails on the platform that
+    /// runs, rather than in whichever build the other caller is compiled into.
+    #[test]
+    fn the_callers_shapes_read_back_through_one_root() {
+        let root = std::env::temp_dir().join(format!("dray-history-{}", uuid::Uuid::now_v7()));
+        let session = "01234567".to_string();
+        let url = "https://a.test/".to_string();
+        let title = "A page".to_string();
+
+        visit(&root, &session, &url);
+        describe(&root, &session, &url, Some(&title), None);
+        describe(&root, &session, &url, None, Some("https://a.test/icon.png"));
+
+        let listed = list(&root, &session);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].title, "A page");
+        assert_eq!(listed[0].favicon, "https://a.test/icon.png");
+
+        forget(&root, &session);
+        assert!(list(&root, &session).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

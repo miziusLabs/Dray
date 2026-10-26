@@ -52,6 +52,8 @@ type FilePathMatch = { start: number; end: number; path: string; line?: number }
 /// command and `I/O` stays prose. No `//`, which is what is left of a URL after
 /// its scheme.
 export function isFilePath(path: string): boolean {
+  if (/^[A-Za-z]:[\\/]/.test(path)) return path.length > 3;
+  if (/^\\\\[^\\]+\\[^\\]+/.test(path)) return true;
   if (!path.startsWith("/") || path.includes("//")) return false;
   return path.split("/").filter(Boolean).length >= 2;
 }
@@ -101,9 +103,9 @@ function namesAHost(segment: string): boolean {
 /// relative one announces nothing, so it has to earn the reading by ending in a
 /// filename.
 export function isRelativePath(path: string): boolean {
-  if (path.startsWith("/") || path.includes("//")) return false;
+  if (/^(?:[\\/]|[A-Za-z]:)/.test(path) || path.includes("//")) return false;
 
-  const parts = path.split("/");
+  const parts = path.split(/[\\/]/);
   if (parts.length < 2 || parts.some((part) => !part)) return false;
   if (namesAHost(parts[0])) return false;
   // A scoped package import — `@scope/pkg/index.js` — is the shape agent prose
@@ -231,7 +233,7 @@ export function findFilePaths(text: string): FilePathMatch[] {
   const found: FilePathMatch[] = [];
 
   for (let i = 0; i < text.length; i += 1) {
-    if (text[i] !== "/") continue;
+    if (text[i] !== "/" && !/^[A-Za-z]:[\\/]/.test(text.slice(i, i + 3)) && text.slice(i, i + 2) !== "\\\\") continue;
     if (i > 0 && !OPENS_PATH.test(text[i - 1])) continue;
 
     let stop = i;
@@ -260,7 +262,7 @@ export function findFilePaths(text: string): FilePathMatch[] {
 /// a match outright, which is what keeps the guess from deciding anything on
 /// its own.
 function namesAFile(path: string): boolean {
-  return (path.split("/").filter(Boolean).at(-1) ?? "").includes(".");
+  return (path.split(/[\\/]/).filter(Boolean).at(-1) ?? "").includes(".");
 }
 
 /// Whether what follows `stop` looks like the rest of a path this scan cut in
@@ -296,8 +298,8 @@ function continuesPath(text: string, stop: number, path: string): boolean {
     while (end < text.length && !/\s/.test(text[end])) end += 1;
 
     const word = text.slice(at + 1, end);
-    if (word.startsWith("/")) return false;
-    if (word.includes("/")) return true;
+    if (/^(?:[\\/]|[A-Za-z]:[\\/])/.test(word)) return false;
+    if (/[\\/]/.test(word)) return true;
     if (finished) return false;
 
     at = end;
@@ -314,8 +316,9 @@ function continuesPath(text: string, stop: number, path: string): boolean {
 /// path means from wherever the app happens to be running.
 export function absolutePath(raw: string, cwd: string | null): string | null {
   if (!raw) return null;
-  if (raw.startsWith("/")) return raw;
+  if (/^(?:\/|\\\\|[A-Za-z]:[\\/])/.test(raw)) return raw;
   if (!cwd) return null;
 
-  return `${cwd.replace(/\/+$/, "")}/${raw.replace(/^\.\//, "")}`;
+  const separator = cwd.includes("\\") ? "\\" : "/";
+  return `${cwd.replace(/[\\/]+$/, "")}${separator}${raw.replace(/^\.[\\/]/, "").replace(/[\\/]/g, separator)}`;
 }

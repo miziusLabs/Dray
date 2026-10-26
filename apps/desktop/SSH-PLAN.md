@@ -1,6 +1,6 @@
 # Stage 4: connecting the app to a VPS over SSH
 
-monorepo-labs/dray#415, stage 4. Stage 3 ([SERVERS-PLAN.md](SERVERS-PLAN.md))
+miziusLabs/Dray#415, stage 4. Stage 3 ([SERVERS-PLAN.md](SERVERS-PLAN.md))
 holds a remote server as an address plus a token. Today a reader gets there by
 running `ssh -N -L …` in a terminal and copying `~/.dray/serve-token` by hand.
 This removes both steps: Add server takes the line they would type, `ssh

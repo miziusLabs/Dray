@@ -103,11 +103,10 @@ pub async fn update_agent_in_terminal(harness: Harness) -> Result<(), String> {
     let bin = binpath::agent_binary(harness).await;
     // The enriched `PATH` rides the line: Terminal inherits launchd's when Dray
     // was opened from the Dock, where pi's `env node` and npm are not found.
-    let mut line = format!(
-        "PATH={} {}",
-        crate::apps::sh_quote(&agent_path(&bin)),
-        crate::apps::sh_quote(&bin.to_string_lossy())
-    );
+    #[cfg(unix)]
+    let mut line = format!("PATH={} {}", crate::apps::sh_quote(&agent_path(&bin)), crate::apps::sh_quote(&bin.to_string_lossy()));
+    #[cfg(windows)]
+    let mut line = format!("PATH=\"$(cygpath --path --unix {})\" {}", crate::apps::sh_quote(&agent_path(&bin)), crate::apps::sh_quote(&bin.to_string_lossy()));
     for arg in update_args(harness) {
         line.push(' ');
         line.push_str(arg);
@@ -127,7 +126,7 @@ fn update_args(harness: Harness) -> &'static [&'static str] {
 }
 
 fn command(bin: &std::path::Path) -> Command {
-    let mut command = Command::new(bin);
+    let mut command = crate::binpath::command(bin);
     // `agent_path` because pi is a `node` script and its updater runs npm, and
     // a Dock-launched bundle has neither on launchd's `PATH`.
     command

@@ -38,10 +38,19 @@ if (args[0] === "dev" && !args.some((a) => a === "-c" || a === "--config")) {
   console.log(`  Info dev server on port ${port}`);
   // Merged in order, so the port lands over whatever the dev flavour says.
   args.push("--config", "src-tauri/tauri.dev.conf.json");
+  if (process.platform === "win32") {
+    args.push("--config", "src-tauri/tauri.windows.conf.json");
+  }
   args.push("--config", JSON.stringify({ build: { devUrl: `http://localhost:${port}` } }));
 }
 
-const child = spawn("tauri", args, { stdio: "inherit", env });
+// Calling the JavaScript CLI directly also works on Windows, where a .cmd
+// shim cannot be passed to spawn without a shell.
+const child = spawn(process.execPath, ["node_modules/@tauri-apps/cli/tauri.js", ...args], { stdio: "inherit", env });
+child.on("error", (error) => {
+  console.error(error.message);
+  process.exit(1);
+});
 child.on("exit", (code, signal) => {
   if (signal) process.kill(process.pid, signal);
   process.exit(code ?? 1);

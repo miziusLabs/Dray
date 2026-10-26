@@ -14,13 +14,13 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout, Command},
+    process::{Child, ChildStdin, ChildStdout},
 };
 use ts_rs::TS;
 
-const SSH: &str = "/usr/bin/ssh";
-const KEYSCAN: &str = "/usr/bin/ssh-keyscan";
-const KEYGEN: &str = "/usr/bin/ssh-keygen";
+const SSH: &str = "ssh";
+const KEYSCAN: &str = "ssh-keyscan";
+const KEYGEN: &str = "ssh-keygen";
 
 /// Where `dray-serve` listens on the server, as `dray setup` leaves it.
 const REMOTE_PORT: u16 = dray_proto::SERVE_PORT;
@@ -76,7 +76,19 @@ impl Target {
         }
     }
 
+    /// The line that would install this Mac's key on the server. Windows'
+    /// OpenSSH ships no `ssh-copy-id`, so there the key is piped into the
+    /// remote `authorized_keys` instead — the same file the script edits.
     fn copy_id(&self) -> String {
+        #[cfg(windows)]
+        {
+            let port = self.port.map(|port| format!(" -p {port}")).unwrap_or_default();
+            return format!(
+                "Get-Content $env:USERPROFILE\\.ssh\\*.pub | ssh{port} {} \"cat >> ~/.ssh/authorized_keys\"",
+                self.dest
+            );
+        }
+        #[cfg(not(windows))]
         match self.port {
             Some(port) => format!("ssh-copy-id -p {port} {}", self.dest),
             None => format!("ssh-copy-id {}", self.dest),
@@ -205,7 +217,7 @@ const SCRIPT: &str = concat!(
 pub async fn open(target: &Target, stage: impl Fn(Stage)) -> Result<Tunnel, Failure> {
     stage(Stage::Connecting);
     let port = free_port().map_err(|e| Failure::new(format!("no free local port: {e}"), None, false))?;
-    let mut child = Command::new(SSH)
+    let mut child = crate::binpath::command(SSH)
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ExitOnForwardFailure=yes"])
         .args(["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
         .args(["-L", &format!("127.0.0.1:{port}:127.0.0.1:{REMOTE_PORT}")])
@@ -353,7 +365,7 @@ impl Forward {
 /// once the local end accepts; `ssh` exiting first says why it could not.
 pub async fn forward(target: &Target, remote: u16) -> Result<Forward, String> {
     let port = free_port().map_err(|e| format!("no free local port: {e}"))?;
-    let mut child = Command::new(SSH)
+    let mut child = crate::binpath::command(SSH)
         .args(["-N", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ExitOnForwardFailure=yes"])
         .args(["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
         // `localhost` rather than 127.0.0.1: sshd tries every address it
@@ -440,7 +452,7 @@ impl Resolved {
 }
 
 async fn resolve(target: &Target) -> Result<Resolved, String> {
-    let out = Command::new(SSH)
+    let out = crate::binpath::command(SSH)
         .arg("-G")
         .args(target.args())
         .stdin(Stdio::null())
@@ -490,7 +502,7 @@ async fn scan(target: &Target) -> Result<ScannedKey, String> {
     if resolved.proxied {
         return Err("it is reached through a jump host, which this app cannot check. Connect once with ssh in a terminal.".into());
     }
-    let out = Command::new(KEYSCAN)
+    let out = crate::binpath::command(KEYSCAN)
         .args(["-T", "5", "-p", &resolved.port.to_string(), "--", &resolved.hostname])
         .stdin(Stdio::null())
         .output()
@@ -541,7 +553,7 @@ async fn fingerprint(key: &str) -> Result<(String, String), String> {
 
 async fn pipe(program: &str, args: &[&str], input: &str) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
-    let mut child = Command::new(program)
+    let mut child = crate::binpath::command(program)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -629,6 +641,7 @@ fn setup_tools() -> Vec<(&'static str, &'static str, &'static str)> {
 /// Looks at a server with no Dray on it: which tools it has, its package
 /// manager, and whether this login can install git.
 pub async fn survey(target: &Target) -> Result<Survey, Failure> {
+    require_posix(target).await?;
     let tools = setup_tools();
     let bins: Vec<_> = tools.iter().map(|t| t.2).collect();
     let managers: Vec<_> = dray_proto::GIT_INSTALLS.iter().map(|g| g.0).collect();
@@ -662,6 +675,7 @@ pub async fn survey(target: &Target) -> Result<Survey, Failure> {
 /// to ask in, and `dray setup --install` with the answers instead. Each line of
 /// output goes to `line`.
 pub async fn install(target: &Target, picks: &[String], line: impl FnMut(&str)) -> Result<(), Failure> {
+    require_posix(target).await?;
     let tools = setup_tools();
     // These reach a shell.
     if let Some(bad) = picks.iter().find(|p| !tools.iter().any(|t| t.0 == p.as_str())) {
@@ -681,6 +695,41 @@ pub async fn install(target: &Target, picks: &[String], line: impl FnMut(&str)) 
     }
 }
 
+/// Refuses a login that cannot run a POSIX shell, with the reason said out loud.
+///
+/// Windows' OpenSSH hands the session to `cmd.exe`, which has no `sh`, and
+/// every remote script here is a POSIX one — so a Windows host reads as a
+/// broken server instead of what it is. The probe costs one login, which only
+/// survey and install pay, and it is the exit status that decides: `255` is
+/// ssh's own refusal and keeps the useful host-key or key-permission answer,
+/// anything else after a successful login is a shell that did not echo the
+/// marker.
+async fn require_posix(target: &Target) -> Result<(), Failure> {
+    let probe = crate::binpath::command(SSH)
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .args(target.args())
+        .arg("sh -c 'echo DRAY-SSH posix'")
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| Failure::new(format!("could not run ssh: {e}"), None, true))?;
+    if String::from_utf8_lossy(&probe.stdout).contains("DRAY-SSH posix") {
+        return Ok(());
+    }
+    if probe.status.code() == Some(255) {
+        return Err(classify(&String::from_utf8_lossy(&probe.stderr), target).await);
+    }
+    Err(Failure::new(
+        format!(
+            "{} is a Windows machine. Dray runs sessions on Linux and macOS servers; a Windows \
+             machine can connect to one, but cannot be one.",
+            target.host()
+        ),
+        None,
+        true,
+    ))
+}
+
 /// Runs `script` over a login with no forward and answers whether it exited 0.
 /// The script opens with `DRAY-SSH hello`; what it prints after that goes to
 /// `line`, colour codes stripped. A login that never got that far fails the
@@ -688,7 +737,7 @@ pub async fn install(target: &Target, picks: &[String], line: impl FnMut(&str)) 
 async fn run(target: &Target, script: &str, limit: Duration, mut line: impl FnMut(&str)) -> Result<bool, Failure> {
     // Quoted whole below, so `SCRIPT`'s rule holds here too.
     debug_assert!(!script.contains(['\'', '\\']), "{script}");
-    let mut child = Command::new(SSH)
+    let mut child = crate::binpath::command(SSH)
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .args(["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
         .args(target.args())
@@ -809,7 +858,13 @@ mod tests {
     #[test]
     fn names_the_line_back() {
         assert_eq!(parse("ssh -p 2222 me@box").unwrap().line(), "ssh -p 2222 me@box");
+        #[cfg(not(windows))]
         assert_eq!(parse("me@box").unwrap().copy_id(), "ssh-copy-id me@box");
+        #[cfg(windows)]
+        assert_eq!(
+            parse("me@box").unwrap().copy_id(),
+            r#"Get-Content $env:USERPROFILE\.ssh\*.pub | ssh me@box "cat >> ~/.ssh/authorized_keys""#
+        );
     }
 
     /// The script is single-quoted whole for the reader's login shell, which
@@ -825,7 +880,10 @@ mod tests {
         let target = parse("me@box").unwrap();
         let denied = classify("me@box: Permission denied (publickey,password).\n", &target).await;
         assert!(denied.permanent);
+        #[cfg(not(windows))]
         assert_eq!(denied.fix, Some(Fix::Copy { command: "ssh-copy-id me@box".into() }));
+        #[cfg(windows)]
+        assert_eq!(denied.fix, Some(Fix::Copy { command: target.copy_id() }));
         let offline = classify("ssh: connect to host box port 22: Operation timed out\n", &target).await;
         assert!(!offline.permanent);
         assert!(offline.message.ends_with("Operation timed out"));
@@ -907,7 +965,7 @@ mod tests {
         trust(&target, &fingerprint).await.unwrap();
         let opened = open(&target, |_| {}).await;
         let name = resolve(&target).await.unwrap().known_as();
-        Command::new(KEYGEN).args(["-R", &name]).output().await.unwrap();
+        crate::binpath::command(KEYGEN).args(["-R", &name]).output().await.unwrap();
         assert!(opened.is_ok(), "{:?}", opened.err().map(|f| f.message));
     }
 
@@ -918,7 +976,7 @@ mod tests {
         let target = parse(&std::env::var("DRAY_TEST_SSH").expect("DRAY_TEST_SSH")).unwrap();
         for agent in ["claude", "codex", "pi", "fx", "grok"] {
             let line = terminal_line(&target, &format!("{agent} --version"));
-            let out = Command::new("/bin/sh").args(["-c", &line]).stdin(Stdio::null()).output().await.unwrap();
+            let out = crate::binpath::command("/bin/sh").args(["-c", &line]).stdin(Stdio::null()).output().await.unwrap();
             println!("{agent}: {} {}", out.status, String::from_utf8_lossy(&out.stdout).trim());
         }
     }

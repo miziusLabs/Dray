@@ -240,7 +240,27 @@ fn read_from(pb: &objc2_app_kit::NSPasteboard) -> Pasted {
     converted.map_or(Pasted::Text, |data| Pasted::Image(data.to_vec()))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn read_pasteboard() -> Pasted {
+    if let Ok(files) = clipboard_win::get_clipboard::<Vec<String>, _>(clipboard_win::formats::FileList) {
+        if !files.is_empty() {
+            return Pasted::Files(files);
+        }
+    }
+    let Ok(mut clipboard) = arboard::Clipboard::new() else { return Pasted::Text };
+    if clipboard.get_text().is_ok() {
+        return Pasted::Text;
+    }
+    let Ok(image) = clipboard.get_image() else { return Pasted::Text };
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, image.width as u32, image.height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let encoded = encoder.write_header().and_then(|mut writer| writer.write_image_data(&image.bytes));
+    if encoded.is_ok() { Pasted::Image(bytes) } else { Pasted::Text }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn read_pasteboard() -> Pasted {
     Pasted::Text
 }

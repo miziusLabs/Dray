@@ -93,6 +93,9 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-22.04-arm
             serve: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            serve: true
 
     runs-on: ${{ matrix.os }}
 
@@ -125,23 +128,31 @@ jobs:
       - name: Build dray-serve
         if: matrix.serve
         working-directory: apps/desktop/src-tauri
+        shell: bash
         # The CLI's version rides into the server, which reports it to the app
         # so the app can tell whether a newer release is out on its channel.
         run: |
-          export DRAY_CLI_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$GITHUB_WORKSPACE/apps/cli/Cargo.toml" | head -n 1)
+          export DRAY_CLI_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "../../cli/Cargo.toml" | head -n 1)
           cargo build --release --no-default-features --features serve \
             --bin dray-serve --target ${{ matrix.target }}
-          cp "target/${{ matrix.target }}/release/dray-serve" "$GITHUB_WORKSPACE/apps/cli/target/${{ matrix.target }}/release/"
-          strip "$GITHUB_WORKSPACE/apps/cli/target/${{ matrix.target }}/release/dray-serve"
+          suffix=
+          if [ "${{ runner.os }}" = Windows ]; then suffix=.exe; fi
+          destination="../../cli/target/${{ matrix.target }}/release"
+          mkdir -p "$destination"
+          cp "target/${{ matrix.target }}/release/dray-serve${suffix}" "$destination/"
+          if [ "${{ runner.os }}" != Windows ]; then
+            strip "$destination/dray-serve"
+          fi
 
-      # Named after the target triple because that is what install.sh derives
-      # from `uname`. Rename either and the installer 404s.
+      # The archive name matches the target triple the install scripts select.
       #
       # The checksum ships beside the archive so the installer can verify what
       # it is about to execute. `shasum` on macOS, `sha256sum` on linux — the
       # runners differ, and the output format is the same either way.
       - name: Package
+        if: matrix.os != 'windows-latest'
         working-directory: apps/cli
+        shell: bash
         run: |
           set -euo pipefail
           archive="dray-${{ matrix.target }}.tar.gz"
@@ -155,12 +166,27 @@ jobs:
           fi
           cat "$archive.sha256"
 
+      - name: Package Windows binaries
+        if: matrix.os == 'windows-latest'
+        working-directory: apps/cli
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $target = '${{ matrix.target }}'
+          $stage = Join-Path $env:RUNNER_TEMP "dray-$target"
+          $archive = "dray-$target.zip"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item "target/$target/release/dray.exe" $stage
+          Copy-Item "target/$target/release/dray-serve.exe" $stage
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $archive -CompressionLevel Optimal -Force
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $PWD "$archive.sha256"), "$hash  $archive`n", [Text.Encoding]::ASCII)
+          Get-Content "$archive.sha256"
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dray-${{ matrix.target }}
-          path: |
-            apps/cli/dray-${{ matrix.target }}.tar.gz
-            apps/cli/dray-${{ matrix.target }}.tar.gz.sha256
+          path: apps/cli/dray-${{ matrix.target }}.*
           if-no-files-found: error
 
   publish:
@@ -205,6 +231,8 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/*.tar.gz.sha256
+            artifacts/*.zip
+            artifacts/*.zip.sha256
           # A label for people reading the releases page. install.sh never reads
           # it and goes by the tag's shape instead, so a release mislabelled
           # here cannot reach the wrong channel.

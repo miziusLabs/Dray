@@ -159,7 +159,7 @@ async fn title_command(harness: Harness, prompt: &str, cwd: &str) -> Result<Comm
     Ok(match harness {
         Harness::ClaudeCode => {
             let bin = crate::binpath::claude().await;
-            let mut cmd = Command::new(&bin);
+            let mut cmd = crate::binpath::command(&bin);
             cmd.env("PATH", crate::harness::agent_path(&bin));
             cmd.args([
                 "-p",
@@ -187,7 +187,7 @@ async fn title_command(harness: Harness, prompt: &str, cwd: &str) -> Result<Comm
         }
         Harness::Codex => {
             let bin = crate::binpath::codex().await;
-            let mut cmd = Command::new(&bin);
+            let mut cmd = crate::binpath::command(&bin);
             cmd.env("PATH", crate::harness::agent_path(&bin));
             cmd.args([
                 "exec",
@@ -250,7 +250,7 @@ async fn title_command(harness: Harness, prompt: &str, cwd: &str) -> Result<Comm
         Harness::Grok => bail!("grok titles its own sessions on the wire"),
         Harness::Fx => {
             let bin = crate::binpath::fx().await;
-            let mut cmd = Command::new(&bin);
+            let mut cmd = crate::binpath::command(&bin);
             cmd.env("PATH", crate::harness::agent_path(&bin));
 
             // Named through the environment because `fx ask` takes no `--model`
@@ -896,8 +896,11 @@ mod command_tests {
     /// since the behaviour being relied on is the runtime's.
     #[tokio::test]
     async fn timing_out_kills_the_child_rather_than_abandoning_it() {
-        let child = Command::new("/bin/sleep")
-            .arg("30")
+        #[cfg(unix)]
+        let mut command = { let mut command = crate::binpath::command("/bin/sleep"); command.arg("30"); command };
+        #[cfg(windows)]
+        let mut command = { let mut command = crate::binpath::command("powershell.exe"); command.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"]); command };
+        let child = command
             .kill_on_drop(true)
             .stdout(Stdio::piped())
             .spawn()
@@ -914,12 +917,15 @@ mod command_tests {
         // The kill and reap are asynchronous, so give the runtime a moment
         // before asking whether the process is gone.
         tokio::time::sleep(Duration::from_millis(500)).await;
-        let alive = std::process::Command::new("/bin/kill")
+        #[cfg(unix)]
+        let alive = crate::binpath::std_command("/bin/kill")
             .args(["-0", &pid.to_string()])
             .status()
             .unwrap()
             .success();
 
+        #[cfg(windows)]
+        let alive = crate::binpath::std_command("tasklist").args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).output().is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\"")));
         assert!(!alive, "pid {pid} outlived the deadline");
     }
 

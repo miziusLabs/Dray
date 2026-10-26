@@ -1,0 +1,91 @@
+name: Windows CI
+
+on:
+  push:
+    paths:
+      - "apps/desktop/**"
+      - "apps/cli/**"
+      - "apps/web/public/install.ps1"
+      - "apps/web/tests/install.test.ps1"
+      - "crates/dray-proto/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/windows-ci.yml"
+      - ".github/workflows/release-cli.yml"
+      - ".github/workflows/release.yml"
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "apps/cli/**"
+      - "apps/web/public/install.ps1"
+      - "apps/web/tests/install.test.ps1"
+      - "crates/dray-proto/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/windows-ci.yml"
+      - ".github/workflows/release-cli.yml"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # A cold build is ~10 minutes and the browser test downloads Chromium. A
+    # hung test would otherwise hold the runner for the six-hour default.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test the desktop frontend
+        run: pnpm test
+
+      - name: Test the Windows CLI installer
+        shell: pwsh
+        run: ./apps/web/tests/install.test.ps1
+
+      - name: Test the protocol crate
+        working-directory: crates/dray-proto
+        run: cargo test --locked
+
+      - name: Test the CLI
+        working-directory: apps/cli
+        run: cargo test --locked
+
+      - name: Test the desktop Rust backend
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+
+      - name: Check the headless server build
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --locked --no-default-features --features serve --bin dray-serve
+
+      - name: Exercise Windows Chromium pipes and input
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked --no-default-features --features serve --lib windows_browser_pipe_and_input -- --ignored
+
+      - name: Build the desktop app
+        working-directory: apps/desktop
+        run: pnpm tauri build --no-bundle --config src-tauri/tauri.windows.conf.json

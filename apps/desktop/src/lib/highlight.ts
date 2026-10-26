@@ -161,7 +161,7 @@ function trimUrlTail(url: string): string {
 /// `dir` keeps the leading `@` and the trailing slash, so `dir + name` is the
 /// segment back exactly — the property the overlay depends on.
 export function splitMention(text: string): { dir: string; name: string } {
-  const cut = text.lastIndexOf("/");
+  const cut = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
   if (cut === -1) return { dir: "@", name: text.slice(1) };
 
   return { dir: text.slice(0, cut + 1), name: text.slice(cut + 1) };

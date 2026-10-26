@@ -20,6 +20,7 @@ use dray_proto::{
     SessionSummary, SetAside, SettleSession, ShareAction, ShareRequest,
 };
 use std::io::{BufRead, BufReader, ErrorKind, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -937,17 +938,25 @@ fn update(args: Update) -> Result<(), String> {
         .parent()
         .ok_or("the running dray binary sits in no directory")?;
 
+    #[cfg(windows)]
+    let mut sh = {
+        let mut command = std::process::Command::new("powershell.exe");
+        command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "$ErrorActionPreference='Stop'; $p=Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString()+'.ps1'); try { Invoke-WebRequest 'https://www.drayhq.com/install.ps1' -OutFile $p; & $p } finally { Remove-Item -LiteralPath $p -ErrorAction SilentlyContinue }"]);
+        command
+    };
+    #[cfg(unix)]
     let mut sh = std::process::Command::new("sh");
+    #[cfg(unix)]
     sh.args([
         "-c",
         "t=$(mktemp) && trap 'rm -f \"$t\"' EXIT && \
          if command -v curl >/dev/null; then curl -fsSL \"$0\" -o \"$t\"; else wget -qO \"$t\" \"$0\"; fi && \
          sh \"$t\"",
         INSTALLER_URL,
-    ])
+    ]);
     // Where this binary lives, not ~/.local/bin. Renaming over a running
     // unix binary is safe: the process keeps the inode it started from.
-    .env("DRAY_INSTALL_DIR", dir)
+    sh.env("DRAY_INSTALL_DIR", dir)
     // An update is not a first install: no setup questions.
     .env("DRAY_UPDATING", "1")
     .env("DRAY_CHANNEL", args.channel.as_deref().unwrap_or(own_channel()));
@@ -1065,8 +1074,26 @@ fn send(request: Request) -> Result<Response, String> {
 
 /// [`send`] to a socket the caller names.
 fn send_to(endpoint: &str, request: Request) -> Result<Response, String> {
-    let mut stream =
-        UnixStream::connect(&endpoint).map_err(|e| connect_failure(&e, &endpoint))?;
+    #[cfg(unix)]
+    let mut stream = UnixStream::connect(endpoint).map_err(|e| connect_failure(&e, endpoint))?;
+    #[cfg(windows)]
+    let mut stream = {
+        // The server swaps pipe instances between clients, and `CreateFile`
+        // reports the gap as ERROR_PIPE_BUSY rather than waiting the way
+        // `WaitNamedPipe` would. Bounded, so a genuinely stuck server still
+        // fails instead of hanging the command.
+        use std::time::{Duration, Instant};
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match std::fs::OpenOptions::new().read(true).write(true).open(endpoint) {
+                Ok(stream) => break stream,
+                Err(e) if e.raw_os_error() == Some(231) && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(e) => return Err(connect_failure(&e, endpoint)),
+            }
+        }
+    };
 
     let line = encode_line(&Envelope::new(request)).map_err(|e| e.to_string())?;
     stream
@@ -1468,9 +1495,10 @@ mod tests {
 
     #[test]
     fn the_skill_carries_frontmatter_claude_code_can_read() {
-        assert!(SKILL.starts_with("---\n"), "skill needs YAML frontmatter");
-        assert!(SKILL.contains("\nname: dray\n"));
-        assert!(SKILL.contains("\ndescription: "));
+        let skill = SKILL.replace("\r\n", "\n");
+        assert!(skill.starts_with("---\n"), "skill needs YAML frontmatter");
+        assert!(skill.contains("\nname: dray\n"));
+        assert!(skill.contains("\ndescription: "));
     }
 
     #[test]
@@ -1503,11 +1531,12 @@ mod tests {
         };
 
         let tree = repo.join(".claude").join("worktrees").join("child");
-        git(&repo, &["worktree", "add", "-q", tree.to_str().unwrap()]);
+        let tree_arg = tree.to_string_lossy().trim_start_matches(r"\\?\").replace('\\', "/");
+        assert!(git(&repo, &["worktree", "add", "-q", &tree_arg]));
 
-        let root = repo.to_string_lossy().into_owned();
-        assert_eq!(repo_root(&repo).as_deref(), Some(root.as_str()));
-        assert_eq!(repo_root(&tree).as_deref(), Some(root.as_str()));
+        let root = std::fs::canonicalize(&repo).unwrap();
+        assert_eq!(std::fs::canonicalize(repo_root(&repo).unwrap()).unwrap(), root);
+        assert_eq!(std::fs::canonicalize(repo_root(&tree).unwrap()).unwrap(), root);
 
         let _ = std::fs::remove_dir_all(&repo);
     }

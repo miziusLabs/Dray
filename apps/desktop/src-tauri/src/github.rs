@@ -10,7 +10,7 @@ use anyhow::Result;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path, process::Stdio, sync::LazyLock};
-use tokio::{process::Command, sync::Mutex};
+use tokio::{sync::Mutex};
 use ts_rs::TS;
 
 use crate::binpath;
@@ -781,7 +781,7 @@ pub(crate) async fn gh(cwd: &str, args: &[&str]) -> Result<String, String> {
         return Err(format!("{cwd} no longer exists."));
     }
 
-    let out = Command::new(bin)
+    let out = crate::binpath::command(bin)
         .args(args)
         .current_dir(cwd)
         .env("GIT_OPTIONAL_LOCKS", "0")

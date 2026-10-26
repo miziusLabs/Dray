@@ -5,9 +5,10 @@
 //! elsewhere: `open(1)`, `.app` bundles and `.icns` are all one platform's,
 //! and no other build has a window to draw the button in yet.
 
+use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
     process::Command,
     sync::{LazyLock, Mutex},
 };
@@ -53,6 +54,7 @@ pub struct ExternalApp {
 
 /// One row of the curated table: the bundle's file name, what to call it, and
 /// which run it sits in.
+#[cfg(target_os = "macos")]
 struct Known {
     /// Matched on the bundle's file name **exactly**, never as a substring.
     /// `Cloudflare WARP.app` is not `Warp.app`, and a contains-check lists it
@@ -62,10 +64,12 @@ struct Known {
     kind: ExternalAppKind,
 }
 
+#[cfg(target_os = "macos")]
 const fn editor(bundle: &'static str, name: &'static str) -> Known {
     Known { bundle, name, kind: ExternalAppKind::Editor }
 }
 
+#[cfg(target_os = "macos")]
 const fn terminal(bundle: &'static str, name: &'static str) -> Known {
     Known { bundle, name, kind: ExternalAppKind::Terminal }
 }
@@ -83,6 +87,7 @@ const fn terminal(bundle: &'static str, name: &'static str) -> Known {
 /// declaration would hide apps that work.
 ///
 /// An app absent from this table costs one entry, never the list.
+#[cfg(target_os = "macos")]
 const KNOWN: &[Known] = &[
     editor("Visual Studio Code.app", "VS Code"),
     editor("Visual Studio Code - Insiders.app", "VS Code Insiders"),
@@ -116,11 +121,13 @@ const KNOWN: &[Known] = &[
 ];
 
 /// Finder, which is in none of the scanned directories and on every mac.
+#[cfg(target_os = "macos")]
 const FINDER: &str = "/System/Library/CoreServices/Finder.app";
 
 /// Where a `.app` bundle lives. One `read_dir` each and no `mdfind`: Spotlight
 /// can be off or still indexing, and the common case is an app that is not
 /// installed at all — where a per-app query is a spawn that answers nothing.
+#[cfg(target_os = "macos")]
 fn search_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![
         PathBuf::from("/Applications"),
@@ -138,6 +145,7 @@ fn search_dirs() -> Vec<PathBuf> {
 }
 
 /// Bundle file name to its path, for every `.app` in `dirs`.
+#[cfg(target_os = "macos")]
 fn installed(dirs: &[PathBuf]) -> HashMap<String, PathBuf> {
     let mut found = HashMap::new();
     for dir in dirs {
@@ -160,6 +168,7 @@ fn installed(dirs: &[PathBuf]) -> HashMap<String, PathBuf> {
 /// Icons cost two spawns each, so they are read once per bundle path and held
 /// for the life of the process. Keyed by path, so an app that moves is read
 /// again rather than drawn with the old one.
+#[cfg(target_os = "macos")]
 static ICONS: LazyLock<Mutex<HashMap<PathBuf, Option<String>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -167,6 +176,7 @@ static ICONS: LazyLock<Mutex<HashMap<PathBuf, Option<String>>>> =
 ///
 /// `CFBundleIconFile` may or may not carry the extension, so both spellings are
 /// tried; `AppIcon` is the fallback for a bundle that names none.
+#[cfg(target_os = "macos")]
 fn icns_path(bundle: &Path) -> Option<PathBuf> {
     let resources = bundle.join("Contents/Resources");
 
@@ -195,6 +205,7 @@ fn icns_path(bundle: &Path) -> Option<PathBuf> {
 
 /// The bundle's icon as a `data:` PNG, read through `sips` — on every mac, and
 /// the only thing here that turns an `.icns` into something a webview draws.
+#[cfg(target_os = "macos")]
 fn read_icon(bundle: &Path) -> Option<String> {
     if let Ok(cache) = ICONS.lock() {
         if let Some(hit) = cache.get(bundle) {
@@ -239,6 +250,7 @@ fn read_icon(bundle: &Path) -> Option<String> {
 /// Finder sits at the end rather than the front on purpose: it is the entry
 /// every machine has, so leading with it puts the least specific answer where
 /// the eye lands first.
+#[cfg(target_os = "macos")]
 fn resolve(installed: &HashMap<String, PathBuf>, finder: &Path) -> Vec<ExternalApp> {
     let mut apps: Vec<ExternalApp> = KNOWN
         .iter()
@@ -265,6 +277,7 @@ fn resolve(installed: &HashMap<String, PathBuf>, finder: &Path) -> Vec<ExternalA
     apps
 }
 
+#[cfg(target_os = "macos")]
 fn detect() -> Vec<ExternalApp> {
     let mut apps = resolve(&installed(&search_dirs()), Path::new(FINDER));
     for app in &mut apps {
@@ -280,13 +293,23 @@ fn detect() -> Vec<ExternalApp> {
 /// editor installed while Dray is running shows up the next time the panel
 /// asks, instead of needing a restart the way the slash-command cache does.
 #[cfg_attr(feature = "desktop", tauri::command)]
+#[cfg(windows)]
 pub async fn list_open_apps() -> Vec<ExternalApp> {
-    if !cfg!(target_os = "macos") {
-        return Vec::new();
-    }
+    windows_apps()
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+#[cfg(target_os = "macos")]
+pub async fn list_open_apps() -> Vec<ExternalApp> {
     tokio::task::spawn_blocking(detect)
         .await
         .unwrap_or_default()
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+#[cfg(not(any(windows, target_os = "macos")))]
+pub async fn list_open_apps() -> Vec<ExternalApp> {
+    Vec::new()
 }
 
 /// Hands `path` to the app at `app_path`.
@@ -297,7 +320,71 @@ pub async fn list_open_apps() -> Vec<ExternalApp> {
 /// shell, so injection is not the risk — but a path whose name opens with `-`
 /// parses as a flag, which `--` ends.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub async fn open_in_app(app_path: String, path: String) -> Result<(), String> {
+pub async fn open_in_app(app_path: String, path: String, line: Option<u32>) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let allowed = windows_apps().into_iter().any(|app| app.path == app_path);
+        if !allowed {
+            return Err("This application is no longer installed.".into());
+        }
+        let executable = Path::new(&app_path).file_name().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
+        let mut command = std::process::Command::new(&app_path);
+        let directory = Path::new(&path).is_dir();
+        // A terminal opens in a directory; handed a file, it opens at the one
+        // holding it. Passing the file itself to cmd's `cd` or PowerShell's
+        // `Set-Location` fails outright, and `wt -d <file>` is not a directory.
+        let start = if directory {
+            Some(path.as_str())
+        } else {
+            Path::new(&path).parent().and_then(|p| p.to_str()).filter(|p| !p.is_empty())
+        };
+        if executable == "wt.exe" {
+            if let Some(start) = start {
+                command.args(["-d", start]);
+            }
+        } else if is_windows_console_host(&executable) {
+            // The console opens in the checkout the reader picked, so a `cd`
+            // typed at its prompt is already in the right tree.
+            if let Some(start) = start {
+                command.current_dir(start);
+            }
+            match executable.as_str() {
+                "powershell.exe" | "pwsh.exe" => {
+                    if let Some(start) = start {
+                        command.args(["-NoLogo", "-NoExit", "-Command"]);
+                        command.arg(format!("Set-Location -LiteralPath '{}'", start.replace('\'', "''")));
+                    }
+                }
+                "cmd.exe" => {
+                    if let Some(start) = start {
+                        command.args(["/K", "cd", "/d"]);
+                        command.arg(start);
+                    }
+                }
+                // Git Bash opens at its current directory; `--login` gives it
+                // the reader's usual PATH.
+                "bash.exe" => { command.args(["--login", "-i"]); }
+                _ => { command.arg(&path); }
+            }
+        } else if is_windows_gui_terminal(&executable) {
+            if let Some(start) = start {
+                command.current_dir(start);
+            }
+        } else if let Some(args) = line.filter(|_| !directory).and_then(|line| windows_line_args(&executable, &path, line)) {
+            command.args(args);
+        } else {
+            if directory {
+                command.current_dir(&path);
+            }
+            command.arg(&path);
+        }
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(if is_windows_console_host(&executable) { 0x00000010 } else { 0x08000000 });
+        return command.spawn().map(|_| ()).map_err(|e| format!("could not open the application: {e}"));
+    }
+    #[cfg(not(windows))]
+    {
+    let _ = line;
     let out = tokio::process::Command::new("open")
         .arg("-a")
         .arg(&app_path)
@@ -314,6 +401,130 @@ pub async fn open_in_app(app_path: String, path: String) -> Result<(), String> {
     // `open`'s own sentence names the cure — a moved bundle, a directory that
     // is gone — where the exit code names nothing.
     Err(crate::git::stderr_or(&out, || format!("could not open {path}")))
+    }
+}
+
+#[cfg(windows)]
+fn windows_apps() -> Vec<ExternalApp> {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_default();
+    let programs = std::env::var_os("ProgramFiles").map(PathBuf::from).unwrap_or_default();
+    let programs_x86 = std::env::var_os("ProgramFiles(x86)").map(PathBuf::from).unwrap_or_default();
+    let system = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let mut candidates = vec![
+        (system.join("explorer.exe"), "File Explorer", ExternalAppKind::Files),
+        (local.join(r"Programs\Microsoft VS Code\Code.exe"), "Visual Studio Code", ExternalAppKind::Editor),
+        (programs.join(r"Microsoft VS Code\Code.exe"), "Visual Studio Code", ExternalAppKind::Editor),
+        (local.join(r"Programs\Microsoft VS Code Insiders\Code - Insiders.exe"), "VS Code Insiders", ExternalAppKind::Editor),
+        (local.join(r"Programs\cursor\Cursor.exe"), "Cursor", ExternalAppKind::Editor),
+        (local.join(r"Programs\Windsurf\Windsurf.exe"), "Windsurf", ExternalAppKind::Editor),
+        (local.join(r"Programs\Zed\zed.exe"), "Zed", ExternalAppKind::Editor),
+        (programs.join(r"Sublime Text\sublime_text.exe"), "Sublime Text", ExternalAppKind::Editor),
+        (programs.join(r"Sublime Text 3\sublime_text.exe"), "Sublime Text", ExternalAppKind::Editor),
+        (programs.join(r"Notepad++\notepad++.exe"), "Notepad++", ExternalAppKind::Editor),
+        (programs_x86.join(r"Notepad++\notepad++.exe"), "Notepad++", ExternalAppKind::Editor),
+    ];
+    // wt's execution alias is installed with Windows Terminal under this user's account.
+    candidates.push((local.join(r"Microsoft\WindowsApps\wt.exe"), "Windows Terminal", ExternalAppKind::Terminal));
+    candidates.push((programs.join(r"Windows Terminal\wt.exe"), "Windows Terminal", ExternalAppKind::Terminal));
+    candidates.push((programs.join(r"PowerShell\7\pwsh.exe"), "PowerShell 7", ExternalAppKind::Terminal));
+    candidates.push((system.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"), "Windows PowerShell", ExternalAppKind::Terminal));
+    candidates.push((system.join(r"System32\cmd.exe"), "Command Prompt", ExternalAppKind::Terminal));
+    candidates.push((programs.join(r"Git\bin\bash.exe"), "Git Bash", ExternalAppKind::Terminal));
+    candidates.push((local.join(r"Programs\Alacritty\alacritty.exe"), "Alacritty", ExternalAppKind::Terminal));
+    candidates.push((programs.join(r"Alacritty\alacritty.exe"), "Alacritty", ExternalAppKind::Terminal));
+    candidates.push((programs.join(r"WezTerm\wezterm-gui.exe"), "WezTerm", ExternalAppKind::Terminal));
+    candidates.push((local.join(r"Programs\WezTerm\wezterm-gui.exe"), "WezTerm", ExternalAppKind::Terminal));
+    let mut apps: Vec<ExternalApp> = candidates
+        .into_iter()
+        .filter(|(path, _, _)| path.is_file())
+        .map(|(path, name, kind)| ExternalApp {
+            path: path.to_string_lossy().into_owned(),
+            name: name.to_string(),
+            kind,
+            icon: None,
+        })
+        .collect();
+    // Toolbox keeps each product behind a channel and version directory, so
+    // these are found by walking rather than by one guessed path.
+    apps.extend(jetbrains_apps(&local).into_iter().filter(|(path, _)| path.is_file()).map(|(path, name)| ExternalApp {
+        path: path.to_string_lossy().into_owned(),
+        name,
+        kind: ExternalAppKind::Editor,
+        icon: None,
+    }));
+    // One entry per name: a per-user install and a machine-wide one of the
+    // same editor would otherwise both sit in the picker.
+    let mut names = std::collections::HashSet::new();
+    apps.retain(|app| names.insert(app.name.clone()));
+    apps
+}
+
+/// The launchers JetBrains Toolbox installed for this user, newest channel and
+/// version per product. The product directory's own name is the label the
+/// reader sees in the picker.
+#[cfg(windows)]
+fn jetbrains_apps(local: &Path) -> Vec<(PathBuf, String)> {
+    let newest_dir = |dir: &Path| -> Option<PathBuf> {
+        std::fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .max_by_key(|path| path.metadata().and_then(|meta| meta.modified()).ok())
+    };
+    let Ok(products) = std::fs::read_dir(local.join(r"JetBrains\Toolbox\apps")) else {
+        return Vec::new();
+    };
+    products
+        .flatten()
+        .filter_map(|product| {
+            let version = newest_dir(&newest_dir(&product.path())?)?;
+            let exe = std::fs::read_dir(version.join("bin"))
+                .ok()?
+                .flatten()
+                .map(|entry| entry.path())
+                .find(|path| {
+                    let name = path.file_name().and_then(|name| name.to_str()).map(str::to_ascii_lowercase);
+                    name.is_some_and(|name| name.ends_with(".exe") && windows_line_args(&name, "", 0).is_some())
+                })?;
+            Some((exe, product.file_name().to_string_lossy().into_owned()))
+        })
+        .collect()
+}
+
+/// The console hosts that need their own window when opened from a GUI app.
+#[cfg(windows)]
+fn is_windows_console_host(executable: &str) -> bool {
+    matches!(executable, "powershell.exe" | "pwsh.exe" | "cmd.exe" | "bash.exe")
+}
+
+/// Terminals that draw their own window and take the directory as a working
+/// directory rather than as a command to run.
+#[cfg(windows)]
+fn is_windows_gui_terminal(executable: &str) -> bool {
+    matches!(executable, "alacritty.exe" | "wezterm-gui.exe")
+}
+
+/// How to ask a Windows editor for a file at a line. `None` where the editor has
+/// no documented argv for it, which opens the file at its first line instead.
+#[cfg(windows)]
+fn windows_line_args(executable: &str, path: &str, line: u32) -> Option<Vec<String>> {
+    match executable {
+        // The same flag `code --goto` gives every VS Code fork.
+        "code.exe" | "code - insiders.exe" | "cursor.exe" | "windsurf.exe" => {
+            Some(vec!["--goto".into(), format!("{path}:{line}")])
+        }
+        // Zed and Sublime accept the `path:line` form as their file argument.
+        "zed.exe" | "subl.exe" | "sublime_text.exe" => Some(vec![format!("{path}:{line}")]),
+        "notepad++.exe" => Some(vec![format!("-n{line}"), path.into()]),
+        // JetBrains launchers, including Toolbox's per-product names.
+        "idea64.exe" | "webstorm64.exe" | "pycharm64.exe" | "goland64.exe" | "rider64.exe"
+        | "clion64.exe" | "phpstorm64.exe" | "rubymine64.exe" | "datagrip64.exe"
+        | "rustrover64.exe" | "studio64.exe" => {
+            Some(vec!["--line".into(), line.to_string(), path.into()])
+        }
+        _ => None,
+    }
 }
 
 /// Writes the modifier that opens Dray Island (`control`, `option`, `command`)
@@ -328,6 +539,9 @@ pub async fn open_in_app(app_path: String, path: String) -> Result<(), String> {
 /// (`tauri dev`) only writes the pick.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn configure_island(key: String) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Dray Island is available on macOS only.".into());
+    }
     use tokio::process::Command;
     if !matches!(key.as_str(), "control" | "option" | "command" | "off") {
         return Err(format!("unknown island key {key}"));
@@ -499,6 +713,7 @@ mod island_pref_tests {
 /// works, the same reading `pick_file_opener` takes with Finder.
 ///
 /// Every mac has it, so there is no case where this resolves to nothing.
+#[cfg(target_os = "macos")]
 const TERMINAL: &str = "/System/Applications/Utilities/Terminal.app";
 
 /// Opens a terminal at `cwd` running the harness's login command.
@@ -534,6 +749,22 @@ pub async fn open_login_terminal(harness: Harness, cwd: String) -> Result<(), St
 /// script, so the safety is in where it came from and not in any escaping this
 /// could do to it.
 pub(crate) async fn run_in_terminal(command: &str, cwd: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let bash = std::env::var_os("DRAY_BASH_PATH").map(PathBuf::from)
+            .or_else(|| std::env::var_os("ProgramFiles").map(PathBuf::from).map(|p| p.join(r"Git\bin\bash.exe")).filter(|p| p.is_file()))
+            .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from).map(|p| p.join(r"Programs\Git\bin\bash.exe")).filter(|p| p.is_file()))
+            .or_else(|| std::env::home_dir().map(|p| p.join(r"scoop\apps\git\current\bin\bash.exe")).filter(|p| p.is_file()))
+            .ok_or("Install Git for Windows to open agent sign-in and update commands.")?;
+        let mut terminal = std::process::Command::new(bash);
+        terminal.args(["--login", "-c", &format!("{command}; status=$?; printf '\\nPress Enter to close...'; read -r; exit \"$status\"")]);
+        if !cwd.is_empty() { terminal.current_dir(cwd); }
+        use std::os::windows::process::CommandExt;
+        terminal.creation_flags(0x00000010);
+        return terminal.spawn().map(|_| ()).map_err(|e| format!("could not open the terminal: {e}"));
+    }
+    #[cfg(not(windows))]
+    {
     if !cfg!(target_os = "macos") {
         return Err("Opening a terminal is macOS only. Copy the command instead.".to_string());
     }
@@ -555,11 +786,12 @@ pub(crate) async fn run_in_terminal(command: &str, cwd: &str) -> Result<(), Stri
     write_script(&path, &script)
         .map_err(|err| format!("could not write the login script: {err}"))?;
 
-    let opened = open_in_app(TERMINAL.to_string(), path.to_string_lossy().into_owned()).await;
+    let opened = open_in_app(TERMINAL.to_string(), path.to_string_lossy().into_owned(), None).await;
     if opened.is_err() {
         let _ = std::fs::remove_file(&path);
     }
     opened
+    }
 }
 
 /// Writes the script at `0700` on the *create*, never by a `chmod` after.
@@ -570,6 +802,7 @@ pub(crate) async fn run_in_terminal(command: &str, cwd: &str) -> Result<(), Stri
 /// file Terminal will run. `create_new` beside it because a leftover from a
 /// crashed write could be somebody else's at whatever mode they chose. `0700`
 /// is what makes it executable at all, which `.command` needs.
+#[cfg(target_os = "macos")]
 fn write_script(path: &Path, body: &str) -> std::io::Result<()> {
     use std::io::Write;
 
@@ -588,6 +821,12 @@ fn write_script(path: &Path, body: &str) -> std::io::Result<()> {
 /// single quotes, with the only character they cannot carry spliced in from
 /// outside them.
 pub(crate) fn sh_quote(word: &str) -> String {
+    #[cfg(windows)]
+    let normalized = if word.as_bytes().get(1) == Some(&b':') && !word.contains(';') {
+        format!("/{}{}", word[..1].to_ascii_lowercase(), word[2..].replace('\\', "/"))
+    } else { word.to_string() };
+    #[cfg(windows)]
+    let word = normalized.as_str();
     format!("'{}'", word.replace('\'', r"'\''"))
 }
 
@@ -611,6 +850,7 @@ mod tests {
 
     /// The table is matched on exact file names, so an extension-less entry is
     /// one that can never be found and nothing else would say so.
+    #[cfg(target_os = "macos")]
     #[test]
     fn every_known_bundle_names_an_app() {
         for known in KNOWN {
@@ -624,6 +864,7 @@ mod tests {
     }
 
     /// Two entries resolving to one bundle would draw the same app twice.
+    #[cfg(target_os = "macos")]
     #[test]
     fn known_bundles_are_unique() {
         let mut seen = std::collections::HashSet::new();
@@ -632,6 +873,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn bundle(dir: &Path, name: &str) -> PathBuf {
         let path = dir.join(name);
         std::fs::create_dir_all(&path).unwrap();
@@ -643,6 +885,7 @@ mod tests {
     /// and a substring match would list it as a terminal that ignores the
     /// directory it is handed), the order is the table's, and Finder comes
     /// last. Icons are not read, so nothing spawns.
+    #[cfg(target_os = "macos")]
     #[test]
     fn resolves_in_table_order_with_finder_last() {
         let tmp = std::env::temp_dir().join(format!("dray-apps-{}", uuid::Uuid::now_v7()));
@@ -666,6 +909,7 @@ mod tests {
     /// A bundle present in two searched directories resolves to the first —
     /// the machine-wide install over the user's own copy, matching Launch
     /// Services. A `HashMap` insert in the other order would silently flip it.
+    #[cfg(target_os = "macos")]
     #[test]
     fn first_directory_wins() {
         let tmp = std::env::temp_dir().join(format!("dray-apps-{}", uuid::Uuid::now_v7()));
@@ -686,9 +930,15 @@ mod tests {
     /// is the one failure here that looks exactly like "nothing is installed".
     ///
     /// `cargo test -p dray --lib apps -- --ignored --nocapture`
+    #[cfg(target_os = "macos")]
     #[test]
     #[ignore = "reports what is installed; asserts nothing"]
     fn report_detected_apps() {
+        report();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn report() {
         for app in detect() {
             println!(
                 "{:?}\t{}\t{}\ticon={}",

@@ -10,7 +10,7 @@ const FIXTURES = new URL(
 
 function lines(name: string): Record<string, any>[] {
   return readFileSync(new URL(name, FIXTURES), "utf8")
-    .split("\n")
+    .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => JSON.parse(line));
 }

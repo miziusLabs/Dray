@@ -27,11 +27,13 @@ use dray_proto::{
     encode_line, CreateDraft, CreateSession, DraftSummary, Envelope, StartDraft, IssueInput, IssueLink, LinkIssues, ListSessions, Request,
     Response, SendMessage, SessionSummary, MAX_LINE, OLDEST_SPOKEN, PROTOCOL_VERSION,
 };
+#[cfg(unix)]
 use std::path::Path;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::{UnixListener, UnixStream},
 };
+#[cfg(unix)]
+use tokio::net::UnixListener;
 
 /// Emitted when a session is created by something other than the composer, so
 /// the sidebar gains the row without a refetch.
@@ -87,7 +89,7 @@ const MAX_DEPTH: usize = 2;
 /// its own directory takes no channel from the app's.
 pub fn socket_path() -> Option<std::path::PathBuf> {
     if let Some(home) = store::home_override() {
-        return Some(home.join(dray_proto::SOCKET_NAME));
+        return Some(dray_proto::local_endpoint(&home.join(dray_proto::SOCKET_NAME)));
     }
     dray_proto::socket_path(crate::is_dev())
 }
@@ -121,7 +123,7 @@ pub async fn serve(app: Sink) -> Result<()> {
     // on every directory in the path, so `0700` there settles it before the
     // socket exists at all. The chmod below stays as a second line rather than
     // the only one.
-    let dir = store::get_home_app_dir().await?;
+    let _dir = store::get_home_app_dir().await?;
 
     // That narrowing is best-effort — the app has to start whether or not it
     // lands — so this checks rather than assumes. A directory that stayed
@@ -132,13 +134,15 @@ pub async fn serve(app: Sink) -> Result<()> {
     // Refusing costs orchestration and nothing else, which is the bargain this
     // whole module already makes: the caller logs and drops the error, and the
     // app carries on without a side channel.
-    let mode = owner_bits(&dir).await?;
+    #[cfg(unix)]
+    let mode = owner_bits(&_dir).await?;
+    #[cfg(unix)]
     if mode & 0o077 != 0 {
         bail!(
             "{} is mode {mode:04o}; refusing to serve a socket that other accounts can reach. \
              Run `chmod 700 {}` and restart.",
-            dir.display(),
-            dir.display()
+            _dir.display(),
+            _dir.display()
         );
     }
 
@@ -148,14 +152,22 @@ pub async fn serve(app: Sink) -> Result<()> {
     // this path names one build*: unlinking can only ever take the channel from
     // another copy of the same build, never from the release app a dev one is
     // running beside.
+    #[cfg(unix)]
     tokio::fs::remove_file(&path).await.ok();
 
+    #[cfg(unix)]
     let listener = UnixListener::bind(&path)
         .with_context(|| format!("could not bind {}", path.display()))?;
 
+    #[cfg(unix)]
     restrict(&path)?;
 
+    #[cfg(windows)]
+    let mut listener = tokio::net::windows::named_pipe::ServerOptions::new()
+        .first_pipe_instance(true).create(&path)?;
+
     loop {
+        #[cfg(unix)]
         let (stream, _) = match listener.accept().await {
             Ok(accepted) => accepted,
             Err(e) => {
@@ -164,6 +176,12 @@ pub async fn serve(app: Sink) -> Result<()> {
             }
         };
 
+        #[cfg(windows)]
+        let stream = {
+            listener.connect().await?;
+            let next = tokio::net::windows::named_pipe::ServerOptions::new().create(&path)?;
+            std::mem::replace(&mut listener, next)
+        };
         let app = app.clone();
         // Per connection, so one slow create cannot hold the next caller off.
         tokio::spawn(async move {
@@ -175,6 +193,7 @@ pub async fn serve(app: Sink) -> Result<()> {
 }
 
 /// The permission bits on a directory, for the check above.
+#[cfg(unix)]
 async fn owner_bits(path: &Path) -> Result<u32> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -188,6 +207,7 @@ async fn owner_bits(path: &Path) -> Result<u32> {
 /// `0600` on the socket itself. Defence in depth behind the `0700` directory,
 /// which is the boundary that holds from before the socket exists — this one
 /// cannot, because `bind` has already applied the umask by the time it runs.
+#[cfg(unix)]
 fn restrict(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -226,8 +246,8 @@ fn refusal(line: &str) -> Option<String> {
 
 /// Reads one request, answers it, closes. A connection carries one command so
 /// that a client crashing mid-line costs nothing but itself.
-async fn handle(stream: UnixStream, app: &Sink) -> Result<()> {
-    let (read_half, mut write_half) = stream.into_split();
+async fn handle<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(stream: S, app: &Sink) -> Result<()> {
+    let (read_half, mut write_half) = tokio::io::split(stream);
 
     let mut line = String::new();
     BufReader::new(read_half.take(MAX_LINE))
@@ -1314,6 +1334,23 @@ fn summarize(item: SessionIndexItem) -> SessionSummary {
 mod tests {
     use super::*;
     use crate::models::Effort;
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn named_pipe_answers_a_cli_request() {
+        use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
+        let path = format!(r"\\.\pipe\dray-test-{}", uuid::Uuid::now_v7());
+        let server = ServerOptions::new().first_pipe_instance(true).create(&path).unwrap();
+        let mut client = ClientOptions::new().open(&path).unwrap();
+        server.connect().await.unwrap();
+        let task = tokio::spawn(async move { handle(server, &Sink::new(|_, _| {})).await });
+        client.write_all(b"{\"v\":0}\n").await.unwrap();
+        let mut response = String::new();
+        BufReader::new(client).read_line(&mut response).await.unwrap();
+        let response: Response = serde_json::from_str(&response).unwrap();
+        assert!(matches!(response, Response::Error { message } if message.contains("protocol")));
+        task.await.unwrap().unwrap();
+    }
 
     fn item(id: &str, parent: Option<&str>) -> SessionIndexItem {
         SessionIndexItem::new(

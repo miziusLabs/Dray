@@ -1,3 +1,5 @@
+import WindowsBrowserPane from "@/components/browser/WindowsBrowserPane";
+import { IS_WINDOWS } from "@/lib/platform";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowLeft,
@@ -134,7 +136,11 @@ function useHistory(sessionId: string, when: boolean): BrowserVisit[] {
 /// webview; nothing here renders it. The stage below reports its rect and
 /// Rust moves the view onto it. The full view outranks the panel, so should
 /// both ever be on screen the page lands in the full view.
-export default function BrowserPane({
+export default function BrowserPane(props: Parameters<typeof NativeBrowserPane>[0]) {
+  return IS_WINDOWS ? <WindowsBrowserPane {...props} /> : <NativeBrowserPane {...props} />;
+}
+
+function NativeBrowserPane({
   sessionId,
   active,
   mode,

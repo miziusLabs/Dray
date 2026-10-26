@@ -1,6 +1,6 @@
 # The Mac's sessions live in a background server
 
-monorepo-labs/dray#456. Until now the Mac app *was* the core: its own process
+miziusLabs/Dray#456. Until now the Mac app *was* the core: its own process
 ran every agent, and quitting it stopped them. #452 let the app serve those
 sessions to another Mac through a quick tunnel, but only while it was open.
 This moves the core out of the app into a server that launchd keeps running

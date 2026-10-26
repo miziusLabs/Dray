@@ -17,7 +17,7 @@
 
 set -eu
 
-REPO="monorepo-labs/dray"
+REPO="miziusLabs/Dray"
 INSTALL_DIR="${DRAY_INSTALL_DIR:-$HOME/.local/bin}"
 CHANNEL="${DRAY_CHANNEL:-stable}"
 

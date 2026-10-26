@@ -11,7 +11,6 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::git::resolved;
 use crate::session::manager;
@@ -78,7 +77,11 @@ fn discover(root: Option<u32>, tree: Option<&Path>) -> Vec<LocalServer> {
 
 /// Every pid under `root`, `root` included.
 pub(crate) fn descendants(root: u32) -> HashSet<u32> {
-    let Ok(out) = Command::new("ps").args(["-axo", "pid=,ppid="]).output() else {
+    #[cfg(unix)]
+    let output = crate::binpath::std_command("ps").args(["-axo", "pid=,ppid="]).output();
+    #[cfg(windows)]
+    let output = powershell("Get-CimInstance Win32_Process | ForEach-Object { '{0} {1}' -f $_.ProcessId,$_.ParentProcessId }");
+    let Ok(out) = output else {
         return HashSet::new();
     };
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -119,15 +122,18 @@ pub(crate) async fn kill_descendants(root: u32) {
     for pid in tree.into_iter().filter(|&p| p != root) {
         // ponytail: a process group set at spawn would make this one signal
         // with no walk; four spawn sites to change if this bites.
+        #[cfg(unix)]
         unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        #[cfg(windows)]
+        { let _ = crate::binpath::std_command("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output(); }
     }
 }
 
 /// `(pid, process name, port)` for every TCP listener, via lsof's machine
 /// format: one field per line, `p` opening a process and `n` naming a socket.
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn listening() -> Vec<(u32, String, u16)> {
-    let Ok(out) = Command::new("lsof")
+    let Ok(out) = crate::binpath::std_command("lsof")
         .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"])
         .output()
     else {
@@ -138,13 +144,13 @@ fn listening() -> Vec<(u32, String, u16)> {
 
 /// Working directory per pid, for the listeners only. One lsof for the lot:
 /// `-a` ands the pid list with the `cwd` descriptor.
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn cwd_of(pids: Vec<u32>) -> HashMap<u32, PathBuf> {
     if pids.is_empty() {
         return HashMap::new();
     }
     let list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-    let Ok(out) = Command::new("lsof").args(["-a", "-p", &list, "-d", "cwd", "-Fpn"]).output() else {
+    let Ok(out) = crate::binpath::std_command("lsof").args(["-a", "-p", &list, "-d", "cwd", "-Fpn"]).output() else {
         return HashMap::new();
     };
     parse_cwds(&String::from_utf8_lossy(&out.stdout))
@@ -203,7 +209,7 @@ fn parse_proc_net(text: &str) -> Vec<(u64, u16)> {
         .collect()
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn parse_cwds(text: &str) -> HashMap<u32, PathBuf> {
     let mut map = HashMap::new();
     let mut pid = 0u32;
@@ -219,7 +225,7 @@ fn parse_cwds(text: &str) -> HashMap<u32, PathBuf> {
     map
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn parse_lsof(text: &str) -> Vec<(u32, String, u16)> {
     let mut rows = Vec::new();
     let (mut pid, mut name) = (0u32, String::new());
@@ -247,6 +253,7 @@ fn parse_lsof(text: &str) -> Vec<(u32, String, u16)> {
 mod tests {
     use super::*;
 
+    #[cfg(all(unix, not(target_os = "linux")))]
     #[test]
     fn parses_lsof_machine_format() {
         let text = "p123\ncnode\nn[::1]:1420\np456\ncpostgres\nn127.0.0.1:5432\nn[::1]:5432\np789\ncsshd\nn10.0.0.5:22\n";
@@ -280,10 +287,37 @@ mod tests {
         assert_eq!(cwd_of(vec![me]).get(&me).map(|p| resolved(p)), Some(resolved(&std::env::current_dir().unwrap())));
     }
 
+    #[cfg(all(unix, not(target_os = "linux")))]
     #[test]
     fn parses_cwds() {
         let map = parse_cwds("p123\nfcwd\nn/Users/me/proj\np456\nfcwd\nn/tmp\n");
         assert_eq!(map[&123], PathBuf::from("/Users/me/proj"));
         assert_eq!(map[&456], PathBuf::from("/tmp"));
     }
+}
+
+#[cfg(windows)]
+fn powershell(script: &str) -> std::io::Result<std::process::Output> {
+    use std::os::windows::process::CommandExt;
+    crate::binpath::std_command("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .creation_flags(0x08000000).output()
+}
+
+#[cfg(windows)]
+fn listening() -> Vec<(u32, String, u16)> {
+    let Ok(out) = powershell("Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; '{0}|{1}|{2}' -f $_.OwningProcess,$p.ProcessName,$_.LocalPort }") else { return Vec::new() };
+    String::from_utf8_lossy(&out.stdout).lines().filter_map(|line| {
+        let mut parts = line.trim().split('|');
+        Some((parts.next()?.parse().ok()?, parts.next()?.to_string(), parts.next()?.parse().ok()?))
+    }).collect()
+}
+
+#[cfg(windows)]
+fn cwd_of(pids: Vec<u32>) -> HashMap<u32, PathBuf> {
+    let me = std::process::id();
+    let mut cwds = HashMap::new();
+    if pids.contains(&me) {
+        if let Ok(cwd) = std::env::current_dir() { cwds.insert(me, cwd); }
+    }
+    cwds
 }
