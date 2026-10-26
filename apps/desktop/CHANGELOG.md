@@ -19,6 +19,33 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.10 · 2026-10-27
+
+### New
+
+- **Fork Codex sessions.** Codex sessions now fork like Claude Code ones.
+- Codex and Grok take images in your prompts.
+
+### Improved
+
+- GPT-6.1 Sol is the default Codex model. Haiku 5.5 and Sonnet 5.5 join
+  the Claude Code list.
+- Changing a Codex session's model, effort, mode or fast mode takes effect
+  on the next turn without restarting the agent.
+- fx fast mode is set per session and can change mid-session. Dray no
+  longer writes it into your fx settings.
+- Stop now ends Grok background tasks and subagents.
+- When Claude Code switches to a fallback model, the transcript says so
+  and the model picker follows.
+
+### Fixed
+
+- fx sessions open again on fx 0.0.14.
+- Stop no longer leaves a Claude Code turn stuck in progress, and neither
+  does an agent that quits mid-turn.
+- pi commands like `/mcp` no longer leave the session working forever.
+- The Island stays on every desktop after switching Spaces.
+
 ## 0.29.9 · 2026-10-26
 
 ### Improved
