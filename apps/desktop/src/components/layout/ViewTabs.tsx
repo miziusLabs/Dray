@@ -26,21 +26,30 @@ import {
 } from "@/components/ui/tooltip";
 import { useDragReorder } from "@/hooks/useDragReorder";
 import { useDigitHotkey, useHotkey } from "@/hooks/useHotkey";
-import { activateFile, closeFile, useOpenFiles } from "@/hooks/useOpenFiles";
+import { activateFile, closeFile, reopenFile, useOpenFiles } from "@/hooks/useOpenFiles";
 import {
   activateBlankTab,
   activateTab,
+  addBlankTab,
   closeBlankTab,
   closeTab,
   openInBrowser,
   setPendingTab,
   useBlankTabs,
   useBrowserTabs,
+  useParkedTabs,
   usePendingTab,
   useRecording,
 } from "@/lib/browser";
 import { tabLabels } from "@/lib/fileTree";
-import { moveKey, reconcile, type TabKey } from "@/lib/tabOrder";
+import {
+  markClosedSlot,
+  moveKey,
+  popClosedTab,
+  pushClosedTab,
+  reconcile,
+  type TabKey,
+} from "@/lib/tabOrder";
 import BranchButton from "@/components/layout/BranchButton";
 import { cn } from "@/lib/utils";
 
@@ -142,6 +151,7 @@ export default function ViewTabs({
   const pages = loadedPages ?? [];
   const pending = usePendingTab(sessionId);
   const blanks = useBlankTabs(sessionId);
+  const parkedPages = useParkedTabs(sessionId);
   // The agent's next verb goes to whichever page is active, so the reader
   // cannot move it mid-recording — the panel strip's own rule.
   const recording = useRecording(sessionId);
@@ -158,6 +168,7 @@ export default function ViewTabs({
   };
   added.set(sessionId, shown);
   const setShown = (kind: keyof Added, on: boolean) => {
+    if (!on) pushClosedTab(sessionId, { key: kind });
     added.set(sessionId, { ...(added.get(sessionId) ?? NONE), [kind]: on });
     bump();
   };
@@ -219,8 +230,8 @@ export default function ViewTabs({
     })),
     ...blanks.ids.map((id) => ({
       key: `blank:${id}`,
-      icon: <GlobeFilledIcon className={MARK} />,
-      label: "New tab",
+      icon: parkedPages[id] ? <Favicon tab={parkedPages[id]} /> : <GlobeFilledIcon className={MARK} />,
+      label: parkedPages[id] ? parkedPages[id].title || hostOf(parkedPages[id].url) : "New tab",
       active: tab === "browser" && blanks.active === id,
       locked: recording,
       pick: () => {
@@ -325,6 +336,23 @@ export default function ViewTabs({
   useHotkey("tab.prev", () => step(-1));
   useHotkey("tab.next", () => step(1));
 
+  // ⌘⇧T, every browser's chord. Puts the tab back and leaves the reader where
+  // they are; a page comes back parked in a blank and loads when picked, so
+  // nothing a recording holds is moved.
+  const reopen = () => {
+    const entry = popClosedTab(sessionId);
+    if (!entry) return;
+    let key = entry.key;
+    if (key === "changes" || key === "files") setShown(key, true);
+    else if (key.startsWith("file:")) reopenFile(sessionId, key.slice("file:".length));
+    else key = `blank:${addBlankTab(sessionId, entry.page)}`;
+    if (entry.at !== undefined) {
+      orders.set(sessionId, moveKey(orders.get(sessionId) ?? order, key, entry.at));
+    }
+    bump();
+  };
+  useHotkey("tab.reopen", reopen);
+
   // Closing the tab on screen moves to the one beside it in this row, as a
   // browser does, rather than to whatever its own kind would pick.
   // Closing the last file is the exception: Files takes its slot, so the
@@ -341,6 +369,7 @@ export default function ViewTabs({
         ?.pick();
     }
     item.close?.();
+    markClosedSlot(sessionId, item.key, i);
   };
 
   useEffect(() => {
@@ -415,14 +444,6 @@ export default function ViewTabs({
           // The chat alone is a title, not a tab: nothing beside it to pick
           // between, so no pill to say which is picked.
           plain={lone}
-          hint={
-            !lone && (
-              <>
-                Switch tabs
-                <ShortcutKeys ids={["tab.prev", "tab.next"]} />
-              </>
-            )
-          }
         />
       ))}
       {/* Last, after every tab, where a browser keeps it. Past the items, so
@@ -466,6 +487,18 @@ export default function ViewTabs({
             <ShortcutKeys ids={["browser.newTab"]} />
           </TooltipContent>
         </Tooltip>
+      )}
+      {/* The chords that step the row, said beside it once there is a row to
+          step. Wraps rather than shrinks: the zero-width opener holds the
+          first line, so a hint that does not fit whole drops to a second
+          line the fixed height clips, and no tab gives up width for it. */}
+      {!lone && (
+        <span className="flex h-7 min-w-0 flex-1 flex-wrap items-center overflow-hidden">
+          <span aria-hidden className="h-7" />
+          <span className="flex whitespace-nowrap pl-2 opacity-50">
+            <ShortcutKeys ids={["tab.prev", "tab.next"]} />
+          </span>
+        </span>
       )}
       {/* At the row's far end, where it gives way before any tab does. */}
       {branch && cwd && (

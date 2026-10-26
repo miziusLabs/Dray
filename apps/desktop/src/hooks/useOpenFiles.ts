@@ -4,6 +4,7 @@ import { invoke, listen } from "@/lib/transport";
 import { watchDocs } from "@/lib/servers";
 
 import { channel } from "@/lib/channel";
+import { pushClosedTab } from "@/lib/tabOrder";
 import type { FileBody } from "@/types/events";
 
 /// A tagged union over the read, so there is no state in which a body exists
@@ -130,6 +131,19 @@ export function openInFiles(sid: string | null, path: string, line?: number): vo
   read(sid, path);
 }
 
+/// Puts a closed file back without bringing it forward: ⌘⇧T restores a tab,
+/// it does not switch to one. Leaves `opened` alone, which is what moves the
+/// view.
+export function reopenFile(sid: string, path: string) {
+  const { open, active } = state(sid);
+  if (open.some((file) => file.path === path)) return;
+  write(sid, {
+    open: [...open, { path, reveal: 0, state: { status: "loading" } }],
+    active: active ?? path,
+  });
+  read(sid, path);
+}
+
 /// Brings an already-open file forward.
 export function activateFile(sid: string | null, path: string) {
   if (!sid) return;
@@ -147,6 +161,7 @@ export function closeFile(sid: string | null, path: string) {
   const { open, active } = state(sid);
   const at = open.findIndex((file) => file.path === path);
   if (at === -1) return;
+  pushClosedTab(sid, { key: `file:${path}` });
   // A read still out for this path must not write into the store after the
   // reader has closed it.
   issue(sid, path);

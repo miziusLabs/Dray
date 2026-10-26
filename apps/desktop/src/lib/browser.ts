@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 
 import { readLocalStorage } from "@/hooks/useLocalStorage";
 import { channel } from "@/lib/channel";
+import { pushClosedTab } from "@/lib/tabOrder";
 import type { BrowserVisit } from "@/lib/history";
 import type { ChromiumStatus } from "@/types/events";
 import { zoomLevel } from "@/lib/zoom";
@@ -294,6 +295,11 @@ export function moveTab(sessionId: string, id: number, to: number) {
 }
 
 export function closeTab(sessionId: string, id: number) {
+  const page = tabsBySession.get(sessionId)?.find((t) => t.id === id);
+  pushClosedTab(sessionId, {
+    key: `page:${id}`,
+    page: page?.url ? { url: page.url, title: page.title, favicon: page.favicon } : undefined,
+  });
   return invoke("browser_close", { sessionId, id });
 }
 
@@ -484,14 +490,52 @@ export function setPendingTab(sessionId: string, on: boolean) {
   putBlanks(sessionId, { ...b, active: null });
 }
 
+/// Adds a blank tab without showing it — or, given a page, a reopened page held
+/// unloaded until picked, as a browser restores a tab. Answers its id.
+export function addBlankTab(sessionId: string, page?: ParkedPage): number {
+  const b = blanks.get(sessionId) ?? NO_BLANKS;
+  const id = nextBlank++;
+  if (page) setParked(sessionId, id, page);
+  putBlanks(sessionId, { ids: [...b.ids, id], active: b.active });
+  return id;
+}
+
+/// Reopened pages not yet loaded, per session, keyed by the blank holding them.
+export type ParkedPage = { url: string; title: string; favicon: string };
+const NO_PARKED: Record<number, ParkedPage> = {};
+const parked = new Map<string, Record<number, ParkedPage>>();
+
+function setParked(sessionId: string, id: number, page: ParkedPage | null) {
+  const { [id]: _, ...rest } = parked.get(sessionId) ?? NO_PARKED;
+  parked.set(sessionId, page ? { ...rest, [id]: page } : rest);
+}
+
+/// Drops a deleted session's parked pages.
+export function forgetParkedTabs(sessionId: string) {
+  parked.delete(sessionId);
+}
+
+export function useParkedTabs(sessionId: string): Record<number, ParkedPage> {
+  return useSyncExternalStore(subscribe, () => parked.get(sessionId) ?? NO_PARKED);
+}
+
 export function activateBlankTab(sessionId: string, id: number) {
   const b = blanks.get(sessionId) ?? NO_BLANKS;
   openErrors.delete(sessionId);
   putBlanks(sessionId, { ...b, active: id });
+  // Picking a parked page is what loads it, into the blank it sits in.
+  const page = parked.get(sessionId)?.[id];
+  if (page) {
+    setParked(sessionId, id, null);
+    void openInBrowser(sessionId, page.url, true, id).catch(() => undefined);
+  }
 }
 
 export function closeBlankTab(sessionId: string, id: number) {
   const b = blanks.get(sessionId) ?? NO_BLANKS;
+  const page = parked.get(sessionId)?.[id];
+  pushClosedTab(sessionId, { key: `blank:${id}`, page });
+  if (page) setParked(sessionId, id, null);
   drafts.delete(`${sessionId}:blank:${id}`);
   if (b.active === id) openErrors.delete(sessionId);
   putBlanks(sessionId, { ids: b.ids.filter((i) => i !== id), active: b.active === id ? null : b.active });
