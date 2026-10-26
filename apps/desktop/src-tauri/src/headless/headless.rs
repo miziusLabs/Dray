@@ -20,6 +20,11 @@
 
 #[path = "../browser/automation.rs"]
 pub mod automation;
+/// The reader-facing browser records its pages here too, so the URL bar's
+/// suggestions and the empty state's recent list are not permanently empty.
+#[cfg(windows)]
+#[path = "../browser/history.rs"]
+mod history;
 #[path = "download.rs"]
 mod download;
 
@@ -171,10 +176,11 @@ pub fn browser_move(session_id: String, id: i32, to: usize) -> Vec<Value> {
     browser_tabs(session_id)
 }
 
-/// The server keeps no visit history to offer a client's history menu.
+/// The pages this session's browser visited, newest first — the same record the
+/// Mac keeps beside a session's profile, written here as pages commit.
 #[cfg(windows)]
-pub fn browser_history(_session_id: String) -> Vec<Value> {
-    Vec::new()
+pub fn browser_history(session_id: String) -> Vec<history::Visit> {
+    history::list(&browser_dir(), &session_id)
 }
 
 #[cfg(windows)]
@@ -204,6 +210,9 @@ struct Tab {
     url: String,
     title: String,
     loading: bool,
+    /// The address last filed in the session's history, so a tab reporting the
+    /// same page twice — its attach, then a title change — counts one visit.
+    recorded: String,
 }
 
 /// One session's Chromium.
@@ -502,6 +511,7 @@ async fn create_tab(session: &str, url: &str, id: Option<i32>) -> Result<i32, St
                 url: url.to_string(),
                 title: String::new(),
                 loading: true,
+                recorded: String::new(),
             }),
         }
     }
@@ -888,10 +898,22 @@ fn dispatch(session: &str, message: &Value) {
 /// A target's url and title onto the tab showing it.
 fn retitle(info: &Value) {
     let Some(target) = info["targetId"].as_str() else { return };
-    if let Some(t) = TABS.lock().unwrap().iter_mut().find(|t| t.target.as_deref() == Some(target)) {
+    let Some(mut tabs) = TABS.lock().ok() else { return };
+    if let Some(t) = tabs.iter_mut().find(|t| t.target.as_deref() == Some(target)) {
         t.url = info["url"].as_str().unwrap_or_default().to_string();
         t.title = info["title"].as_str().unwrap_or_default().to_string();
+        record_visit(t);
+        history::describe(&browser_dir(), &t.session, &t.url, Some(&t.title), None);
     }
+}
+
+/// Files the tab's current address in its session's history, once per address.
+fn record_visit(tab: &mut Tab) {
+    if tab.url.is_empty() || tab.recorded == tab.url {
+        return;
+    }
+    tab.recorded = tab.url.clone();
+    history::visit(&browser_dir(), &tab.session, &tab.url);
 }
 
 fn tab_by_cdp(cdp: &str) -> Option<i32> {
@@ -933,6 +955,7 @@ fn attached(session: &str, params: &Value) {
                 url: String::new(),
                 title: String::new(),
                 loading: true,
+                recorded: String::new(),
             });
             id
         });
@@ -941,6 +964,7 @@ fn attached(session: &str, params: &Value) {
             t.cdp = Some(cdp.to_string());
             t.url = info["url"].as_str().unwrap_or_default().to_string();
             t.title = info["title"].as_str().unwrap_or_default().to_string();
+            record_visit(t);
         }
         popup.then_some(id)
     };
@@ -1029,6 +1053,7 @@ fn start_sweep() {
 /// Closes a session's Chromium and forgets its tabs, for settle and delete.
 pub fn close_session(session: &str) {
     automation::drop_recording(session);
+    history::forget(&browser_dir(), session);
     CHROMES.lock().unwrap().remove(session);
     let ids: Vec<i32> = TABS.lock().unwrap().iter().filter(|t| t.session == session).map(|t| t.id).collect();
     TABS.lock().unwrap().retain(|t| t.session != session);

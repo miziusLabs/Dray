@@ -1231,10 +1231,22 @@ async fn dispatch(cmd: &str, args: Value, sink: Sink) -> Result<Value, Value> {
             | "browser_move"
             | "browser_nav"
             | "browser_history"
+            | "browser_devtools"
+            | "browser_pick"
             | "chromium_status"
             | "chromium_download"
             | "chromium_remove"
     ) {
+        // Windows' browser is headless Chromium behind private pipes: there is
+        // no view to hang DevTools beside and no overlay to pick through. Both
+        // answer in words rather than as an unknown command, which would read
+        // as a stale client.
+        if cmd == "browser_devtools" {
+            return Err(json!("DevTools is not available in the Windows browser."));
+        }
+        if cmd == "browser_pick" {
+            return Err(json!("Picking an element for chat is not available in the Windows browser."));
+        }
         return table! { cmd, args;
             browser_view(session_id: String) => crate::headless::browser_view(session_id).await;
             browser_input(session_id: String, action: Value) => crate::headless::browser_input(session_id, action).await;
