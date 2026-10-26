@@ -342,7 +342,12 @@ mod tests {
 
         client.close();
 
-        let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+        // `cat` answers at once and PowerShell does not: spawning it, loading
+        // its runtime and reaching `ReadToEnd` took longer than five seconds on
+        // a loaded Windows runner, which failed the run while `close` was
+        // working exactly as asked. The timeout is a hang guard, not a speed
+        // assertion, so it is generous enough for a cold PowerShell.
+        let status = tokio::time::timeout(Duration::from_secs(30), child.wait())
             .await
             .expect("the child outlived its EOF")
             .expect("wait");
