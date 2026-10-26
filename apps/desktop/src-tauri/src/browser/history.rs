@@ -60,10 +60,11 @@ fn with<R>(root: &Path, session: &str, f: impl FnOnce(&mut Vec<Visit>) -> R) -> 
     f(list)
 }
 
-/// Marks the list for the writer, which is a thread of its own: these are
-/// called from CEF's display handlers on the main thread, where a disk
-/// write is a pause in the whole window. Changes in the last second before
-/// a quit are lost, which history can afford.
+/// Marks the list for the writer, which is a thread of its own: both callers
+/// write from a thread that must not block. CEF's display handlers run on the
+/// main thread, where a disk write is a pause in the whole window, and the
+/// headless browser's pipe reader carries every CDP reply. Changes in the last
+/// second before a quit are lost, which history can afford.
 fn save(root: &Path, session: &str) {
     DIRTY.lock().unwrap().insert((root.to_path_buf(), session.to_string()));
     let tx = WRITER.get_or_init(|| {
