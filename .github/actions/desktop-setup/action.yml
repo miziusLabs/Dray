@@ -1,7 +1,7 @@
 name: Desktop build setup
 description: >
   pnpm, Rust with both Apple targets, the cargo cache and the CEF build tools.
-  One place, so release.yml and warm-cache.yml meet on the same cache key —
+  One place, so ci.yml and warm-cache.yml meet on the same cache key —
   runner, toolchain and target list all feed it.
 
 outputs:

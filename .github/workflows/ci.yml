@@ -1,13 +1,13 @@
-name: Release
+name: CI
 
-# A tag is the whole trigger, and its shape picks the channel: `v0.3.0` is
-# stable, `v0.3.0-beta.1` is beta. Semver's own prerelease rule is what makes
-# that work end to end — the updater compares versions, and `0.3.0-beta.1` is
-# older than `0.3.0`, so a beta user lands on the stable release when it ships.
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths:
+      - apps/desktop/src-tauri/tauri.conf.json
+      - apps/desktop/src-tauri/Cargo.toml
+      - apps/desktop/package.json
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,10 +17,55 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  # Apple stops notarizing whenever it updates the developer agreement until
-  # the Account Holder accepts it, and the build only finds out ~30 minutes in.
-  # Any notarytool call answers the same 403, so ask before building.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      changed: ${{ steps.version.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          version="$(jq -er '.version | strings | select(length > 0)' apps/desktop/src-tauri/tauri.conf.json)"
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          changed=false
+          if [ "$EVENT" = workflow_dispatch ]; then
+            changed=true
+          else
+            previous="$(git show "$BEFORE:apps/desktop/src-tauri/tauri.conf.json" | jq -er '.version')"
+            if [ "$version" != "$previous" ]; then
+              changed=true
+            fi
+          fi
+          if [ "$changed" = true ]; then
+            package_version="$(jq -er .version apps/desktop/package.json)"
+            cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/desktop/src-tauri/Cargo.toml | head -n 1)"
+            if [ "$version" != "$package_version" ] || [ "$version" != "$cargo_version" ]; then
+              echo "::error::Desktop version files do not match"
+              exit 1
+            fi
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Invalid desktop version $version"
+              exit 1
+            fi
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null &&
+               [ "$(git rev-list -n 1 "$tag")" != "$GITHUB_SHA" ]; then
+              echo "::error::Tag $tag already points to a different commit"
+              exit 1
+            fi
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   notary-check:
+    needs: version
+    if: needs.version.outputs.changed == 'true'
     runs-on: macos-latest
     steps:
       - run: xcrun notarytool history --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" >/dev/null
@@ -30,7 +75,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
   build:
-    needs: notary-check
+    env:
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+    needs: [version, notary-check]
     runs-on: macos-latest
     outputs:
       channel: ${{ steps.channel.outputs.channel }}
@@ -38,19 +85,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The manifest's version is the app's, not the tag's — a tag that names a
-      # version the conf doesn't carry publishes a manifest no client considers
-      # newer, and the release silently reaches nobody. Fail loudly instead.
-      - run: |
-          V="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
-          if [ "v$V" != "${GITHUB_REF_NAME}" ]; then
-            echo "tag ${GITHUB_REF_NAME} does not match tauri.conf.json version v$V" >&2
-            exit 1
-          fi
-
       - id: channel
         run: |
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+          if [[ "${RELEASE_TAG}" == *-* ]]; then
             echo "channel=beta" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
@@ -145,8 +182,9 @@ jobs:
         with:
           # The Tauri project no longer sits at the repo root.
           projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
+          tagName: ${{ needs.version.outputs.tag }}
+          releaseName: ${{ needs.version.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
           prerelease: ${{ steps.channel.outputs.prerelease }}
           releaseBody: ${{ steps.notes.outputs.body }}
           generateReleaseNotes: true
@@ -211,10 +249,10 @@ jobs:
               --cache-control "public, max-age=31536000, immutable"
           }
           DMG="$(ls "$BUNDLE"/dmg/*.dmg)"
-          put "$DMG" "${GITHUB_REF_NAME}/$(basename "$DMG")"
+          put "$DMG" "${RELEASE_TAG}/$(basename "$DMG")"
           # The bundler writes `Dray.app.tar.gz`; tauri-action renames it on
           # upload, and the manifest names the renamed one.
-          put "$(ls "$BUNDLE"/macos/*.app.tar.gz)" "${GITHUB_REF_NAME}/Dray_universal.app.tar.gz"
+          put "$(ls "$BUNDLE"/macos/*.app.tar.gz)" "${RELEASE_TAG}/Dray_universal.app.tar.gz"
           echo "dmg=$(basename "$DMG")" >> "$GITHUB_OUTPUT"
 
   # The manifests live on a branch rather than in the release, because
@@ -222,8 +260,10 @@ jobs:
   # GitHub Pages serves this branch; the artifact URLs inside are rewritten
   # onto the R2 mirror the build job uploaded to.
   manifest:
-    needs: build
+    needs: [version, build]
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -244,7 +284,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${DOWNLOADS_URL:?}" "${DMG:?}"
-          gh release download "${GITHUB_REF_NAME}" \
+          gh release download "${RELEASE_TAG}" \
             --repo "${GITHUB_REPOSITORY}" \
             --pattern latest.json --output release.json --clobber
 
@@ -303,7 +343,7 @@ jobs:
           # channel — leaves nothing staged, and an empty commit would fail
           # the job over a push that had nothing to say.
           git diff --cached --quiet || {
-            git commit -m "release ${GITHUB_REF_NAME}"
+            git commit -m "release ${RELEASE_TAG}"
             git push
           }
 
@@ -313,7 +353,7 @@ jobs:
           # release means this one did not win. A server-side copy of the key
           # the build job uploaded; nothing is re-sent.
           if [ "$(jq -r '.version // empty' stable.json 2>/dev/null)" = "$NEW" ]; then
-            aws s3 cp "s3://${R2_BUCKET}/${GITHUB_REF_NAME}/${DMG}" "s3://${R2_BUCKET}/Dray_universal.dmg" \
+            aws s3 cp "s3://${R2_BUCKET}/${RELEASE_TAG}/${DMG}" "s3://${R2_BUCKET}/Dray_universal.dmg" \
               --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
               --metadata-directive REPLACE \
               --content-type application/x-apple-diskimage \
