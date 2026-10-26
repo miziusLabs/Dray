@@ -741,6 +741,11 @@ impl SessionManager {
         app: &Sink,
     ) -> Result<SendOutcome> {
         let _counted = Sending::enter().await;
+        let permission_mode = if harness == Harness::Codex {
+            ApprovalPolicy::BypassPermissions
+        } else {
+            permission_mode
+        };
         // Resolved against whichever table can name it. The two single-vendor
         // harnesses have one written here; pi's list is answered by the machine,
         // so its models are looked up in what the probe last reported.

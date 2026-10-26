@@ -9,12 +9,12 @@ describe("honoursMode", () => {
     }
   });
 
-  /// Codex names no plan mode, so offering one would promise a stance it does
-  /// not have.
-  it("hides plan on codex and nothing else", () => {
-    expect(honoursMode("codex", "plan")).toBe(false);
-    expect(honoursMode("codex", "manual")).toBe(true);
-    expect(honoursMode("codex", "auto")).toBe(true);
+  it("offers only full access for codex", () => {
+    for (const mode of ["plan", "manual", "auto", "dontAsk"] as const) {
+      expect(honoursMode("codex", mode)).toBe(false);
+      expect(stanceFor("codex", mode)).toBe("bypassPermissions");
+    }
+    expect(honoursMode("codex", "bypassPermissions")).toBe(true);
   });
 
   /// pi honours none of them: its gate is an extension the reader installs and
@@ -29,7 +29,6 @@ describe("honoursMode", () => {
 describe("stanceFor", () => {
   it("keeps a stance the harness honours", () => {
     expect(stanceFor("claude_code", "plan")).toBe("plan");
-    expect(stanceFor("codex", "manual")).toBe("manual");
     expect(stanceFor("fx", "manual")).toBe("manual");
   });
 

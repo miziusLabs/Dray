@@ -3,10 +3,6 @@ import type { ApprovalPolicy, Harness } from "@/types/events";
 /// The stances a harness can actually honour, for one that cannot honour them
 /// all. Absent means every stance in the picker applies.
 ///
-/// Codex has no plan mode: its own three are ask / approve-for-me / full
-/// access, and `plan` maps onto read-only-and-ask — close, but a stance Codex
-/// never names, so offering it would promise a mode it does not have.
-///
 /// pi honours **none of them**, so it draws no picker at all. It has no
 /// permission system of its own — it runs what the model asks for, and the gate
 /// belongs to an extension the reader installs and configures themselves. Both
@@ -26,7 +22,7 @@ import type { ApprovalPolicy, Harness } from "@/types/events";
 /// fx exposes three modes over ACP — `auto`, `ask` and `full-access` — since
 /// 0.0.14; earlier builds had no bypass. It has no plan mode and no `dontAsk`.
 const HONOURED: Partial<Record<Harness, ApprovalPolicy[]>> = {
-  codex: ["bypassPermissions", "manual", "auto"],
+  codex: ["bypassPermissions"],
   pi: [],
   fx: ["manual", "auto", "bypassPermissions"],
   // Three, and `plan` is the one missing: grok has a plan *mode* of its own
