@@ -19,6 +19,16 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.9 · 2026-10-26
+
+### Improved
+
+- **Edit the buttons behind the composer.** Settings → Composer lets you
+  rename them, change their prompts, and add your own.
+- Usage analytics now also count browser pages you open (local or a
+  website, never the address), Island use, and sessions on remote
+  machines.
+
 ## 0.29.8 · 2026-10-26
 
 ### Improved
