@@ -531,6 +531,10 @@ struct Hello {
     /// `"island"` from Dray Island, which [`island_used`] counts by.
     #[serde(default)]
     client: Option<String>,
+    /// The client reports the sessions it starts here itself — the reader's
+    /// app on another machine — so this server must not count them too.
+    #[serde(default)]
+    counts: bool,
 }
 
 /// What the app can answer when it connects as the host.
@@ -965,6 +969,8 @@ async fn connection(
         "release": option_env!("DRAY_CLI_VERSION"),
         "stale": stale(),
         "dictation": cfg!(feature = "desktop"),
+        // Read by the app to tag a session it starts here, as a closed value.
+        "os": std::env::consts::OS,
     });
     write.send(Message::text(welcome.to_string())).await?;
     write.send(Message::text(snapshot)).await?;
@@ -995,7 +1001,11 @@ async fn connection(
     });
 
     let connection = NEXT_CALL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let hello = serde_json::from_str::<Hello>(&hello).ok().filter(|_| hosts);
+    let hello = serde_json::from_str::<Hello>(&hello).ok();
+    // Read before the filter: a remote reader's app reaches this server
+    // through the tunnel or a `dray-serve` listener too, neither of them hosts.
+    let counts = hello.as_ref().is_some_and(|h| h.counts);
+    let hello = hello.filter(|_| hosts);
     // The local listener alone, like the host offer: the island runs on this Mac.
     let island = hello.as_ref().is_some_and(|h| h.client.as_deref() == Some("island"));
     let offer = hello.and_then(|h| h.host);
@@ -1031,7 +1041,7 @@ async fn connection(
         // Concurrently, as Tauri runs async commands: a send that spawns a
         // child must not hold a permission reply behind it.
         let (sink, replies) = (sink.clone(), replies.clone());
-        tokio::spawn(async move {
+        tokio::spawn(crate::analytics::CLIENT_COUNTS.scope(counts, async move {
             let args = tag_dictation(&call.cmd, call.args, island);
             let reply = match dispatch(&call.cmd, args, sink).await {
                 Ok(ok) => {
@@ -1043,7 +1053,7 @@ async fn connection(
                 Err(err) => json!({ "id": call.id, "err": err }),
             };
             let _ = replies.send(reply.to_string());
-        });
+        }));
     }
 
     // Dropping its waiters answers every call still out on it.
