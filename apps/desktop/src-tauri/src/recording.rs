@@ -175,6 +175,11 @@ fn convert(mov: &Path, mp4: &Path) -> Result<(), String> {
 }
 
 fn run(name: &str, mut command: std::process::Command) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
     let out = command.output().map_err(|e| format!("could not run {name}: {e}"))?;
     if !out.status.success() {
         let said = String::from_utf8_lossy(&out.stderr);
@@ -191,7 +196,7 @@ fn ffmpeg() -> Option<PathBuf> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::split_paths(&path)
         .chain(["/usr/bin", "/usr/local/bin"].map(PathBuf::from))
-        .map(|dir| dir.join("ffmpeg"))
+        .map(|dir| dir.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }))
         .find(|p| p.is_file())
 }
 

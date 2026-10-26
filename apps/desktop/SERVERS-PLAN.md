@@ -1,6 +1,6 @@
 # Several servers at once
 
-monorepo-labs/dray#414, stage 3 of "Dray anywhere". Stage 1 (#413,
+miziusLabs/Dray#414, stage 3 of "Dray anywhere". Stage 1 (#413,
 [SERVE-PLAN.md](SERVE-PLAN.md)) made the core a `dray-serve` and put one
 transport in front of it. This makes the desktop app hold the in-process core
 **and** any number of remote `dray-serve`s, with one merged sidebar.

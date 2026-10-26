@@ -281,12 +281,17 @@ fn detect() -> Vec<ExternalApp> {
 /// asks, instead of needing a restart the way the slash-command cache does.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_open_apps() -> Vec<ExternalApp> {
+    #[cfg(windows)]
+    return windows_apps();
+    #[cfg(not(windows))]
+    {
     if !cfg!(target_os = "macos") {
         return Vec::new();
     }
     tokio::task::spawn_blocking(detect)
         .await
         .unwrap_or_default()
+    }
 }
 
 /// Hands `path` to the app at `app_path`.
@@ -297,7 +302,31 @@ pub async fn list_open_apps() -> Vec<ExternalApp> {
 /// shell, so injection is not the risk — but a path whose name opens with `-`
 /// parses as a flag, which `--` ends.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub async fn open_in_app(app_path: String, path: String) -> Result<(), String> {
+pub async fn open_in_app(app_path: String, path: String, line: Option<u32>) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let allowed = windows_apps().into_iter().any(|app| app.path == app_path);
+        if !allowed {
+            return Err("This application is no longer installed.".into());
+        }
+        let executable = Path::new(&app_path).file_name().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
+        let mut command = std::process::Command::new(&app_path);
+        if executable == "wt.exe" {
+            command.args(["-d", &path]);
+        } else if executable == "powershell.exe" {
+            command.args(["-NoExit", "-Command", &format!("Set-Location -LiteralPath '{}'", path.replace('\'', "''"))]);
+        } else if matches!(executable.as_str(), "code.exe" | "cursor.exe" | "windsurf.exe") && line.is_some() {
+            command.args(["--goto", &format!("{path}:{}", line.unwrap_or(1))]);
+        } else {
+            command.arg(path);
+        }
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(if executable == "powershell.exe" { 0x00000010 } else { 0x08000000 });
+        return command.spawn().map(|_| ()).map_err(|e| format!("could not open the application: {e}"));
+    }
+    #[cfg(not(windows))]
+    {
+    let _ = line;
     let out = tokio::process::Command::new("open")
         .arg("-a")
         .arg(&app_path)
@@ -314,6 +343,29 @@ pub async fn open_in_app(app_path: String, path: String) -> Result<(), String> {
     // `open`'s own sentence names the cure — a moved bundle, a directory that
     // is gone — where the exit code names nothing.
     Err(crate::git::stderr_or(&out, || format!("could not open {path}")))
+    }
+}
+
+#[cfg(windows)]
+fn windows_apps() -> Vec<ExternalApp> {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_default();
+    let programs = std::env::var_os("ProgramFiles").map(PathBuf::from).unwrap_or_default();
+    let system = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let mut candidates = vec![
+        (system.join("explorer.exe"), "File Explorer", ExternalAppKind::Files),
+        (local.join(r"Programs\Microsoft VS Code\Code.exe"), "Visual Studio Code", ExternalAppKind::Editor),
+        (programs.join(r"Microsoft VS Code\Code.exe"), "Visual Studio Code", ExternalAppKind::Editor),
+        (local.join(r"Programs\cursor\Cursor.exe"), "Cursor", ExternalAppKind::Editor),
+        (local.join(r"Programs\Windsurf\Windsurf.exe"), "Windsurf", ExternalAppKind::Editor),
+        (local.join(r"Programs\Zed\zed.exe"), "Zed", ExternalAppKind::Editor),
+    ];
+    // wt's execution alias is installed with Windows Terminal under this user's account.
+    candidates.push((local.join(r"Microsoft\WindowsApps\wt.exe"), "Windows Terminal", ExternalAppKind::Terminal));
+    candidates.push((system.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"), "PowerShell", ExternalAppKind::Terminal));
+    let mut names = std::collections::HashSet::new();
+    candidates.into_iter().filter(|(path, name, _)| path.is_file() && names.insert(*name)).map(|(path, name, kind)| ExternalApp {
+        path: path.to_string_lossy().into_owned(), name: name.into(), kind, icon: None,
+    }).collect()
 }
 
 /// Writes the modifier that opens Dray Island (`control`, `option`, `command`)
@@ -328,6 +380,9 @@ pub async fn open_in_app(app_path: String, path: String) -> Result<(), String> {
 /// (`tauri dev`) only writes the pick.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn configure_island(key: String) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Dray Island is available on macOS only.".into());
+    }
     use tokio::process::Command;
     if !matches!(key.as_str(), "control" | "option" | "command" | "off") {
         return Err(format!("unknown island key {key}"));
@@ -534,6 +589,22 @@ pub async fn open_login_terminal(harness: Harness, cwd: String) -> Result<(), St
 /// script, so the safety is in where it came from and not in any escaping this
 /// could do to it.
 pub(crate) async fn run_in_terminal(command: &str, cwd: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let bash = std::env::var_os("DRAY_BASH_PATH").map(PathBuf::from)
+            .or_else(|| std::env::var_os("ProgramFiles").map(PathBuf::from).map(|p| p.join(r"Git\bin\bash.exe")).filter(|p| p.is_file()))
+            .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from).map(|p| p.join(r"Programs\Git\bin\bash.exe")).filter(|p| p.is_file()))
+            .or_else(|| std::env::home_dir().map(|p| p.join(r"scoop\apps\git\current\bin\bash.exe")).filter(|p| p.is_file()))
+            .ok_or("Install Git for Windows to open agent sign-in and update commands.")?;
+        let mut terminal = std::process::Command::new(bash);
+        terminal.args(["--login", "-c", &format!("{command}; status=$?; printf '\\nPress Enter to close...'; read -r; exit \"$status\"")]);
+        if !cwd.is_empty() { terminal.current_dir(cwd); }
+        use std::os::windows::process::CommandExt;
+        terminal.creation_flags(0x00000010);
+        return terminal.spawn().map(|_| ()).map_err(|e| format!("could not open the terminal: {e}"));
+    }
+    #[cfg(not(windows))]
+    {
     if !cfg!(target_os = "macos") {
         return Err("Opening a terminal is macOS only. Copy the command instead.".to_string());
     }
@@ -555,11 +626,12 @@ pub(crate) async fn run_in_terminal(command: &str, cwd: &str) -> Result<(), Stri
     write_script(&path, &script)
         .map_err(|err| format!("could not write the login script: {err}"))?;
 
-    let opened = open_in_app(TERMINAL.to_string(), path.to_string_lossy().into_owned()).await;
+    let opened = open_in_app(TERMINAL.to_string(), path.to_string_lossy().into_owned(), None).await;
     if opened.is_err() {
         let _ = std::fs::remove_file(&path);
     }
     opened
+    }
 }
 
 /// Writes the script at `0700` on the *create*, never by a `chmod` after.
@@ -588,6 +660,12 @@ fn write_script(path: &Path, body: &str) -> std::io::Result<()> {
 /// single quotes, with the only character they cannot carry spliced in from
 /// outside them.
 pub(crate) fn sh_quote(word: &str) -> String {
+    #[cfg(windows)]
+    let normalized = if word.as_bytes().get(1) == Some(&b':') && !word.contains(';') {
+        format!("/{}{}", word[..1].to_ascii_lowercase(), word[2..].replace('\\', "/"))
+    } else { word.to_string() };
+    #[cfg(windows)]
+    let word = normalized.as_str();
     format!("'{}'", word.replace('\'', r"'\''"))
 }
 

@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use tokio::{fs, io::AsyncWriteExt, process::Command};
+use tokio::{fs, io::AsyncWriteExt};
 use ts_rs::TS;
 use uuid::Uuid;
 
@@ -290,7 +290,7 @@ async fn run(cwd: &str, args: &[&str]) -> Result<()> {
 /// One git invocation: stdout on success, git's own stderr as the error.
 /// Every spawn but `cat-file`'s streamed one goes through here.
 async fn exec(cwd: &str, envs: &[(&str, &str)], args: &[&str]) -> Result<String> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::binpath::command("git");
     cmd.args(args).current_dir(cwd);
     for (key, value) in envs {
         cmd.env(key, value);
@@ -865,7 +865,7 @@ async fn read_batch(cwd: &str, revs: &[String]) -> Vec<Side> {
 
 /// Feeds NUL-delimited revs to one `git cat-file` and returns its raw stdout.
 async fn batch(cwd: &str, mode: &str, revs: &[String]) -> Option<Vec<u8>> {
-    let mut child = Command::new("git")
+    let mut child = crate::binpath::command("git")
         .args(["cat-file", mode, "-z"])
         .current_dir(cwd)
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -1325,6 +1325,7 @@ fn lock_owner_pid(reason: &str) -> Option<u32> {
 /// `kill(pid, 0)` — the signal number that checks for a process without
 /// sending anything. `EPERM` counts as alive: a process owned by another user
 /// is still a process holding that lock.
+#[cfg(unix)]
 fn pid_is_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -1333,6 +1334,13 @@ fn pid_is_alive(pid: u32) -> bool {
     // permission check that gives this function its answer.
     let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
     rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(windows)]
+fn pid_is_alive(pid: u32) -> bool {
+    if pid == 0 { return false; }
+    crate::binpath::std_command("tasklist").args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).output()
+        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).lines().any(|line| line.split(',').nth(1) == Some(format!("\"{pid}\"").as_str())))
 }
 
 /// The `locked` reason git records for `worktree_path`, if any.

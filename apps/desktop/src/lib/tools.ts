@@ -47,7 +47,7 @@ export function toolSummary(
   // fx's own skill tool, whose only field is an opaque location ending in the
   // skill's name — `skill:68130a4a3e6c5614:0/find-skills`. Tool-keyed for the
   // same reason: `location` names a skill on this tool and nothing else.
-  if (name === "skill") return field(input, "location")?.split("/").pop() ?? null;
+  if (name === "skill") return field(input, "location")?.split(/[\\/]/).pop() ?? null;
 
   // grok's MCP dispatcher: every server's tool arrives as one `use_tool` call
   // whose own name says nothing, with the real one under `tool_name` and that
@@ -402,13 +402,13 @@ export function fileTarget(toolType: ToolType, input: JsonValue): string | null 
   const path = pathField(input);
   // A relative path has no anchor here — the row does not know the session's
   // cwd — so it is drawn as text rather than offered as something to open.
-  return path?.startsWith("/") ? path : null;
+  return path && /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(path) ? path : null;
 }
 
 export function shortenPath(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[\\/]/).filter(Boolean);
   if (parts.length <= 2) return path;
-  return parts.slice(-2).join("/");
+  return parts.slice(-2).join(path.includes("\\") ? "\\" : "/");
 }
 
 /// Pretty-prints tool input for the expanded view, dropping the fields the row

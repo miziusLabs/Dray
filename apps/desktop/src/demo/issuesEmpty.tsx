@@ -16,7 +16,7 @@ import "../App.css";
 /// origin, so this is the reader's own local storage — a demo page must not
 /// write over a pick they made in the app itself.
 if (localStorage.getItem("ade.issueRepo") === null) {
-  localStorage.setItem("ade.issueRepo", JSON.stringify("monorepo-labs/dray"));
+  localStorage.setItem("ade.issueRepo", JSON.stringify("miziusLabs/Dray"));
 }
 
 const LINEAR_ROWS: Issue[] = [
@@ -62,15 +62,15 @@ const GITHUB_ROWS: Issue[] = [
   {
     tracker: "github",
     id: "gh-1",
-    identifier: "monorepo-labs/dray#248",
+    identifier: "miziusLabs/Dray#248",
     title: "Read GitHub issues beside Linear",
-    url: "https://github.com/monorepo-labs/dray/issues/248",
+    url: "https://github.com/miziusLabs/Dray/issues/248",
     state: { id: "OPEN", name: "Open", kind: "unstarted", color: "#1a7f37" },
     priority: "none",
     assignee: null,
     author: { name: "yogesh", avatar: null },
     labels: [{ name: "feature", color: "#a2eeef" }],
-    team: "monorepo-labs/dray",
+    team: "miziusLabs/Dray",
     project: null,
     createdAt: "2026-09-22T05:32:40Z",
     updatedAt: "2026-09-22T05:32:40Z",
@@ -80,15 +80,15 @@ const GITHUB_ROWS: Issue[] = [
   {
     tracker: "github",
     id: "gh-2",
-    identifier: "monorepo-labs/dray#108",
+    identifier: "miziusLabs/Dray#108",
     title: "Sidebar rows reorder under the cursor while a turn is running",
-    url: "https://github.com/monorepo-labs/dray/issues/108",
+    url: "https://github.com/miziusLabs/Dray/issues/108",
     state: { id: "OPEN", name: "Open", kind: "unstarted", color: "#1a7f37" },
     priority: "none",
     assignee: null,
     author: { name: "yogesh", avatar: null },
     labels: [{ name: "bug", color: "#d73a4a" }],
-    team: "monorepo-labs/dray",
+    team: "miziusLabs/Dray",
     project: null,
     createdAt: "2026-09-01T16:56:52Z",
     updatedAt: "2026-09-18T11:00:00Z",
@@ -129,7 +129,7 @@ const FILTERS: IssueFilters = {
       return GITHUB_ROWS.filter((row) => !query.issueType || row.issueType?.name === query.issueType);
     }
     if (cmd === "list_issue_filters") return FILTERS;
-    if (cmd === "github_repo") return "monorepo-labs/dray";
+    if (cmd === "github_repo") return "miziusLabs/Dray";
     // The GitHub pane's own button. `false` is the answer worth seeing: it is
     // what a reader who has not actually installed or signed in gets, and the
     // pane staying put is the whole of what it says.

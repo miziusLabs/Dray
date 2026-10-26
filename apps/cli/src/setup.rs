@@ -3,7 +3,9 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -227,10 +229,27 @@ const HOME_BIN_DIRS: [&str; 5] = [".local/bin", ".grok/bin", ".pi/agent/bin", ".
 fn find(bin: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let home = std::env::home_dir();
+    let mut extra = Vec::new();
+    #[cfg(windows)]
+    for (var, suffix) in [("APPDATA", "npm"), ("LOCALAPPDATA", "Microsoft/WinGet/Links"), ("ProgramFiles", "Git/cmd")] {
+        if let Some(root) = std::env::var_os(var) { extra.push(PathBuf::from(root).join(suffix)); }
+    }
     std::env::split_paths(&path)
         .chain(home.iter().flat_map(|h| HOME_BIN_DIRS.map(|d| h.join(d))))
-        .map(|dir| dir.join(bin))
-        .find(|p| p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+        .chain(extra)
+        .flat_map(|dir| {
+            #[cfg(windows)]
+            let names = vec![format!("{bin}.exe"), format!("{bin}.cmd"), bin.to_string()];
+            #[cfg(not(windows))]
+            let names = vec![bin.to_string()];
+            names.into_iter().map(move |name| dir.join(name))
+        })
+        .find(|p| {
+            #[cfg(unix)]
+            { p.metadata().is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0) }
+            #[cfg(windows)]
+            { p.is_file() }
+        })
 }
 
 pub fn setup(args: Install) -> Result<(), String> {
@@ -247,9 +266,14 @@ pub fn setup(args: Install) -> Result<(), String> {
         done("Found", &names.join(", "));
     }
 
+    #[cfg(unix)]
     let tty = OpenOptions::new().read(true).write(true).open("/dev/tty").ok();
+    #[cfg(windows)]
+    let tty: Option<File> = None;
     let picked: Vec<&Tool> = if missing.is_empty() || !args.tools.is_empty() {
         missing.into_iter().filter(|t| args.tools.iter().any(|n| n == t.id)).collect()
+    } else if cfg!(windows) && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        select_from_console(&missing)?
     } else if let Some(tty) = &tty {
         let items: Vec<(String, bool)> = missing
             .iter()
@@ -311,6 +335,25 @@ pub fn setup(args: Install) -> Result<(), String> {
     Ok(())
 }
 
+fn select_from_console<'a>(tools: &[&'a Tool]) -> Result<Vec<&'a Tool>, String> {
+    for (index, tool) in tools.iter().enumerate() {
+        println!("  {}. {}", index + 1, tool.name);
+    }
+    print!("Enter tool numbers separated by commas, or press Enter to skip. ");
+    std::io::stdout().flush().map_err(|e| e.to_string())?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer).map_err(|e| e.to_string())?;
+    let mut selected = Vec::new();
+    for number in answer.trim().split(',').map(str::trim).filter(|value| !value.is_empty()) {
+        let index = number.parse::<usize>().ok().and_then(|value| value.checked_sub(1))
+            .filter(|&index| index < tools.len()).ok_or_else(|| format!("{number} is not a tool number"))?;
+        if !selected.iter().any(|tool: &&Tool| tool.id == tools[index].id) {
+            selected.push(tools[index]);
+        }
+    }
+    Ok(selected)
+}
+
 fn done(title: &str, body: &str) {
     println!("{BAR}\n\x1b[32m◇\x1b[0m  {title}");
     if !body.is_empty() {
@@ -329,6 +372,10 @@ enum InstallError {
 }
 use InstallError::{Failed, Manual};
 
+#[cfg(windows)]
+fn install(tool: &Tool, _tty: Option<&File>) -> Result<(), InstallError> { windows_install(tool) }
+
+#[cfg(not(windows))]
 fn install(tool: &Tool, tty: Option<&File>) -> Result<(), InstallError> {
     // The vendor scripts ask the odd question on /dev/tty; stdin under
     // `curl | sh` is the rest of the installer, which a child must not eat.
@@ -468,13 +515,21 @@ fn output(cmd: &str, args: &[&str]) -> Option<String> {
 pub fn serve(args: Run) -> Result<(), String> {
     may_serve()?;
     let bin = beside("dray-serve")?;
-    let err = Command::new(&bin).args(args.args).exec();
-    Err(format!("could not run {}: {err}", bin.display()))
+    #[cfg(unix)]
+    {
+        let err = Command::new(&bin).args(args.args).exec();
+        Err(format!("could not run {}: {err}", bin.display()))
+    }
+    #[cfg(windows)]
+    {
+        let status = Command::new(&bin).args(args.args).status().map_err(|e| e.to_string())?;
+        if status.success() { Ok(()) } else { Err(format!("{} exited with {status}", bin.display())) }
+    }
 }
 
 fn beside(name: &str) -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("could not find the running dray binary: {e}"))?;
-    let bin = exe.with_file_name(name);
+    let bin = exe.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     if bin.is_file() {
         Ok(bin)
     } else {
@@ -486,6 +541,10 @@ fn beside(name: &str) -> Result<PathBuf, String> {
     }
 }
 
+#[cfg(windows)]
+pub fn service(command: ServiceCommand) -> Result<(), String> { windows_service(command) }
+
+#[cfg(not(windows))]
 pub fn service(command: ServiceCommand) -> Result<(), String> {
     if MAC {
         return agent_service(command);
@@ -567,10 +626,11 @@ fn unit_escape(text: &str) -> String {
 /// whether or not it exists yet, so one installed after the server starts is
 /// found without rewriting the unit, then the reader's own.
 fn unit_env_path(bin: &Path) -> Result<String, String> {
-    let dir = bin.parent().unwrap_or(bin).display().to_string();
     let home = std::env::home_dir().ok_or("could not resolve your home directory")?;
-    let homes: Vec<String> = HOME_BIN_DIRS.iter().map(|d| home.join(d).display().to_string()).collect();
-    Ok(format!("{dir}:{}:{}", homes.join(":"), std::env::var("PATH").unwrap_or_default()))
+    let mut dirs = vec![bin.parent().unwrap_or(bin).to_path_buf()];
+    dirs.extend(HOME_BIN_DIRS.iter().map(|dir| home.join(dir)));
+    dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+    std::env::join_paths(dirs).map(|value| value.to_string_lossy().into_owned()).map_err(|e| e.to_string())
 }
 
 /// Asks the running server to serve itself at its public address, and waits
@@ -606,7 +666,7 @@ fn tunnel_off() -> Result<(), String> {
 fn set_remote_access(on: bool) -> Result<(), String> {
     let endpoint = match std::env::var("DRAY_ENDPOINT") {
         Ok(set) if !set.is_empty() => set,
-        _ => dray_home()?.join(dray_proto::SOCKET_NAME).to_string_lossy().into_owned(),
+        _ => dray_proto::local_endpoint(&dray_home()?.join(dray_proto::SOCKET_NAME)).to_string_lossy().into_owned(),
     };
     let request = dray_proto::Request::SetRemoteAccess(dray_proto::SetRemoteAccess { on });
     match super::send_to(&endpoint, request)? {
@@ -619,7 +679,7 @@ fn set_remote_access(on: bool) -> Result<(), String> {
 /// Takes away the `dray-tunnel.service` an older CLI wrote to run
 /// cloudflared, if there is one. The server runs the tunnel itself now.
 fn remove_tunnel_unit() -> Result<(), String> {
-    if MAC {
+    if MAC || cfg!(windows) {
         return Ok(());
     }
     let file = unit_file(TUNNEL_UNIT)?;
@@ -694,6 +754,10 @@ fn systemctl(quiet: bool, args: &[&str]) -> bool {
 /// A systemd user unit, kept alive across logout and reboot by linger. Writes
 /// the unit every time, so `PATH` follows wherever the reader last ran this
 /// from, and never restarts a running server — that would kill its agents.
+#[cfg(windows)]
+fn service_start() -> Result<String, String> { windows_service(ServiceCommand::Start)?; Ok("dray server status".into()) }
+
+#[cfg(not(windows))]
 fn service_start() -> Result<String, String> {
     if MAC {
         return agent_start();
@@ -747,6 +811,8 @@ fn already_running() -> String {
 /// How the reader restarts the background server onto the `dray-serve` now on
 /// disk, if one is installed.
 pub fn installed_restart() -> Option<String> {
+    #[cfg(windows)]
+    if dray_home().is_ok_and(|home| home.join("server.ps1").exists()) { return Some("dray server uninstall; dray server start".into()); }
     let installed = if MAC { agent_plist_path() } else { unit_path() }.is_ok_and(|p| p.exists());
     installed.then(restart_command)
 }
@@ -847,10 +913,11 @@ fn agent_start() -> Result<String, String> {
     let home = std::path::absolute(dray_home()?).map_err(|e| format!("could not resolve DRAY_HOME: {e}"))?;
     // 0700, which the server's orchestration socket insists on. launchd opens
     // the log in it before the server could make it.
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&home)
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    builder.mode(0o700);
+    builder.create(&home)
         .map_err(|e| format!("could not create {}: {e}", home.display()))?;
     let log = home.join("server.log");
     let mut env = vec![("PATH", unit_env_path(&serve)?)];
@@ -1016,6 +1083,7 @@ mod tests {
     /// Runs the browser script against a fake apt that knows only the old
     /// spellings plus `libasound2t64`, and reads back what it installed.
     #[test]
+    #[cfg(unix)]
     fn browser_script_picks_names_after_updating() {
         use std::os::unix::fs::PermissionsExt;
         let script = super::browser_script();
@@ -1045,6 +1113,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_quoted_path_reaches_sh_as_one_word() {
         let path = "/Users/a b'c/x.plist";
         let out = std::process::Command::new("sh")
@@ -1062,4 +1131,41 @@ mod tests {
         assert_eq!(at("2001:db8::1 51234 2001:db8::7 22").as_deref(), Some("ssh ana@2001:db8::7"));
         assert_eq!(at(""), None);
     }
+}
+
+#[cfg(windows)]
+fn windows_install(tool: &Tool) -> Result<(), InstallError> {
+    let args: &[&str] = match tool.id {
+        "git" => &["install", "--id", "Git.Git", "--exact", "--accept-package-agreements", "--accept-source-agreements"],
+        "gh" => &["install", "--id", "GitHub.cli", "--exact", "--accept-package-agreements", "--accept-source-agreements"],
+        "claude_code" => &["install", "--id", "Anthropic.ClaudeCode", "--exact", "--accept-package-agreements", "--accept-source-agreements"],
+        _ => return Err(Manual(format!("Install {} using its vendor's Windows instructions, then run dray server install again", tool.name))),
+    };
+    let stdin = if std::io::IsTerminal::is_terminal(&std::io::stdin()) { Stdio::inherit() } else { Stdio::null() };
+    let status = Command::new("winget.exe").args(args).stdin(stdin).status().map_err(|e| Failed(e.to_string()))?;
+    if status.success() { Ok(()) } else { Err(Failed(status.to_string())) }
+}
+
+#[cfg(windows)]
+fn windows_service(command: ServiceCommand) -> Result<(), String> {
+    let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
+    let script = match command {
+        ServiceCommand::Start => {
+            may_serve()?;
+            let exe = beside("dray-serve")?;
+            let home = std::path::absolute(dray_home()?).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+            let launcher = home.join("server.ps1");
+            let body = format!("$env:DRAY_HOME = {}\n$env:PATH = {}\n& {} *>> {}\n", quote(&home.to_string_lossy()), quote(&unit_env_path(&exe)?), quote(&exe.to_string_lossy()), quote(&home.join("server.log").to_string_lossy()));
+            std::fs::write(&launcher, body).map_err(|e| e.to_string())?;
+            let args = format!("-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{}\"", launcher.display());
+            format!("$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument {}; $t=New-ScheduledTaskTrigger -AtLogOn -User ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name); $s=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1); Register-ScheduledTask -TaskName 'Dray server' -Action $a -Trigger $t -Settings $s -Force | Out-Null; Start-ScheduledTask -TaskName 'Dray server'", quote(&args))
+        }
+        ServiceCommand::Status => "Get-ScheduledTask -TaskName 'Dray server' | Format-List TaskName,State".into(),
+        ServiceCommand::Uninstall => "Stop-ScheduledTask -TaskName 'Dray server' -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName 'Dray server' -Confirm:$false".into(),
+        ServiceCommand::Tunnel { state: OnOff::On } => return tunnel_on(),
+        ServiceCommand::Tunnel { state: OnOff::Off } => return tunnel_off(),
+    };
+    let status = Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &format!("$ErrorActionPreference='Stop'; {script}")]).status().map_err(|e| e.to_string())?;
+    if status.success() { Ok(()) } else { Err(format!("Windows Task Scheduler returned {status}")) }
 }

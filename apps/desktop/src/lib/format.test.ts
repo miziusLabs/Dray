@@ -11,9 +11,16 @@ describe("calendarDay", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
+    const format = Date.prototype.toLocaleDateString;
+    vi.spyOn(Date.prototype, "toLocaleDateString").mockImplementation(function (this: Date, _locale, options) {
+      return format.call(this, "en-US", options);
+    });
   });
 
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
 
   it("names the two days that have names", () => {
     expect(calendarDay(new Date(2026, 7, 27, 9, 0).toISOString())).toBe("Today");

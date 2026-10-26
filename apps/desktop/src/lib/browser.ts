@@ -7,6 +7,7 @@ import { pushClosedTab } from "@/lib/tabOrder";
 import type { BrowserVisit } from "@/lib/history";
 import type { ChromiumStatus } from "@/types/events";
 import { zoomLevel } from "@/lib/zoom";
+import { IS_WINDOWS } from "@/lib/platform";
 
 /// The in-app browser's frontend half: tabs per session as the backend
 /// reports them, and the one rule about who presents the native view.
@@ -42,6 +43,11 @@ let started = false;
 function start() {
   if (started) return;
   started = true;
+  if (IS_WINDOWS) {
+    setInterval(() => {
+      void invoke<ChromiumStatus>("chromium_status").then(setChromium).catch(() => {});
+    }, 1000);
+  }
   void listen<{ sessionId: string; tabs: BrowserTab[] }>("browser_tabs", (e) => {
     const { sessionId, tabs } = e.payload;
     // A tab arriving is what the new tab on screen was waiting for, whoever

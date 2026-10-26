@@ -1,10 +1,11 @@
-export const REPO = "https://github.com/monorepo-labs/dray";
+export const REPO = "https://github.com/miziusLabs/Dray";
 
 /// The newest stable dmg, off the R2 mirror rather than GitHub, whose release
 /// CDN has had 42MB take 45 minutes. release.yml overwrites this one key on
 /// every stable release, so the button needs no build-time lookup; betas leave
 /// it alone, the beta channel being the updater's and not this page's.
 export const DOWNLOAD = "https://downloads.drayhq.com/Dray_universal.dmg";
+export const WINDOWS_DOWNLOAD = "https://downloads.drayhq.com/Dray_x64-setup.exe";
 
 /// The server install. `public/install.sh` resolves the newest `cli-v*` tag
 /// itself, so this line never needs a version in it.

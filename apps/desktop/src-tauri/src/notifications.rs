@@ -36,6 +36,9 @@ pub async fn notify_session(
         return Ok(());
     }
 
+    #[cfg(not(target_os = "macos"))]
+    let _ = &kind;
+
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         request_auth_once();
@@ -49,6 +52,11 @@ pub async fn notify_session(
             .body(&body)
             .auto_icon()
             .timeout(notify_rust::Timeout::Milliseconds(60_000));
+
+        #[cfg(windows)]
+        notification
+            .app_id("com.yogesh.dray")
+            .sound_name(if kind == "asking" { "Reminder" } else { "Default" });
 
         #[cfg(target_os = "macos")]
         notification.sound_name(sound_for(&kind));
@@ -69,7 +77,15 @@ pub async fn notify_session(
                 activate(&app, &session_id);
             }
         });
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
+        {
+            let _ = handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
+                if response.is_default_action() {
+                    activate(&app, &session_id);
+                }
+            });
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             let _ = (handle, &app, &session_id, &kind);
         }
@@ -125,7 +141,6 @@ fn request_auth_once() {
 /// Both halves are needed and neither implies the other: the OS raises the app
 /// on its own, but nothing about being frontmost selects a session.
 /// Also the Island's way into a session, through the server's `show_session`.
-#[cfg(target_os = "macos")]
 pub fn activate(app: &AppHandle, session_id: &str) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();

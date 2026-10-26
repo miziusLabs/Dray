@@ -5,7 +5,7 @@
 /// by the sanitizer, so the panel would show a confidently wrong version of the
 /// file. It goes to the external editor with everything else.
 export function isMarkdownPath(path: string): boolean {
-  const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
+  const name = path.split(/[\\/]/).at(-1)?.toLowerCase() ?? "";
   return name.endsWith(".md") || name.endsWith(".markdown");
 }
 

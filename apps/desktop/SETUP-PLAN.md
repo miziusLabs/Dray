@@ -1,6 +1,6 @@
 # Stage 2: installing Dray on a VPS
 
-monorepo-labs/dray#415, flow A. The user SSHes into a fresh Linux box and pastes
+miziusLabs/Dray#415, flow A. The user SSHes into a fresh Linux box and pastes
 the line that already installs the CLI:
 
 ```bash

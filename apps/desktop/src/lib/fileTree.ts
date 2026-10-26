@@ -39,8 +39,9 @@ export function flattenTree(
 /// and `src/lib` expanded. An empty list for a file at the root, which is the
 /// ordinary case and not a failure.
 export function expandTo(path: string): string[] {
-  const parts = path.split("/").slice(0, -1).filter(Boolean);
-  return parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+  const separator = path.includes("\\") ? "\\" : "/";
+  const parts = path.split(/[\\/]/).slice(0, -1).filter(Boolean);
+  return parts.map((_, i) => parts.slice(0, i + 1).join(separator));
 }
 
 /// What each open tab is called, in the order it was given.
@@ -60,7 +61,7 @@ export function tabLabels(paths: readonly string[]): string[] {
   return paths.map((path) => {
     const name = basename(path);
     if ((counts.get(name) ?? 0) < 2) return name;
-    const parent = basename(path.slice(0, path.lastIndexOf("/")));
+    const parent = basename(path.slice(0, Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"))));
     // Two files with the same name at the root of two different trees is the
     // one case this cannot separate. The tab's `title` carries the full path,
     // which is where that question gets answered.

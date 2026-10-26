@@ -56,7 +56,6 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::Stdio;
-use tokio::process::Command;
 
 /// `~/.fx/mcp.json`, the path `fx mcp path` prints.
 fn config_path() -> Option<PathBuf> {
@@ -160,7 +159,7 @@ async fn login_shell_var(key: &str) -> Option<String> {
     }
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let output = Command::new(shell)
+    let output = crate::binpath::command(shell)
         .args(["-l", "-c", &format!("printenv {key}")])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -197,7 +196,7 @@ fn is_env_name(key: &str) -> bool {
 /// reads as "skip" — the safe direction.
 async fn auth_states() -> BTreeMap<String, String> {
     let bin = crate::binpath::fx().await;
-    let mut command = Command::new(&bin);
+    let mut command = crate::binpath::command(&bin);
     command.args(["mcp", "list"]);
     if let Some(home) = std::env::home_dir() {
         command.current_dir(home);

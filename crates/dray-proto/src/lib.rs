@@ -783,7 +783,24 @@ pub fn endpoint() -> Option<String> {
 /// rather than leaving them to guess which build spawned them.
 pub fn socket_path(dev: bool) -> Option<PathBuf> {
     let name = if dev { SOCKET_NAME_DEV } else { SOCKET_NAME };
-    Some(std::env::home_dir()?.join(".dray").join(name))
+    let home = std::env::var_os("DRAY_HOME").filter(|v| !v.is_empty()).map(PathBuf::from)
+        .or_else(|| std::env::home_dir().map(|home| home.join(".dray")))?;
+    Some(local_endpoint(&home.join(name)))
+}
+
+/// Maps a data directory's socket to the platform's local IPC address.
+pub fn local_endpoint(path: &std::path::Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let mut hash = 0xcbf29ce484222325u64;
+        for byte in path.to_string_lossy().to_lowercase().bytes() {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+        }
+        PathBuf::from(format!(r"\\.\pipe\dray-{hash:016x}"))
+    }
+    #[cfg(not(windows))]
+    path.to_path_buf()
 }
 
 /// One request or response as it goes on the wire. Newline-delimited JSON, the
@@ -1026,7 +1043,7 @@ mod tests {
         // Empty reads as unset rather than as an address, so an exported-but-
         // blank var falls back instead of failing to connect to "".
         std::env::set_var("DRAY_ENDPOINT", "");
-        assert!(endpoint().unwrap().ends_with("dray.sock"));
+        assert_eq!(endpoint().unwrap(), socket_path(false).unwrap().to_string_lossy());
 
         std::env::remove_var("DRAY_ENDPOINT");
     }

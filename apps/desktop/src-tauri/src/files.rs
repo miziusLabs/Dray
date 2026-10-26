@@ -36,7 +36,6 @@ use std::{
 use tauri::Manager;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    process::Command,
 };
 use ts_rs::TS;
 
@@ -336,7 +335,7 @@ async fn mark_ignored(cwd: &str, entries: &mut [DirEntry]) {
         input.push('\0');
     }
 
-    let Ok(mut child) = Command::new("git")
+    let Ok(mut child) = crate::binpath::command("git")
         .args(["check-ignore", "--stdin", "-z"])
         .current_dir(cwd)
         // A listing shouldn't contend with a background index refresh.
@@ -660,7 +659,7 @@ mod tests {
     async fn flags_what_git_ignores() {
         let dir = scratch();
         let cwd = dir.to_str().unwrap().to_string();
-        assert!(std::process::Command::new("git")
+        assert!(crate::binpath::std_command("git")
             .args(["init", "-q"])
             .current_dir(&cwd)
             .status()
@@ -739,7 +738,10 @@ mod tests {
 
         // A video name on a link is not a video: the target decides.
         let link = dir.join("secret.mp4");
+        #[cfg(unix)]
         std::os::unix::fs::symlink(&zip, &link).unwrap();
+        #[cfg(windows)]
+        if std::os::windows::fs::symlink_file(&zip, &link).is_err() { return; }
         assert_eq!(read_body(link.to_str().unwrap()).await.unwrap_err(), NOT_TEXT);
 
         std::fs::remove_dir_all(&dir).unwrap();

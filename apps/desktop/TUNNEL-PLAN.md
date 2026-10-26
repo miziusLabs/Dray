@@ -1,6 +1,6 @@
 # Stage 7: reaching a server through a Cloudflare quick tunnel
 
-monorepo-labs/dray#452. Until now a client reached a remote server over SSH
+miziusLabs/Dray#452. Until now a client reached a remote server over SSH
 alone ([SSH-PLAN.md](SSH-PLAN.md)), which needs a public IP and a key on the
 client. A phone cannot run `ssh` at all. This puts the quick tunnel `dray
 share` already runs for dev servers (#434) in front of `dray-serve` itself.

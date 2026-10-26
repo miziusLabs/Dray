@@ -4,6 +4,8 @@ A desktop home for your coding agents. Dray wraps coding-agent CLIs (Claude
 Code, Codex, fx, pi) in a native chat UI. Run many sessions at once. Each gets
 its own worktree, diff view, PR panel, issue panel and embedded browser.
 
+Source code lives at [github.com/miziusLabs/Dray](https://github.com/miziusLabs/Dray).
+
 ## Sponsors
 
 - [Guillermo Rauch](https://x.com/rauchg), Vercel CEO, through his
@@ -16,17 +18,20 @@ Want to sponsor Dray? [patreon.com/yogesharc](https://patreon.com/yogesharc)
 
 ## Layout
 
-| Path                | What                                                   |
-| ------------------- | ------------------------------------------------------ |
-| `apps/desktop`      | The Tauri app. React 19 + Vite frontend, Rust backend. |
-| `apps/web`          | Marketing site. Next.js, deployed to Vercel.           |
-| `apps/docs`         | Docs at drayhq.com/docs. Blume, deployed to Vercel.    |
-| `apps/cli`          | The `dray` CLI agents use to fan work out.             |
-| `crates/dray-proto` | Wire types shared by the CLI and the app.              |
+| Path | What |
+| --- | --- |
+| `apps/desktop` | Tauri app with a React frontend and Rust backend |
+| `apps/cli` | Standalone `dray` command line client |
+| `crates/dray-proto` | Wire types shared by the CLI and the app |
+| `apps/web` | Next.js marketing site and install scripts |
+| `apps/docs` | Public docs at drayhq.com/docs |
+| `apps/ios` | SwiftUI client for `dray-serve` |
 
 ## Getting started
 
-You need Node with pnpm, a Rust toolchain, and cmake.
+You need Node with pnpm and a Rust toolchain. Some native dependencies also use CMake.
+
+For a Windows desktop build, use the `x86_64-pc-windows-msvc` Rust target. Install Visual Studio Build Tools with the Desktop development with C++ workload, CMake, and the Microsoft Edge WebView2 Runtime.
 
 ```bash
 pnpm install
@@ -42,19 +47,29 @@ cd apps/desktop && pnpm tauri build
 cd apps/desktop/src-tauri && cargo test
 ```
 
-`cargo test` regenerates `apps/desktop/src/types/events.ts`. Always follow a
-filtered run with a bare `cargo test`.
+`cargo test` regenerates `apps/desktop/src/types/events.ts`. After a filtered
+Rust test run, run the full `cargo test` command.
+
+On Windows, the browser uses a shared headless Chromium screenshot view instead of the embedded CEF view. Dray Island is available on macOS only.
 
 ## The `dray` CLI
 
-A standalone binary. It talks to the running app over `~/.dray/dray.sock`, so
-an agent in one session can create, list and message others.
+A standalone binary. It talks to the running app over a local Unix socket on
+macOS and Linux or a Windows named pipe. An agent in one session can create,
+list and message others.
 
 ```bash
 curl -fsSL https://www.drayhq.com/install.sh | sh
 ```
 
-On Linux the same line makes the machine a Dray server: [drayhq.com/docs/server](https://www.drayhq.com/docs/server).
+On Windows PowerShell, install the CLI with:
+
+```powershell
+irm https://www.drayhq.com/install.ps1 | iex
+```
+
+On Linux, the shell command makes the machine a Dray server too. See
+[drayhq.com/docs/server](https://www.drayhq.com/docs/server).
 
 ## Releasing
 

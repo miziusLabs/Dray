@@ -23,6 +23,12 @@ beforeEach(() => {
 });
 
 describe("paths", () => {
+  it("keeps Windows drive and UNC paths distinct across servers", () => {
+    for (const path of ["C:\\work\\app", "D:/work/app", "\\\\host\\share\\app"]) {
+      expect(splitPath(qualify(path, "windows-server"))).toEqual({ server: "windows-server", path });
+      expect(qualify(path, "local")).toBe(path);
+    }
+  });
   it("round-trips a remote path and leaves a local one alone", () => {
     expect(qualify("/root/app", "vps1")).toBe("dray://vps1/root/app");
     expect(splitPath("dray://vps1/root/app")).toEqual({ server: "vps1", path: "/root/app" });

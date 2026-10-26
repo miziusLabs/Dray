@@ -119,7 +119,10 @@ pub fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 /// arrives as a preventable event — so the default menu is left alone.
 #[cfg(not(target_os = "macos"))]
 pub fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    Menu::default(app)
+    let updates = MenuItem::with_id(app, crate::updater::CHECK_UPDATE_ID, "Check for Updates…", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_ID, "Quit Dray", true, Some("CmdOrCtrl+Q"))?;
+    let file = Submenu::with_items(app, "Dray", true, &[&updates, &PredefinedMenuItem::separator(app)?, &quit])?;
+    Menu::with_items(app, &[&file])
 }
 
 pub fn request<R: Runtime>(app: &AppHandle<R>) {

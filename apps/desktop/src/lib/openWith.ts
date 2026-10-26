@@ -104,6 +104,10 @@ export async function openFileWith(
   // `open -a Finder` on a source file hands Finder a document it has no use
   // for, where selecting it in a window is what picking Finder here means.
   if (app.kind === "files") return revealItemInDir(path);
+  if (/\.exe$/i.test(app.path)) {
+    await invoke("open_in_app", { appPath: app.path, path, line: line ?? null });
+    return;
+  }
   await invoke("open_in_app", { appPath: app.path, path: lineUrl(app, path, line) ?? path });
 }
 

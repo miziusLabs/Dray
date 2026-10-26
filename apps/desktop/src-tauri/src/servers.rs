@@ -283,7 +283,7 @@ async fn refresh_releases(fresh: Duration) -> Result<(), String> {
     }
     let read = async {
         let list: Vec<Value> = crate::http()
-            .get("https://api.github.com/repos/monorepo-labs/dray/releases?per_page=100")
+            .get("https://api.github.com/repos/miziusLabs/Dray/releases?per_page=100")
             .header("User-Agent", "dray")
             .timeout(Duration::from_secs(10))
             .send()
@@ -306,7 +306,7 @@ async fn refresh_releases(fresh: Duration) -> Result<(), String> {
     }
 }
 
-/// "This Mac": the background server launchd runs from this app's own
+/// "This computer": the background server launchd runs from this app's own
 /// binary, held here like any remote one so the frontend reaches both the
 /// same way. Never saved and never on the Servers page's list. Its id is
 /// `transport.ts`'s `LOCAL`. See MAC-SERVER-PLAN.md.
@@ -318,7 +318,7 @@ fn snapshot() -> Vec<ServerInfo> {
 }
 
 /// Every change — status, add, remove — goes out as the whole list, so the
-/// frontend replaces rather than reconciles. This Mac rides its own event.
+/// frontend replaces rather than reconciles. This computer rides its own event.
 fn announce() {
     if let Some(sink) = SINK.get() {
         let _ = sink.emit("servers_changed", snapshot());
@@ -326,22 +326,22 @@ fn announce() {
     }
 }
 
-/// This Mac's server, as the remote ones are drawn.
+/// This computer's server, as the remote ones are drawn.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn local_server() -> Option<ServerInfo> {
     conns().iter().find(|c| c.saved.id == LOCAL).map(info)
 }
 
-/// Where this Mac's server is listening and its token, both read again each
+/// Where this computer's server is listening and its token, both read again each
 /// connect since a restart may pick a new port — and whether it runs a binary
 /// older than this one's, per the stamp it wrote under the port.
 async fn local_address() -> Result<(String, String, bool), String> {
     let home = store::get_home_app_dir().await.map_err(|e| e.to_string())?;
     let port_file = tokio::fs::read_to_string(home.join(crate::serve::PORT_FILE)).await.unwrap_or_default();
     let mut lines = port_file.lines();
-    let port: u16 = lines.next().and_then(|p| p.trim().parse().ok()).ok_or("The server on this Mac is starting.")?;
+    let port: u16 = lines.next().and_then(|p| p.trim().parse().ok()).ok_or("The server on this computer is starting.")?;
     let stale = crate::serve::exe_stamp().is_some_and(|now| lines.next().map(str::trim) != Some(now.as_str()));
-    let token = tokio::fs::read_to_string(home.join("serve-token")).await.map_err(|_| "The server on this Mac is starting.")?;
+    let token = tokio::fs::read_to_string(home.join("serve-token")).await.map_err(|_| "The server on this computer is starting.")?;
     Ok((format!("ws://127.0.0.1:{port}"), token.trim().to_string(), stale))
 }
 
@@ -371,7 +371,7 @@ pub async fn start(sink: Sink) {
         let mut list = conns();
         let this_mac = Saved {
             id: LOCAL.into(),
-            name: "This Mac".into(),
+            name: "This computer".into(),
             url: String::new(),
             ssh: None,
             off: false,
@@ -435,12 +435,12 @@ struct Welcome {
 /// Connects and says hello. Answers the admitted socket, or why not.
 async fn admit(url: &str, token: &str) -> Result<(Socket, Welcome), String> {
     // `counts`: this app reports the sessions it starts there, so the server
-    // must not. This Mac's own server is reached through `admit_as_host`
+    // must not. This computer's own server is reached through `admit_as_host`
     // instead and counts its sessions itself.
     admit_with(url, json!({ "v": PROTOCOL, "token": token, "counts": true })).await
 }
 
-/// This Mac's own server, which may call back into the app: browser steps go
+/// This computer's own server, which may call back into the app: browser steps go
 /// to the app's Chromium where this build has one.
 async fn admit_as_host(url: &str, token: &str) -> Result<(Socket, Welcome), String> {
     let browser = cfg!(all(feature = "cef", target_os = "macos"));
@@ -528,7 +528,7 @@ async fn run(id: String) {
                             conn.live = Some((url, token));
                         }
                         serve(&id, ws).await;
-                        set_status(&id, ServerStatus::Disconnected, Some("The server on this Mac restarted.".into()));
+                        set_status(&id, ServerStatus::Disconnected, Some("The server on this computer restarted.".into()));
                         if let Err(e) = crate::launchd::reload_if_pending().await {
                             eprintln!("[launchd] could not load the new agent: {e:#}");
                         }
@@ -538,7 +538,7 @@ async fn run(id: String) {
                 Err(e) => set_status(&id, ServerStatus::Disconnected, Some(e)),
             }
             // launchd brings it back within seconds; a dev build has to ask.
-            if crate::is_dev() {
+            if crate::is_dev() || !cfg!(target_os = "macos") {
                 let _ = crate::launchd::ensure().await;
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -591,7 +591,7 @@ async fn run(id: String) {
                     format!("server_connected:{via}"),
                     json!({ "feature": "server_connected", "via": via }),
                 );
-                // This Mac's rule: a server running older code than its own
+                // This computer's rule: a server running older code than its own
                 // binary restarts once idle. Covers a `dray update` run by
                 // hand there too.
                 if welcome.stale {
@@ -649,7 +649,7 @@ async fn remember_address(id: &str, address: Option<&str>, token: &str) {
 }
 
 /// Whether a Cloudflare quick tunnel's address is one Cloudflare no longer
-/// serves — rather than this Mac being offline, or the server behind a live
+/// serves — rather than this computer being offline, or the server behind a live
 /// address being down. Servers tunnelled that way before #518, which come back
 /// under an OpenTunnel address once updated. Measured: a stopped tunnel's
 /// host answers 530 while its DNS lingers, then stops resolving at all; a live
@@ -688,7 +688,7 @@ async fn serve(id: &str, ws: Socket) {
         conn.fix = None;
     }
     announce();
-    // This Mac's server is loopback, which cannot die silently.
+    // This computer's server is loopback, which cannot die silently.
     let remote = id != LOCAL;
     let writer = tokio::spawn(async move {
         let mut ping = tokio::time::interval(PING);
@@ -1008,7 +1008,7 @@ pub async fn run_server_login(
     run_on_server(&server, &command).await
 }
 
-/// Sign `gh` in, on this Mac (`None`) or on a server, in Terminal the way
+/// Sign `gh` in, on this computer (`None`) or on a server, in Terminal the way
 /// [`run_server_login`] signs in an agent. Takes no command: `gh` is not a
 /// harness, and the line is fixed here.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1022,7 +1022,7 @@ pub async fn run_gh_login(server: Option<String>) -> Result<(), String> {
 /// HTTPS and the browser flow named up front, so the only questions left are
 /// the device code and whether git should use the token, which agents pushing
 /// from a server want. A headless server cannot open the browser itself; gh
-/// says so and prints the URL, which Terminal on this Mac makes clickable.
+/// says so and prints the URL, which Terminal on this computer makes clickable.
 const GH_LOGIN: &str = "gh auth login --hostname github.com --git-protocol https --web";
 
 async fn run_on_server(server: &str, command: &str) -> Result<(), String> {
@@ -1042,7 +1042,7 @@ async fn run_on_server(server: &str, command: &str) -> Result<(), String> {
 /// sent theirs to a webview that was not listening yet, and open cards ride
 /// that frame alone.
 ///
-/// This Mac's server is asked for the frame instead: the webview's first
+/// This computer's server is asked for the frame instead: the webview's first
 /// reads are already waiting on that connection, and dropping it would fail
 /// every one of them.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1065,7 +1065,7 @@ pub fn reconnect_servers() {
 /// answer or rejection as the server gave it.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn server_invoke(server: String, cmd: String, args: Value) -> Result<Value, Value> {
-    // This Mac's server is down only while it starts or restarts — seconds —
+    // This computer's server is down only while it starts or restarts — seconds —
     // and every screen reads it at launch, so a call waits for it rather
     // than failing into an error the reader sees for nothing.
     // ponytail: polled; a Notify on connect if the 100ms ever shows.
@@ -1306,7 +1306,7 @@ fn http_base(server: &str) -> Result<(String, String), String> {
     Ok((base, token))
 }
 
-/// Copies a file on this Mac to `server` and answers where it landed there —
+/// Copies a file on this computer to `server` and answers where it landed there —
 /// what a send names in its place, since the server cannot read a path on this
 /// Mac. Streamed, with `upload_progress` `{id, sent, total}` per chunk read, so
 /// the composer's tile can say how far it has got.
@@ -1416,15 +1416,15 @@ mod tests {
 
     /// A name picks one server for `--machine`, so a second one may not take
     /// it — but the server already holding it may, which is a rename to itself
-    /// or a re-add after rotating a token. This Mac's row is no name to route to.
+    /// or a re-add after rotating a token. This computer's row is no name to route to.
     #[test]
     fn a_name_belongs_to_one_server() {
         let saved = |id: &str, name: &str| Saved { id: id.into(), name: name.into(), url: String::new(), ssh: None, off: true, beta: false, ignored: None, unknown: Default::default() };
-        let list = vec![Conn::new(saved("a", "vps")), Conn::new(saved(LOCAL, "This Mac"))];
+        let list = vec![Conn::new(saved("a", "vps")), Conn::new(saved(LOCAL, "This computer"))];
         assert!(refuse_taken(&list, "vps", None).is_err());
         assert!(refuse_taken(&list, "vps", Some("b")).is_err());
         assert!(refuse_taken(&list, "vps", Some("a")).is_ok());
-        assert!(refuse_taken(&list, "This Mac", None).is_ok());
+        assert!(refuse_taken(&list, "This computer", None).is_ok());
     }
 
     /// Turning a server off must answer the calls already sent to it: no run

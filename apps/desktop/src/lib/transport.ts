@@ -9,6 +9,7 @@
 
 import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type Event, type UnlistenFn } from "@tauri-apps/api/event";
+import { IS_WINDOWS } from "@/lib/platform";
 
 /// `"local"` for the in-process core, an id from `servers.json` for a remote one.
 export type ServerId = string;
@@ -30,7 +31,9 @@ export function splitPath(path: string): { server: ServerId; path: string } {
   if (!path.startsWith(SCHEME)) return { server: LOCAL, path };
   const rest = path.slice(SCHEME.length);
   const slash = rest.indexOf("/");
-  return slash < 0 ? { server: rest, path: "/" } : { server: rest.slice(0, slash), path: rest.slice(slash) };
+  if (slash < 0) return { server: rest, path: "/" };
+  const local = rest.slice(slash);
+  return { server: rest.slice(0, slash), path: /^\/(?:[A-Za-z]:[\\/]|\\\\)/.test(local) ? local.slice(1) : local };
 }
 
 export const serverOfPath = (path: string): ServerId => splitPath(path).server;
@@ -41,8 +44,8 @@ export const displayPath = (path: string): string => splitPath(path).path;
 /// `path` as the frontend keys it on `server`. Relative and already-qualified
 /// paths come back untouched.
 export function qualify(path: string, server: ServerId): string {
-  if (server === LOCAL || !path.startsWith("/")) return path;
-  return `${SCHEME}${server}${path}`;
+  if (server === LOCAL || !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(path)) return path;
+  return `${SCHEME}${server}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
 // ── sessions ──────────────────────────────────────────────────────────────────
@@ -222,7 +225,7 @@ export async function invoke<T>(cmd: string, args?: Rec, server?: ServerId): Pro
   if (sessionId && unwrapped.server) noteSession(sessionId, unwrapped.server);
   if (target === LOCAL) {
     if (browser) return remoteInvoke<T>(browser, cmd, unwrapped.args);
-    if (APP_COMMANDS.has(cmd)) return tauriInvoke<T>(cmd, unwrapped.args);
+    if (APP_COMMANDS.has(cmd) && !(IS_WINDOWS && cmd.startsWith("chromium_"))) return tauriInvoke<T>(cmd, unwrapped.args);
   }
   const answer = await tauriInvoke<unknown>("server_invoke", { server: target, cmd, args: unwrapped.args });
   return (QUALIFIED.has(cmd) ? qualifyRecord(answer, target) : answer) as T;

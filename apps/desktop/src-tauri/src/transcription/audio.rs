@@ -205,14 +205,42 @@ fn osascript(line: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Every other target answers as though there were nothing to mute. The
-/// setting still draws, since a row that vanishes reads as one the app forgot.
-#[cfg(not(target_os = "macos"))]
+/// Core Audio exposes the current Windows output device's mute without a shell.
+#[cfg(windows)]
+fn read_muted() -> Option<bool> {
+    windows_output(|output| unsafe { output.GetMute().map(|value| value.as_bool()) }).ok()
+}
+
+#[cfg(windows)]
+fn set_muted(muted: bool) -> bool {
+    windows_output(|output| unsafe { output.SetMute(muted, std::ptr::null()) }).is_ok()
+}
+
+#[cfg(windows)]
+fn windows_output<T>(read: impl FnOnce(&windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume) -> windows::core::Result<T>) -> windows::core::Result<T> {
+    use windows::Win32::{
+        Media::Audio::{eConsole, eRender, IMMDeviceEnumerator, MMDeviceEnumerator},
+        System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED},
+    };
+    struct Com(bool);
+    impl Drop for Com {
+        fn drop(&mut self) {
+            if self.0 { unsafe { CoUninitialize(); } }
+        }
+    }
+    let _com = Com(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok());
+    let enumerator: IMMDeviceEnumerator = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)? };
+    let device = unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole)? };
+    let output = unsafe { device.Activate(CLSCTX_ALL, None)? };
+    read(&output)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn read_muted() -> Option<bool> {
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn set_muted(_muted: bool) -> bool {
     false
 }

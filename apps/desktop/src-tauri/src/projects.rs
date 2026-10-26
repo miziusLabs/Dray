@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::{fs, io::AsyncReadExt, process::Command, sync::Mutex};
+use tokio::{fs, io::AsyncReadExt, sync::Mutex};
 use ts_rs::TS;
 
 use crate::{
@@ -442,7 +442,7 @@ fn repo_name(slug: &str) -> Option<&str> {
 /// gh and git said, the sentence the reader would have seen in a terminal.
 async fn clone(slug: &str, dir: &Path, sink: &Sink) -> Result<(), String> {
     let bin = binpath::gh().await.ok_or(github::NO_CLI)?;
-    let mut child = Command::new(bin)
+    let mut child = crate::binpath::command(bin)
         .args(["repo", "clone", slug])
         .arg(dir)
         // git writes progress to a terminal alone unless asked.

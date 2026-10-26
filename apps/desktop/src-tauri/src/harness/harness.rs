@@ -235,7 +235,10 @@ mod path_tests {
     /// lands on the node it was installed beside.
     #[test]
     fn the_spawned_binary_dir_leads_the_additions() {
+        #[cfg(unix)]
         let bin = std::path::Path::new("/home/u/.fnm/node-versions/v22/installation/bin/pi");
+        #[cfg(windows)]
+        let bin = std::path::Path::new(r"C:\dray-test-node\bin\pi.cmd");
         let inherited: Vec<std::path::PathBuf> =
             std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
 
@@ -252,7 +255,7 @@ mod path_tests {
     fn a_bare_name_adds_no_empty_segment() {
         let path = super::agent_path(std::path::Path::new("pi"));
 
-        assert!(!path.split(':').any(str::is_empty), "{path}");
+        assert!(!std::env::split_paths(&path).any(|dir| dir.as_os_str().is_empty()), "{path}");
     }
 }
 

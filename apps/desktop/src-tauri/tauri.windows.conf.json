@@ -1,0 +1,24 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "Dray",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 720,
+        "minHeight": 480,
+        "transparent": false,
+        "decorations": true
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
+  }
+}

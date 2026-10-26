@@ -44,12 +44,19 @@ const MAC_X64: Zip = Zip {
     sha256: "6338a784c691f42dd1ed6aeeef650171c7d72cf74bdb8450d0079864e72a8074",
 };
 
+const WINDOWS_X64: Zip = Zip {
+    platform: "win64",
+    size: 124_737_213,
+    sha256: "20798f7c51a22def0b3d02e526a8f52e7ee2c7eddcde9d81a4c23f618e8b5436",
+};
+
 fn zip() -> Option<&'static Zip> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Some(&LINUX_X64),
         ("linux", "aarch64") => Some(&LINUX_ARM64),
         ("macos", "aarch64") => Some(&MAC_ARM64),
         ("macos", "x86_64") => Some(&MAC_X64),
+        ("windows", "x86_64") => Some(&WINDOWS_X64),
         _ => None,
     }
 }
@@ -78,6 +85,35 @@ static STATUS: Mutex<Status> = Mutex::new(Status::Absent);
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static WAKE: Notify = Notify::const_new();
 
+#[cfg(windows)]
+pub async fn desktop_status() -> serde_json::Value {
+    use serde_json::json;
+    if let (Ok(dir), Some(zip)) = (dir().await, zip()) {
+        if binary_in(&dir.join(VERSION), zip).is_file() {
+            return json!({ "state": "ready", "version": VERSION, "sizeBytes": zip.size });
+        }
+    }
+    match &*STATUS.lock().unwrap() {
+        Status::Downloading { received, total } => json!({ "state": "downloading", "received": received, "total": total }),
+        Status::Extracting => json!({ "state": "extracting" }),
+        Status::Failed(message) => json!({ "state": "failed", "message": message }),
+        _ => json!({ "state": "absent" }),
+    }
+}
+
+#[cfg(windows)]
+pub async fn remove_desktop() -> Result<(), String> {
+    if RUNNING.load(Ordering::SeqCst) { return Err("Chromium is still downloading.".into()); }
+    let dir = dir().await.map_err(|e| e.to_string())?;
+    match fs::remove_dir_all(dir).await {
+        Ok(()) => {},
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+        Err(e) => return Err(e.to_string()),
+    }
+    set(Status::Absent);
+    Ok(())
+}
+
 fn set(status: Status) {
     *STATUS.lock().unwrap() = status;
 }
@@ -88,7 +124,7 @@ async fn dir() -> Result<PathBuf> {
 }
 
 fn binary_in(version_dir: &Path, zip: &Zip) -> PathBuf {
-    version_dir.join(zip.root()).join("chrome-headless-shell")
+    version_dir.join(zip.root()).join(if zip.platform.starts_with("win") { "chrome-headless-shell.exe" } else { "chrome-headless-shell" })
 }
 
 /// The binary, if it is on disk; otherwise a download is started (or a
@@ -230,7 +266,7 @@ mod tests {
             LINUX_ARM64.url(),
             "https://storage.googleapis.com/chrome-for-testing-public/155.0.8059.39/linux-arm64/chrome-headless-shell-linux-arm64.zip"
         );
-        for z in [&LINUX_X64, &LINUX_ARM64, &MAC_ARM64, &MAC_X64] {
+        for z in [&LINUX_X64, &LINUX_ARM64, &MAC_ARM64, &MAC_X64, &WINDOWS_X64] {
             assert_eq!(z.sha256.len(), 64);
             assert!(z.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
         }
@@ -242,11 +278,13 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn unpacks_the_real_archive() {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("dray-headless-{}", std::process::id()));
         let zip = zip().expect("a platform Chrome for Testing ships");
         download(&dir, zip).await.unwrap();
         let binary = binary_in(&dir.join(VERSION), zip);
+        #[cfg(unix)]
         assert!(binary.metadata().unwrap().permissions().mode() & 0o111 != 0);
         let out = std::process::Command::new(&binary).arg("--version").output().unwrap();
         assert!(String::from_utf8_lossy(&out.stdout).contains(VERSION));

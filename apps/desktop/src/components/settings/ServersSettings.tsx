@@ -63,7 +63,7 @@ function detailOf(server: ServerInfo): string {
   return address;
 }
 
-/// Every Dray server this app shows, This Mac first. A remote one's
+/// Every Dray server this app shows, This computer first. A remote one's
 /// projects and sessions join the sidebar while it is connected and stay,
 /// dimmed, while it is not — its agents keep running there either way.
 export default function ServersSettings() {
@@ -297,8 +297,8 @@ function UpdateLine({
   return <div className="flex min-h-7 items-center gap-1.5 text-ui text-muted-foreground">{line}</div>;
 }
 
-/// This Mac's background server, and its remote access: on, the server
-/// serves this Mac's sessions at a public address, the same across restarts,
+/// This computer's background server, and its remote access: on, the server
+/// serves this computer's sessions at a public address, the same across restarts,
 /// for another Mac's Add server. A button rather than a switch, since a switch on this row reads as
 /// turning the Mac off.
 function ThisMacRow() {
@@ -326,7 +326,7 @@ function ThisMacRow() {
   const starting = remote.on && !remote.address && !remote.error;
   const down = server?.status === "disconnected";
   const detail = down ? (
-    (server.error ?? "The server on this Mac is not running.")
+    (server.error ?? "The server on this computer is not running.")
   ) : !remote.on ? (
     "Runs your sessions, with Dray open or closed"
   ) : starting ? (
@@ -335,12 +335,12 @@ function ThisMacRow() {
       Starting remote access. The first time takes about 30 seconds.
     </span>
   ) : (
-    (remote.error ?? "Other Macs can reach it while this Mac is awake, with Dray open or closed.")
+    (remote.error ?? "Other computers can reach it while this computer is awake, with Dray open or closed.")
   );
 
   return (
     <Row
-      name="This Mac"
+      name="This computer"
       detail={detail}
       status={server?.status ?? "connected"}
       action={
@@ -393,7 +393,7 @@ function CopyIcon({ label, done, onClick }: { label: string; done: boolean; onCl
   );
 }
 
-/// The phone's way in: a QR of address, token and this Mac's name. It
+/// The phone's way in: a QR of address, token and this computer's name. It
 /// carries the token, so it is fetched on open and dropped on close, and
 /// never sits on screen unasked.
 function PairButton() {
@@ -430,7 +430,7 @@ function PairButton() {
           <DialogHeader>
             <DialogTitle>Pair a phone</DialogTitle>
             <DialogDescription>
-              Point the iPhone's Camera at this, or scan it from Dray's Add server. Anyone holding it can use this Mac.
+              Point the iPhone's Camera at this, or scan it from Dray's Add server. Anyone holding it can use this computer.
             </DialogDescription>
           </DialogHeader>
           {/* White under the code whatever the theme: a scanner reads dark on light. */}
@@ -484,7 +484,7 @@ function Row({
   children?: ReactNode;
   /// A control of the row's own, beside the switch.
   action?: ReactNode;
-  /// Absent for This Mac, which is the app itself and cannot be turned off.
+  /// Absent for This computer, which is the app itself and cannot be turned off.
   on?: boolean;
   onToggle?: (on: boolean) => void;
   /// Present while a connect is not running, to start one now.
@@ -861,7 +861,7 @@ function HostKeyDialog({
         <DialogHeader>
           <DialogTitle>Is this the right server?</DialogTitle>
           <DialogDescription>
-            This Mac has never connected to {fix.host}. Its {fix.keyType} key fingerprint is:
+            This computer has never connected to {fix.host}. Its {fix.keyType} key fingerprint is:
           </DialogDescription>
         </DialogHeader>
         <code className="rounded-md border border-border px-2 py-1.5 font-mono text-code break-all dark:border-input">

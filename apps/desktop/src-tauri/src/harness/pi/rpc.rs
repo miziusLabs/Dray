@@ -320,7 +320,15 @@ mod tests {
     /// a reader that ends on EOF is the only witness to that.
     #[tokio::test]
     async fn close_ends_the_child_rather_than_leaving_it_running() {
-        let mut child = tokio::process::Command::new("/bin/cat")
+        #[cfg(unix)]
+        let mut command = tokio::process::Command::new("/bin/cat");
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = tokio::process::Command::new("powershell.exe");
+            command.args(["-NoProfile", "-Command", "[Console]::In.ReadToEnd() | Out-Null"]);
+            command
+        };
+        let mut child = command
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()

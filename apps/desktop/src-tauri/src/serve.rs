@@ -127,6 +127,7 @@ pub async fn run_mac() -> Result<()> {
     tokio::spawn(crate::remote_access::start(sink.clone()));
 
     // launchd, and Quit and stop sessions in dev, stop the server with SIGTERM.
+    #[cfg(unix)]
     tokio::spawn(async {
         use tokio::signal::unix::{signal, SignalKind};
         let (Ok(mut term), Ok(mut int)) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt())) else {
@@ -137,6 +138,12 @@ pub async fn run_mac() -> Result<()> {
             _ = int.recv() => {}
         }
         shut_down(0).await;
+    });
+    #[cfg(windows)]
+    tokio::spawn(async {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            shut_down(0).await;
+        }
     });
 
     eprintln!("dray --serve listening on 127.0.0.1:{port}, home {}", home.display());
@@ -210,9 +217,9 @@ async fn update_server(channel: String) -> Result<&'static str, String> {
     // the newer version, and the installer keeps a newer install.
     static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _one = ONE.lock().await;
-    let dray =STARTED_FROM.get().map(|(exe, _)| exe.with_file_name("dray")).ok_or("could not find this server's binary")?;
+    let dray =STARTED_FROM.get().map(|(exe, _)| exe.with_file_name(format!("dray{}", std::env::consts::EXE_SUFFIX))).ok_or("could not find this server's binary")?;
     use tokio::io::AsyncReadExt;
-    let mut child = tokio::process::Command::new(&dray)
+    let mut child = crate::binpath::command(&dray)
         .args(["update", "--channel", &channel])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -286,12 +293,22 @@ async fn shut_down(code: i32) -> ! {
     // ponytail: a pid that exited in those 3s could be reused; a process
     // group per agent would make this one signal.
     for pid in tree.into_iter().filter(|&p| p != me) {
+        #[cfg(unix)]
         unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .output();
+        }
     }
     // `_exit`, not `process::exit`: once a phone's dictation has loaded a
     // model, ggml-metal's atexit handler aborts (lib.rs's `RunEvent::Exit`
     // says how), which would end every stop and restart as 134, not `code`.
+    #[cfg(unix)]
     unsafe { libc::_exit(code) }
+    #[cfg(not(unix))]
+    std::process::exit(code)
 }
 
 /// Removes the browser profiles of deleted and settled sessions, the backlog
@@ -338,13 +355,17 @@ async fn start_core(sink: Sink) -> Result<PathBuf> {
         .write(true)
         .open(home.join("serve.lock"))
         .context("could not open serve.lock")?;
-    if unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&held), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    if held.try_lock().is_err() {
         anyhow::bail!("a Dray server is already running on {}", home.display());
     }
     std::mem::forget(held);
     for name in [dray_proto::SOCKET_NAME, dray_proto::SOCKET_NAME_DEV] {
-        let socket = home.join(name);
-        if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+        let socket = dray_proto::local_endpoint(&home.join(name));
+        #[cfg(unix)]
+        let connected = std::os::unix::net::UnixStream::connect(&socket).is_ok();
+        #[cfg(windows)]
+        let connected = std::fs::OpenOptions::new().read(true).write(true).open(&socket).is_ok();
+        if connected {
             anyhow::bail!(
                 "a Dray is already running on {} ({} answers). Quit it, or start \
                  dray-serve with DRAY_HOME set to a directory of its own.",
@@ -760,22 +781,18 @@ async fn upload(stream: TcpStream, token: &str) -> Result<()> {
         .map(|(_, value)| value.into_owned())
         .unwrap_or_default();
 
-    let refuse = |status: &str| format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    let remaining = head.length.unwrap_or(FILE_HEAD_LIMIT).saturating_sub(early.len() as u64);
     if !same_token(head.bearer.as_deref().unwrap_or_default(), token) {
-        stream.write_all(refuse("401 Unauthorized").as_bytes()).await?;
-        return Ok(());
+        return refuse_upload(stream, "401 Unauthorized", remaining).await;
     }
     let Some(length) = head.length else {
-        stream.write_all(refuse("411 Length Required").as_bytes()).await?;
-        return Ok(());
+        return refuse_upload(stream, "411 Length Required", remaining).await;
     };
     if length > crate::attachments::MAX_UPLOAD_BYTES {
-        stream.write_all(refuse("413 Content Too Large").as_bytes()).await?;
-        return Ok(());
+        return refuse_upload(stream, "413 Content Too Large", remaining).await;
     }
     let Ok(path) = crate::attachments::upload_path(&name).await else {
-        stream.write_all(refuse("400 Bad Request").as_bytes()).await?;
-        return Ok(());
+        return refuse_upload(stream, "400 Bad Request", remaining).await;
     };
 
     let mut out = tokio::fs::File::create(&path).await?;
@@ -795,6 +812,16 @@ async fn upload(stream: TcpStream, token: &str) -> Result<()> {
     );
     stream.write_all(reply.as_bytes()).await?;
     stream.shutdown().await.ok();
+    Ok(())
+}
+
+/// Drains an in-flight body after the refusal so Windows does not reset the response.
+async fn refuse_upload(mut stream: TcpStream, status: &str, remaining: u64) -> Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    stream.write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await?;
+    stream.shutdown().await?;
+    let mut body = stream.take(remaining.min(crate::attachments::MAX_UPLOAD_BYTES));
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(1), tokio::io::copy(&mut body, &mut tokio::io::sink())).await;
     Ok(())
 }
 
@@ -1038,6 +1065,18 @@ async fn connection(
                 continue;
             }
         };
+        if call.cmd == "stop_server" {
+            if hosts {
+                let _ = replies.send(json!({ "id": call.id, "ok": null }).to_string());
+                tokio::spawn(async {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    shut_down(0).await;
+                });
+            } else {
+                let _ = replies.send(json!({ "id": call.id, "err": "Only the local app can stop its server." }).to_string());
+            }
+            continue;
+        }
         // Concurrently, as Tauri runs async commands: a send that spawns a
         // child must not hold a permission reply behind it.
         let (sink, replies) = (sink.clone(), replies.clone());
@@ -1180,6 +1219,16 @@ async fn dispatch_mac(cmd: &str, args: Value, sink: Sink) -> Result<Value, Value
 /// server's own desktop: opening apps and terminals, and the pasteboard.
 /// Mac-only modules are not compiled here.
 async fn dispatch(cmd: &str, args: Value, sink: Sink) -> Result<Value, Value> {
+    #[cfg(windows)]
+    if matches!(cmd, "browser_view" | "browser_input" | "chromium_status" | "chromium_download" | "chromium_remove") {
+        return table! { cmd, args;
+            browser_view(session_id: String) => crate::headless::browser_view(session_id).await;
+            browser_input(session_id: String, action: Value) => crate::headless::browser_input(session_id, action).await;
+            chromium_status() => ok(crate::headless::chromium_status().await);
+            chromium_download() => crate::headless::chromium_download().await;
+            chromium_remove() => crate::headless::chromium_remove().await;
+        };
+    }
     #[cfg(feature = "desktop")]
     if matches!(
         cmd,
@@ -1538,7 +1587,7 @@ mod tests {
         let landed = post("tok", "data.csv").await.text().await.unwrap();
         let uploads = store::get_home_app_dir().await.unwrap().join("attachments/uploads");
         assert!(Path::new(&landed).starts_with(&uploads), "{landed}");
-        assert!(landed.ends_with("/data.csv"));
+        assert_eq!(Path::new(&landed).file_name().unwrap(), "data.csv");
         assert_eq!(std::fs::read(&landed).unwrap(), body);
         std::fs::remove_dir_all(Path::new(&landed).parent().unwrap()).ok();
 

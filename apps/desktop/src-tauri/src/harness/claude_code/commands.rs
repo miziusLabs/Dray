@@ -21,7 +21,6 @@ use serde_json::Value;
 use std::{process::Stdio, sync::LazyLock, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::Command,
     time::timeout,
 };
 use ts_rs::TS;
@@ -128,7 +127,7 @@ pub async fn list_commands(cwd: &str) -> Result<Vec<SlashCommand>> {
 /// of it changes the answer and every flag is one more way the probe can fail
 /// where a session would not.
 async fn probe(cwd: &str) -> Result<Vec<SlashCommand>> {
-    let mut child = Command::new(crate::binpath::claude().await)
+    let mut child = crate::binpath::command(crate::binpath::claude().await)
         .args([
             "-p",
             "--input-format",

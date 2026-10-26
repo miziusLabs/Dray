@@ -14,13 +14,13 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout, Command},
+    process::{Child, ChildStdin, ChildStdout},
 };
 use ts_rs::TS;
 
-const SSH: &str = "/usr/bin/ssh";
-const KEYSCAN: &str = "/usr/bin/ssh-keyscan";
-const KEYGEN: &str = "/usr/bin/ssh-keygen";
+const SSH: &str = "ssh";
+const KEYSCAN: &str = "ssh-keyscan";
+const KEYGEN: &str = "ssh-keygen";
 
 /// Where `dray-serve` listens on the server, as `dray setup` leaves it.
 const REMOTE_PORT: u16 = dray_proto::SERVE_PORT;
@@ -205,7 +205,7 @@ const SCRIPT: &str = concat!(
 pub async fn open(target: &Target, stage: impl Fn(Stage)) -> Result<Tunnel, Failure> {
     stage(Stage::Connecting);
     let port = free_port().map_err(|e| Failure::new(format!("no free local port: {e}"), None, false))?;
-    let mut child = Command::new(SSH)
+    let mut child = crate::binpath::command(SSH)
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ExitOnForwardFailure=yes"])
         .args(["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
         .args(["-L", &format!("127.0.0.1:{port}:127.0.0.1:{REMOTE_PORT}")])
@@ -353,7 +353,7 @@ impl Forward {
 /// once the local end accepts; `ssh` exiting first says why it could not.
 pub async fn forward(target: &Target, remote: u16) -> Result<Forward, String> {
     let port = free_port().map_err(|e| format!("no free local port: {e}"))?;
-    let mut child = Command::new(SSH)
+    let mut child = crate::binpath::command(SSH)
         .args(["-N", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ExitOnForwardFailure=yes"])
         .args(["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
         // `localhost` rather than 127.0.0.1: sshd tries every address it
@@ -440,7 +440,7 @@ impl Resolved {
 }
 
 async fn resolve(target: &Target) -> Result<Resolved, String> {
-    let out = Command::new(SSH)
+    let out = crate::binpath::command(SSH)
         .arg("-G")
         .args(target.args())
         .stdin(Stdio::null())
@@ -490,7 +490,7 @@ async fn scan(target: &Target) -> Result<ScannedKey, String> {
     if resolved.proxied {
         return Err("it is reached through a jump host, which this app cannot check. Connect once with ssh in a terminal.".into());
     }
-    let out = Command::new(KEYSCAN)
+    let out = crate::binpath::command(KEYSCAN)
         .args(["-T", "5", "-p", &resolved.port.to_string(), "--", &resolved.hostname])
         .stdin(Stdio::null())
         .output()
@@ -541,7 +541,7 @@ async fn fingerprint(key: &str) -> Result<(String, String), String> {
 
 async fn pipe(program: &str, args: &[&str], input: &str) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
-    let mut child = Command::new(program)
+    let mut child = crate::binpath::command(program)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -688,7 +688,7 @@ pub async fn install(target: &Target, picks: &[String], line: impl FnMut(&str)) 
 async fn run(target: &Target, script: &str, limit: Duration, mut line: impl FnMut(&str)) -> Result<bool, Failure> {
     // Quoted whole below, so `SCRIPT`'s rule holds here too.
     debug_assert!(!script.contains(['\'', '\\']), "{script}");
-    let mut child = Command::new(SSH)
+    let mut child = crate::binpath::command(SSH)
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .args(["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
         .args(target.args())
@@ -907,7 +907,7 @@ mod tests {
         trust(&target, &fingerprint).await.unwrap();
         let opened = open(&target, |_| {}).await;
         let name = resolve(&target).await.unwrap().known_as();
-        Command::new(KEYGEN).args(["-R", &name]).output().await.unwrap();
+        crate::binpath::command(KEYGEN).args(["-R", &name]).output().await.unwrap();
         assert!(opened.is_ok(), "{:?}", opened.err().map(|f| f.message));
     }
 
@@ -918,7 +918,7 @@ mod tests {
         let target = parse(&std::env::var("DRAY_TEST_SSH").expect("DRAY_TEST_SSH")).unwrap();
         for agent in ["claude", "codex", "pi", "fx", "grok"] {
             let line = terminal_line(&target, &format!("{agent} --version"));
-            let out = Command::new("/bin/sh").args(["-c", &line]).stdin(Stdio::null()).output().await.unwrap();
+            let out = crate::binpath::command("/bin/sh").args(["-c", &line]).stdin(Stdio::null()).output().await.unwrap();
             println!("{agent}: {} {}", out.status, String::from_utf8_lossy(&out.stdout).trim());
         }
     }

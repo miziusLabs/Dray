@@ -106,7 +106,7 @@ them, don't relitigate.
 Tests: `parse_identifier` both shapes + `#fff`/heading regressions;
 `IssueTracker::of`; `remote_path` forms; mapping from committed fixtures
 `src-tauri/src/fixtures/gh_issue_list.json` (real capture — `gh issue list -R
-monorepo-labs/dray --state all --json …` already returns one OPEN and one
+miziusLabs/Dray --state all --json …` already returns one OPEN and one
 CLOSED/COMPLETED; add a NOT_PLANNED row by hand and say so) and
 `gh_issue_view.json` (real capture with comments). **After any filtered `cargo
 test`, run a bare `cargo test`** — ts-rs regenerates `events.ts`.

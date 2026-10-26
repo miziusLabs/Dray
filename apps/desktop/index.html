@@ -23,6 +23,7 @@
           m === "dark" ||
           (m === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
         var el = document.documentElement;
+        el.dataset.platform = /Mac/.test(navigator.platform) ? "macos" : "other";
         el.dataset.theme = t;
         el.dataset.mode = dark ? "dark" : "light";
         el.classList.toggle("dark", dark);

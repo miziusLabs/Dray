@@ -15,6 +15,12 @@ Every command talks to the Dray app on the same machine, so the app has to be ru
 curl -fsSL https://www.drayhq.com/install.sh | sh
 ```
 
+On Windows PowerShell, use:
+
+```powershell
+irm https://www.drayhq.com/install.ps1 | iex
+```
+
 This puts `dray` (and `dray-serve`, the server) in `~/.local/bin`. Set `DRAY_INSTALL_DIR` to put them somewhere else. If that directory is not on your `PATH`, the installer says so and prints the line to add.
 
 It also installs the skill that teaches your agents to use `dray`. See [The skill](#the-skill).
@@ -48,7 +54,7 @@ If a background server is installed on this machine, `dray update` does not rest
 
 ## How it reaches the app
 
-Every command connects to a socket in `~/.dray`: `~/.dray/dray.sock`. Nothing on the network can reach it. Set `DRAY_ENDPOINT` to a socket path to talk to a different one.
+On macOS and Linux, every command connects to the Unix socket at `~/.dray/dray.sock`. On Windows, it connects to a local named pipe derived from Dray's data directory. These endpoints are local-only. Set `DRAY_ENDPOINT` to another endpoint when you need the CLI to reach a different Dray instance.
 
 Sessions Dray starts get two things in their environment: `DRAY_SESSION_ID`, naming the session, and `DRAY_ENDPOINT`, naming the app that started it. That is how `dray` knows which session is calling. From inside a session, a new session is nested under the caller, and `dray browser` drives the caller's own browser. From your own terminal there is no calling session, so commands that need one take `--session <id>`.
 

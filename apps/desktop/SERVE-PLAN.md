@@ -1,6 +1,6 @@
 # `dray serve` — the core as a headless server
 
-monorepo-labs/dray#413, steps 1 and 2: the Rust core runs with no Tauri and
+miziusLabs/Dray#413, steps 1 and 2: the Rust core runs with no Tauri and
 speaks a WebSocket, and the frontend reaches either it or the in-process core
 through one wrapper. SSH, pairing, Tailscale, relay and mobile are later issues.
 

@@ -20,8 +20,8 @@ use ts_rs::TS;
 
 use crate::{analytics, binpath, store::get_home_app_dir};
 
-const STABLE_MANIFEST: &str = "https://monorepo-labs.github.io/dray/stable.json";
-const BETA_MANIFEST: &str = "https://monorepo-labs.github.io/dray/beta.json";
+const STABLE_MANIFEST: &str = "https://raw.githubusercontent.com/miziusLabs/Dray/updates/stable.json";
+const BETA_MANIFEST: &str = "https://raw.githubusercontent.com/miziusLabs/Dray/updates/beta.json";
 
 /// The app menu's "Check for Updates…" item.
 pub const CHECK_UPDATE_ID: &str = "check_update";
@@ -246,13 +246,22 @@ async fn install(app: AppHandle) -> Result<(), InstallError> {
         return Err(InstallError::install("no update has been downloaded"));
     };
 
-    update
-        .install(bytes)
-        .map_err(|e| InstallError::install(e.to_string()))?;
-    // The plugin's own save runs on exit, after the new instance has already
-    // read the file, so the relaunch would open at the previous quit's size.
+    // Windows cannot replace the executable while its background server runs it.
+    #[cfg(windows)]
+    if let Err(error) = crate::launchd::stop().await {
+        let _ = crate::launchd::resume().await;
+        return Err(InstallError::install(error.to_string()));
+    }
+    // The Windows installer exits this process directly, before Tauri's exit callback.
     if let Err(e) = app.save_window_state(StateFlags::all()) {
         eprintln!("[window state save err] {e}");
+    }
+    #[cfg(windows)]
+    crate::transcription::audio::restore_other_audio();
+    if let Err(error) = update.install(bytes) {
+        #[cfg(windows)]
+        let _ = crate::launchd::resume().await;
+        return Err(InstallError::install(error.to_string()));
     }
     relaunch(&app).map_err(|message| InstallError::Relaunch { message })?;
     app.exit(0);
@@ -359,7 +368,7 @@ async fn sync_cli_once(channel: UpdateChannel) {
     }
 
     if let Some((dray, cli_version)) = installed_cli().await {
-        let mut command = tokio::process::Command::new(&dray);
+        let mut command = crate::binpath::command(&dray);
         command.arg("update");
         // A CLI before 0.12 refuses `--channel` but hands `DRAY_CHANNEL` on to
         // the installer; a newer one sets that variable itself, from the flag.
@@ -415,7 +424,7 @@ const CLI_UPDATE_TIMEOUT: Duration = Duration::from_secs(300);
 /// and this is about to be run with `update`. Answers the version beside it.
 async fn installed_cli() -> Option<(PathBuf, String)> {
     let dray = binpath::dray().await?;
-    let out = tokio::process::Command::new(&dray)
+    let out = crate::binpath::command(&dray)
         .arg("--version")
         .stdin(Stdio::null())
         .kill_on_drop(true)
