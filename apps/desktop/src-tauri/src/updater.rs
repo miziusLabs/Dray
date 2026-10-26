@@ -1,6 +1,6 @@
 //! In-app updates over the Tauri updater plugin.
 //!
-//! Two channels, one manifest each, both served from the repo's GitHub Pages
+//! Two channels, one manifest each, both served from the repo's updates
 //! branch. The channel is chosen per check rather than in `tauri.conf.json`,
 //! so switching it needs no rebuild — the config endpoint is only the fallback
 //! for a caller that names no channel.
@@ -20,8 +20,8 @@ use ts_rs::TS;
 
 use crate::{analytics, binpath, store::get_home_app_dir};
 
-const STABLE_MANIFEST: &str = "https://monorepo-labs.github.io/dray/stable.json";
-const BETA_MANIFEST: &str = "https://monorepo-labs.github.io/dray/beta.json";
+const STABLE_MANIFEST: &str = "https://raw.githubusercontent.com/miziusLabs/Dray/updates/stable.json";
+const BETA_MANIFEST: &str = "https://raw.githubusercontent.com/miziusLabs/Dray/updates/beta.json";
 
 /// The app menu's "Check for Updates…" item.
 pub const CHECK_UPDATE_ID: &str = "check_update";

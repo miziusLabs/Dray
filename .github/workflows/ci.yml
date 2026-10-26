@@ -7,9 +7,14 @@ on:
       - apps/desktop/src-tauri/tauri.conf.json
       - apps/desktop/src-tauri/Cargo.toml
       - apps/desktop/package.json
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
 
 env:
   CARGO_INCREMENTAL: 0
@@ -30,15 +35,20 @@ jobs:
         id: version
         env:
           BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           version="$(jq -er '.version | strings | select(length > 0)' apps/desktop/src-tauri/tauri.conf.json)"
           tag="v$version"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           changed=false
-          previous="$(git show "$BEFORE:apps/desktop/src-tauri/tauri.conf.json" | jq -er '.version')"
-          if [ "$version" != "$previous" ]; then
+          if [ "$EVENT" = workflow_dispatch ]; then
             changed=true
+          else
+            previous="$(git show "$BEFORE:apps/desktop/src-tauri/tauri.conf.json" | jq -er '.version')"
+            if [ "$version" != "$previous" ]; then
+              changed=true
+            fi
           fi
           if [ "$changed" = true ]; then
             package_version="$(jq -er .version apps/desktop/package.json)"
@@ -82,15 +92,7 @@ jobs:
       - name: Set up the desktop build
         uses: ./.github/actions/desktop-setup
 
-      - name: Import signing certificate
-        uses: apple-actions/import-codesign-certs@v3
-        with:
-          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
-          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-
       - name: Build Dray Island
-        env:
-          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           brew install xcodegen
           apps/island/build.sh apps/desktop/src-tauri/target/island
@@ -99,15 +101,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGN_IDENTITY: "-"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
           POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
         with:
@@ -132,3 +127,45 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release edit "$TAG" --draft=false
+
+  manifest:
+    name: Update channels
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update channel manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --pattern latest.json --output "$RUNNER_TEMP/latest.json"
+          npm install --global semver
+          git init "$RUNNER_TEMP/updates"
+          cd "$RUNNER_TEMP/updates"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git"
+          if git fetch origin updates; then
+            git checkout -b updates FETCH_HEAD
+          else
+            git checkout --orphan updates
+          fi
+          new="$(jq -er .version "$RUNNER_TEMP/latest.json")"
+          promote() {
+            current="$(jq -r '.version // empty' "$1" 2>/dev/null || true)"
+            if [ -z "$current" ] || ! semver -p -r ">$new" "$current" >/dev/null; then
+              cp "$RUNNER_TEMP/latest.json" "$1"
+            fi
+          }
+          promote beta.json
+          if [[ "$TAG" != *-* ]]; then
+            promote stable.json
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- *.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update release channels" -m "Publish the manifests for $TAG."
+            git push origin HEAD:updates
+          fi

@@ -63,8 +63,8 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUyRjQxNERDMkE4NDU0MkEKUldRcVZJUXEzQlQwVWcxVUdGL1hkaGpibFBxOE5PVWc4WURveTh4MFpuZGMwVkNZVWQ5QkZtalEK",
-      "endpoints": ["https://monorepo-labs.github.io/dray/stable.json"]
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQxNjlDOTZCREUzQzg0QzgKUldUSWhEemVhOGxwUVpxUDV0KzZ6bmk5YTZnS0picms0Q3FPdEkvQ3JKRmdpU1RMVnZSSWtQT0MK",
+      "endpoints": ["https://raw.githubusercontent.com/miziusLabs/Dray/updates/stable.json"]
     }
   }
 }
