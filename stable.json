@@ -1,0 +1,23 @@
+{
+  "version": "0.29.13",
+  "notes": "",
+  "pub_date": "2026-10-26T23:53:37.391Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSWhEemVhOGxwUVZPOUp4Q2dmVkRPbUpTUHVQTXl3M0ZmeGtacnN6THFFZ01JaGdKMGw1VHp3SzZ5dm03dFVhdmpxbWp3cDZKbnozbU85d0xoSmc1QXAwUXQyODNETEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDU4ODA3CWZpbGU6RHJheS5hcHAudGFyLmd6CXZlcnNpb246MC4yOS4xMwpyQzFRNWtTTHdDbjNqYnEwb0tlNk1tVUlXbzI3MkltRVpBYlRybDRTaXpza0h0L3cvWWhlUjFDM1ZSL3BRbzJHNjBETTdVVExqc2JRZmFsMVhRTWVBZz09Cg==",
+      "url": "https://github.com/miziusLabs/Dray/releases/download/v0.29.13/Dray_universal.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSWhEemVhOGxwUVZPOUp4Q2dmVkRPbUpTUHVQTXl3M0ZmeGtacnN6THFFZ01JaGdKMGw1VHp3SzZ5dm03dFVhdmpxbWp3cDZKbnozbU85d0xoSmc1QXAwUXQyODNETEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDU4ODA3CWZpbGU6RHJheS5hcHAudGFyLmd6CXZlcnNpb246MC4yOS4xMwpyQzFRNWtTTHdDbjNqYnEwb0tlNk1tVUlXbzI3MkltRVpBYlRybDRTaXpza0h0L3cvWWhlUjFDM1ZSL3BRbzJHNjBETTdVVExqc2JRZmFsMVhRTWVBZz09Cg==",
+      "url": "https://github.com/miziusLabs/Dray/releases/download/v0.29.13/Dray_universal.app.tar.gz"
+    },
+    "darwin-aarch64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSWhEemVhOGxwUVZPOUp4Q2dmVkRPbUpTUHVQTXl3M0ZmeGtacnN6THFFZ01JaGdKMGw1VHp3SzZ5dm03dFVhdmpxbWp3cDZKbnozbU85d0xoSmc1QXAwUXQyODNETEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDU4ODA3CWZpbGU6RHJheS5hcHAudGFyLmd6CXZlcnNpb246MC4yOS4xMwpyQzFRNWtTTHdDbjNqYnEwb0tlNk1tVUlXbzI3MkltRVpBYlRybDRTaXpza0h0L3cvWWhlUjFDM1ZSL3BRbzJHNjBETTdVVExqc2JRZmFsMVhRTWVBZz09Cg==",
+      "url": "https://github.com/miziusLabs/Dray/releases/download/v0.29.13/Dray_universal.app.tar.gz"
+    },
+    "darwin-x86_64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSWhEemVhOGxwUVZPOUp4Q2dmVkRPbUpTUHVQTXl3M0ZmeGtacnN6THFFZ01JaGdKMGw1VHp3SzZ5dm03dFVhdmpxbWp3cDZKbnozbU85d0xoSmc1QXAwUXQyODNETEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDU4ODA3CWZpbGU6RHJheS5hcHAudGFyLmd6CXZlcnNpb246MC4yOS4xMwpyQzFRNWtTTHdDbjNqYnEwb0tlNk1tVUlXbzI3MkltRVpBYlRybDRTaXpza0h0L3cvWWhlUjFDM1ZSL3BRbzJHNjBETTdVVExqc2JRZmFsMVhRTWVBZz09Cg==",
+      "url": "https://github.com/miziusLabs/Dray/releases/download/v0.29.13/Dray_universal.app.tar.gz"
+    }
+  }
+}
