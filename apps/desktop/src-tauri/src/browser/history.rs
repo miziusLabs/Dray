@@ -184,4 +184,29 @@ mod tests {
         assert_eq!(list.len(), CAP);
         assert_eq!(list[0].url, format!("https://{}.test/", CAP + 4));
     }
+
+    /// Both callers pass a `PathBuf` for the root and an owned `String` for
+    /// the title, and both file their pages through these four functions. The
+    /// shapes are pinned here so a signature change fails on the platform that
+    /// runs, rather than in whichever build the other caller is compiled into.
+    #[test]
+    fn the_callers_shapes_read_back_through_one_root() {
+        let root = std::env::temp_dir().join(format!("dray-history-{}", uuid::Uuid::now_v7()));
+        let session = "01234567".to_string();
+        let url = "https://a.test/".to_string();
+        let title = "A page".to_string();
+
+        visit(&root, &session, &url);
+        describe(&root, &session, &url, Some(&title), None);
+        describe(&root, &session, &url, None, Some("https://a.test/icon.png"));
+
+        let listed = list(&root, &session);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].title, "A page");
+        assert_eq!(listed[0].favicon, "https://a.test/icon.png");
+
+        forget(&root, &session);
+        assert!(list(&root, &session).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
