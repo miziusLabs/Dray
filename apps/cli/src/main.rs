@@ -1077,8 +1077,23 @@ fn send_to(endpoint: &str, request: Request) -> Result<Response, String> {
     #[cfg(unix)]
     let mut stream = UnixStream::connect(endpoint).map_err(|e| connect_failure(&e, endpoint))?;
     #[cfg(windows)]
-    let mut stream = std::fs::OpenOptions::new().read(true).write(true).open(endpoint)
-        .map_err(|e| connect_failure(&e, endpoint))?;
+    let mut stream = {
+        // The server swaps pipe instances between clients, and `CreateFile`
+        // reports the gap as ERROR_PIPE_BUSY rather than waiting the way
+        // `WaitNamedPipe` would. Bounded, so a genuinely stuck server still
+        // fails instead of hanging the command.
+        use std::time::{Duration, Instant};
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match std::fs::OpenOptions::new().read(true).write(true).open(endpoint) {
+                Ok(stream) => break stream,
+                Err(e) if e.raw_os_error() == Some(231) && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(e) => return Err(connect_failure(&e, endpoint)),
+            }
+        }
+    };
 
     let line = encode_line(&Envelope::new(request)).map_err(|e| e.to_string())?;
     stream

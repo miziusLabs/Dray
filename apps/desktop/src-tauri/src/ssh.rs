@@ -76,7 +76,19 @@ impl Target {
         }
     }
 
+    /// The line that would install this Mac's key on the server. Windows'
+    /// OpenSSH ships no `ssh-copy-id`, so there the key is piped into the
+    /// remote `authorized_keys` instead — the same file the script edits.
     fn copy_id(&self) -> String {
+        #[cfg(windows)]
+        {
+            let port = self.port.map(|port| format!(" -p {port}")).unwrap_or_default();
+            return format!(
+                "Get-Content $env:USERPROFILE\\.ssh\\*.pub | ssh{port} {} \"cat >> ~/.ssh/authorized_keys\"",
+                self.dest
+            );
+        }
+        #[cfg(not(windows))]
         match self.port {
             Some(port) => format!("ssh-copy-id -p {port} {}", self.dest),
             None => format!("ssh-copy-id {}", self.dest),
@@ -809,7 +821,13 @@ mod tests {
     #[test]
     fn names_the_line_back() {
         assert_eq!(parse("ssh -p 2222 me@box").unwrap().line(), "ssh -p 2222 me@box");
+        #[cfg(not(windows))]
         assert_eq!(parse("me@box").unwrap().copy_id(), "ssh-copy-id me@box");
+        #[cfg(windows)]
+        assert_eq!(
+            parse("me@box").unwrap().copy_id(),
+            r#"Get-Content $env:USERPROFILE\.ssh\*.pub | ssh me@box "cat >> ~/.ssh/authorized_keys""#
+        );
     }
 
     /// The script is single-quoted whole for the reader's login shell, which
@@ -825,7 +843,10 @@ mod tests {
         let target = parse("me@box").unwrap();
         let denied = classify("me@box: Permission denied (publickey,password).\n", &target).await;
         assert!(denied.permanent);
+        #[cfg(not(windows))]
         assert_eq!(denied.fix, Some(Fix::Copy { command: "ssh-copy-id me@box".into() }));
+        #[cfg(windows)]
+        assert_eq!(denied.fix, Some(Fix::Copy { command: target.copy_id() }));
         let offline = classify("ssh: connect to host box port 22: Operation timed out\n", &target).await;
         assert!(!offline.permanent);
         assert!(offline.message.ends_with("Operation timed out"));

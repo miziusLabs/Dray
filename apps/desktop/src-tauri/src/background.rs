@@ -16,7 +16,10 @@ pub async fn ensure() -> Result<()> {
         return Ok(());
     }
     #[cfg(windows)]
-    if !crate::is_dev() && !cfg!(debug_assertions) {
+    // The Run entry carries no `DRAY_HOME`, so it would start a server on the
+    // default home while this app serves a custom one. Skip it there rather
+    // than start two servers, one of which nothing connects to.
+    if !crate::is_dev() && !cfg!(debug_assertions) && std::env::var_os("DRAY_HOME").is_none_or(|v| v.is_empty()) {
         if let Err(error) = register_login().await {
             eprintln!("[background] could not register login startup: {error:#}");
         }

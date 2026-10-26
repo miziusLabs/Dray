@@ -1,13 +1,12 @@
-import { ArrowLeft, ArrowRight, ExternalLink, Maximize2, Minimize2, Plus, RotateCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Maximize2, Minimize2, RotateCw } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { invoke } from "@/lib/transport";
-import { normalizeUrl } from "@/lib/browser";
+import { normalizeUrl, publishTabs, type BrowserTab } from "@/lib/browser";
 
-type Tab = { id: number; url: string; title: string; active: boolean };
-type View = { tabs: Tab[]; image: string | null; width: number; height: number };
+type View = { tabs: BrowserTab[]; image: string | null; width: number; height: number };
 
 /// Windows shares the agent's Chromium through private pipes and displays its viewport.
 export default function WindowsBrowserPane({ sessionId, active, mode, fullOpen = false, onExpand, onCollapse }: {
@@ -44,6 +43,7 @@ export default function WindowsBrowserPane({ sessionId, active, mode, fullOpen =
         const next = await invoke<View>("browser_view", { sessionId });
         if (stopped) return;
         setView(next);
+        publishTabs(sessionId, next.tabs);
         if (!editing.current) setUrl(next.tabs.find((tab) => tab.active)?.url ?? "");
       } catch (cause) {
         if (!stopped) setError(String(cause));
@@ -88,13 +88,6 @@ export default function WindowsBrowserPane({ sessionId, active, mode, fullOpen =
         <Button variant="ghost" size="icon-sm" aria-label="Open in browser" disabled={!selected} onClick={() => selected && void openUrl(selected.url)}><ExternalLink className="size-4" /></Button>
         {(onExpand || onCollapse) && <Button variant="ghost" size="icon-sm" aria-label={mode === "panel" ? "Expand browser" : "Collapse browser"} onClick={mode === "panel" ? onExpand : onCollapse}>{mode === "panel" ? <Maximize2 className="size-4" /> : <Minimize2 className="size-4" />}</Button>}
       </div>
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b p-1">
-        {view?.tabs.map((tab) => <div key={tab.id} className={`flex max-w-48 items-center rounded-md ${tab.active ? "bg-sidebar-accent" : ""}`}>
-          <button className="truncate px-2 py-1 text-ui" onClick={() => void input({ action: "tab_switch", id: tab.id })}>{tab.title || tab.url || "New tab"}</button>
-          <Button variant="ghost" size="icon-sm" aria-label="Close tab" onClick={() => void input({ action: "tab_close", id: tab.id })}><X className="size-3" /></Button>
-        </div>)}
-        <Button variant="ghost" size="icon-sm" aria-label="New tab" onClick={() => void input({ action: "tab_new" })}><Plus className="size-4" /></Button>
-      </div>
       {error && <p className="shrink-0 px-3 py-2 text-ui text-destructive" role="status">{error}</p>}
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-muted/30">
         {view?.image ? <img ref={image} src={`data:image/jpeg;base64,${view.image}`} alt={selected?.title || "Browser page"} draggable={false} tabIndex={0} className="max-h-full max-w-full object-contain outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -102,6 +95,19 @@ export default function WindowsBrowserPane({ sessionId, active, mode, fullOpen =
             event.currentTarget.focus();
             const rect = event.currentTarget.getBoundingClientRect();
             void input({ action: "pointer", x: (event.clientX - rect.left) * event.currentTarget.naturalWidth / rect.width, y: (event.clientY - rect.top) * event.currentTarget.naturalHeight / rect.height });
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.currentTarget.focus();
+            const rect = event.currentTarget.getBoundingClientRect();
+            void input({ action: "pointer", button: "right", x: (event.clientX - rect.left) * event.currentTarget.naturalWidth / rect.width, y: (event.clientY - rect.top) * event.currentTarget.naturalHeight / rect.height });
+          }}
+          onAuxClick={(event) => {
+            if (event.button !== 1) return;
+            event.preventDefault();
+            event.currentTarget.focus();
+            const rect = event.currentTarget.getBoundingClientRect();
+            void input({ action: "pointer", button: "middle", x: (event.clientX - rect.left) * event.currentTarget.naturalWidth / rect.width, y: (event.clientY - rect.top) * event.currentTarget.naturalHeight / rect.height });
           }}
           onWheel={(event) => { event.preventDefault(); void input({ action: "wheel", delta: event.deltaY }); }}
           onKeyDown={(event) => {

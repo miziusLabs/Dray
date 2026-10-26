@@ -1,7 +1,9 @@
 //! `dray server`: what makes a machine a Dray server. `setup`, `service` and
 //! `serve` are its spellings before, still answered. See apps/desktop/SETUP-PLAN.md.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(unix)]
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -16,7 +18,7 @@ use clap::{Args, Subcommand};
 pub struct Install {
     /// Install these without asking, which is how a run with no terminal
     /// installs anything: git, gh, claude_code, codex, pi, fx, grok, and on
-    /// Linux browser and ffmpeg.
+    /// Linux browser and ffmpeg, and ffmpeg on Windows too.
     #[arg(long, alias = "install", value_delimiter = ',', value_name = "TOOL")]
     tools: Vec<String>,
 }
@@ -28,10 +30,10 @@ pub enum ServerCommand {
     /// server in the background.
     Install(Install),
     /// Run the server in the background, surviving logout and reboot. On a
-    /// Mac, only where the Dray app is not installed.
+    /// Mac or Windows, only where the Dray app is not installed.
     Start,
-    /// Run the server in this terminal. On a Mac, only where the Dray app is
-    /// not installed.
+    /// Run the server in this terminal. On a Mac or Windows, only where the
+    /// Dray app is not installed.
     Run(Run),
     /// Stop the server and remove it from the background.
     Stop,
@@ -113,13 +115,17 @@ pub struct Run {
 const LINUX: bool = cfg!(target_os = "linux");
 const MAC: bool = cfg!(target_os = "macos");
 
-/// Whether this machine may run a server of its own: Linux always, a Mac only
-/// where no Dray app runs one on the same home. A `DRAY_HOME` of its own is
-/// the way round that `serve.lock`'s refusal already names.
+/// Whether this machine may run a server of its own: Linux always, a Mac or
+/// Windows only where no Dray app runs one on the same home. A `DRAY_HOME` of
+/// its own is the way round that `serve.lock`'s refusal already names.
 fn may_serve() -> Result<(), String> {
     let own_home = std::env::var_os("DRAY_HOME").is_some_and(|v| !v.is_empty());
     if MAC && !own_home && app_on_this_mac() {
         return Err("the Dray app runs this Mac's server".into());
+    }
+    #[cfg(windows)]
+    if !own_home && app_on_this_pc() {
+        return Err("the Dray app runs this PC's server".into());
     }
     Ok(())
 }
@@ -135,6 +141,30 @@ fn app_on_this_mac() -> bool {
     ]
     .iter()
     .any(|p| p.exists())
+}
+
+/// The app's bundle, or the HKCU entry its first launch writes. Two servers on
+/// one home fight over the index and the orchestration pipe, so a PC with the
+/// app installed is not one for a second server.
+#[cfg(windows)]
+fn app_on_this_pc() -> bool {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_default();
+    [
+        local.join(r"Dray\Dray.exe"),
+        local.join(r"Programs\Dray\Dray.exe"),
+    ]
+    .iter()
+    .any(|p| p.exists())
+        || output(
+            "reg",
+            &[
+                "query",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+                "/v",
+                "Dray Server",
+            ],
+        )
+        .is_some()
 }
 
 const BAR: &str = "\x1b[90m│\x1b[0m";
@@ -155,12 +185,34 @@ fn tools() -> Vec<Tool> {
     tools.extend(dray_proto::AGENTS.iter().map(|a| Tool { id: a.id, name: a.name, bin: a.bin }));
     // A server's `dray browser` downloads its own Chromium; what it cannot
     // fetch is the system libraries that Chromium links against, nor ffmpeg
-    // for `record`.
+    // for `record`. Windows' Chromium needs no separate libraries, but its
+    // recorder needs ffmpeg just the same.
     if LINUX {
         tools.push(Tool { id: "browser", name: "Browser for agents", bin: "" });
+    }
+    if LINUX || cfg!(windows) {
         tools.push(Tool { id: "ffmpeg", name: "ffmpeg", bin: "ffmpeg" });
     }
     tools
+}
+
+/// The names a command may carry on `PATH`, in the order Windows itself tries
+/// them: each `PATHEXT` suffix, then the bare name (an extensionless shim).
+#[cfg(windows)]
+fn exe_names(bin: &str) -> Vec<String> {
+    let exts = std::env::var_os("PATHEXT")
+        .map(|v| {
+            v.to_string_lossy()
+                .split(';')
+                .filter(|e| !e.is_empty())
+                .map(str::to_ascii_lowercase)
+                .collect::<Vec<_>>()
+        })
+        .filter(|exts| !exts.is_empty())
+        .unwrap_or_else(|| vec![".com".into(), ".exe".into(), ".bat".into(), ".cmd".into()]);
+    let mut names: Vec<String> = exts.into_iter().map(|ext| format!("{bin}{ext}")).collect();
+    names.push(bin.to_string());
+    names
 }
 
 fn present(tool: &Tool) -> bool {
@@ -191,6 +243,7 @@ const BROWSER_LIBS: [(&str, &[&str]); 12] = [
 
 /// No library Chromium links against, but without fontconfig's config it
 /// aborts on start, and without a font every page draws as boxes.
+#[cfg(not(windows))]
 const FONT_PACKAGES: [&str; 3] = ["fontconfig", "fonts-liberation", "fonts-dejavu-core"];
 
 fn browser_libs_present() -> bool {
@@ -203,6 +256,7 @@ fn browser_libs_present() -> bool {
 /// the script, after `apt-get update`: a fresh image's lists are empty, so
 /// asking apt-cache first finds nothing. Single-quote free, since `as_admin`
 /// may wrap it in `sudo sh -c '…'`.
+#[cfg(not(windows))]
 fn browser_script() -> String {
     let choose: String = BROWSER_LIBS
         .iter()
@@ -239,7 +293,7 @@ fn find(bin: &str) -> Option<PathBuf> {
         .chain(extra)
         .flat_map(|dir| {
             #[cfg(windows)]
-            let names = vec![format!("{bin}.exe"), format!("{bin}.cmd"), bin.to_string()];
+            let names = exe_names(bin);
             #[cfg(not(windows))]
             let names = vec![bin.to_string()];
             names.into_iter().map(move |name| dir.join(name))
@@ -315,7 +369,8 @@ pub fn setup(args: Install) -> Result<(), String> {
     }
 
     if may_serve().is_err() {
-        println!("\x1b[90m└\x1b[0m  Done. The Dray app runs this Mac's server.");
+        let machine = if MAC { "Mac" } else { "PC" };
+        println!("\x1b[90m└\x1b[0m  Done. The Dray app runs this {machine}'s server.");
         return Ok(());
     }
     match service_start() {
@@ -396,6 +451,7 @@ fn install(tool: &Tool, tty: Option<&File>) -> Result<(), InstallError> {
     sh(&script, stdin())
 }
 
+#[cfg(not(windows))]
 fn sh(script: &str, stdin: Stdio) -> Result<(), InstallError> {
     match Command::new("sh").args(["-c", script]).stdin(stdin).status() {
         Ok(s) if s.success() => Ok(()),
@@ -407,6 +463,7 @@ fn sh(script: &str, stdin: Stdio) -> Result<(), InstallError> {
 /// Root runs it, passwordless sudo runs it under sudo, anyone else is handed
 /// the command — a password prompt in the middle of an installer is easy to
 /// miss and easy to fat-finger.
+#[cfg(not(windows))]
 fn install_git(stdin: Stdio) -> Result<(), InstallError> {
     if !LINUX {
         return Err(Manual("xcode-select --install".into()));
@@ -417,10 +474,12 @@ fn install_git(stdin: Stdio) -> Result<(), InstallError> {
     as_admin(cmd, stdin)
 }
 
+#[cfg(not(windows))]
 fn apt(packages: &str, stdin: Stdio) -> Result<(), InstallError> {
     as_admin(&format!("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y {packages}"), stdin)
 }
 
+#[cfg(not(windows))]
 fn as_admin(cmd: &str, stdin: Stdio) -> Result<(), InstallError> {
     if output("id", &["-u"]).as_deref() == Some("0") {
         sh(cmd, stdin)
@@ -434,6 +493,7 @@ fn as_admin(cmd: &str, stdin: Stdio) -> Result<(), InstallError> {
 /// gh's own release tarball into ~/.local/bin, checked against the checksums
 /// file published beside it. No package manager: a distro's gh is often years
 /// old, and adding GitHub's apt repo wants root.
+#[cfg(not(windows))]
 const GH_LINUX: &str = r#"set -eu
 case $(uname -m) in x86_64|amd64) a=amd64 ;; aarch64|arm64) a=arm64 ;; *) echo "no gh build for $(uname -m)" >&2; exit 1 ;; esac
 v=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/p' | head -n 1)
@@ -596,9 +656,11 @@ pub fn service(command: ServiceCommand) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(windows))]
 const UNIT: &str = "dray.service";
 const TUNNEL_UNIT: &str = "dray-tunnel.service";
 
+#[cfg(not(windows))]
 fn unit_path() -> Result<PathBuf, String> {
     unit_file(UNIT)
 }
@@ -611,6 +673,7 @@ fn unit_file(name: &str) -> Result<PathBuf, String> {
     Ok(config.join("systemd/user").join(name))
 }
 
+#[cfg(not(windows))]
 fn write_unit(file: &Path, unit: &str) -> Result<(), String> {
     std::fs::create_dir_all(file.parent().unwrap_or(file))
         .and_then(|()| std::fs::write(file, unit))
@@ -618,6 +681,7 @@ fn write_unit(file: &Path, unit: &str) -> Result<(), String> {
 }
 
 /// `%` is systemd's specifier character, so a literal one is doubled.
+#[cfg(not(windows))]
 fn unit_escape(text: &str) -> String {
     text.replace('%', "%%")
 }
@@ -800,6 +864,7 @@ fn service_start() -> Result<String, String> {
     Ok(note)
 }
 
+#[cfg(not(windows))]
 fn already_running() -> String {
     format!(
         "\n{BAR}  It was already running. A newer dray-serve takes over on restart, \
@@ -812,13 +877,22 @@ fn already_running() -> String {
 /// disk, if one is installed.
 pub fn installed_restart() -> Option<String> {
     #[cfg(windows)]
-    if dray_home().is_ok_and(|home| home.join("server.ps1").exists()) { return Some("dray server uninstall; dray server start".into()); }
-    let installed = if MAC { agent_plist_path() } else { unit_path() }.is_ok_and(|p| p.exists());
-    installed.then(restart_command)
+    {
+        return dray_home()
+            .ok()
+            .filter(|home| home.join("server.ps1").exists())
+            .map(|_| "dray server uninstall; dray server start".into());
+    }
+    #[cfg(not(windows))]
+    {
+        let installed = if MAC { agent_plist_path() } else { unit_path() }.is_ok_and(|p| p.exists());
+        installed.then(restart_command)
+    }
 }
 
 /// On a Mac, a reload rather than `kickstart -k`, which restarts the job as
 /// loaded and so would miss a plist `dray server start` rewrote since.
+#[cfg(not(windows))]
 fn restart_command() -> String {
     if MAC {
         let plist = agent_plist_path().map(|p| sh_quote(&p.display().to_string())).unwrap_or_default();
@@ -830,6 +904,7 @@ fn restart_command() -> String {
 
 /// One shell word, for a path printed for the reader to paste: a home may
 /// hold a space.
+#[cfg(not(windows))]
 fn sh_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
@@ -837,22 +912,27 @@ fn sh_quote(text: &str) -> String {
 /// A Mac's background server: a LaunchAgent under a label of its own, so it
 /// never touches the app's `com.yogesh.dray.server`. Modelled on the app's
 /// launchd.rs.
+#[cfg(not(windows))]
 const AGENT_LABEL: &str = "com.yogesh.dray-serve";
 
+#[cfg(not(windows))]
 fn agent_plist_path() -> Result<PathBuf, String> {
     let home = std::env::home_dir().ok_or("could not resolve your home directory")?;
     Ok(home.join("Library/LaunchAgents").join(format!("{AGENT_LABEL}.plist")))
 }
 
+#[cfg(not(windows))]
 fn agent_domain() -> String {
     format!("gui/{}", output("id", &["-u"]).unwrap_or_default())
 }
 
+#[cfg(not(windows))]
 fn agent_target() -> String {
     format!("{}/{AGENT_LABEL}", agent_domain())
 }
 
 /// Status and output; a launchctl that cannot run reads as a failure.
+#[cfg(not(windows))]
 fn launchctl(args: &[&str]) -> (bool, String) {
     match Command::new("/bin/launchctl").args(args).stdin(Stdio::null()).output() {
         Ok(out) => {
@@ -865,12 +945,14 @@ fn launchctl(args: &[&str]) -> (bool, String) {
 
 /// The job's pid, off `launchctl print`: `None` when it is not loaded, or is
 /// loaded and not running.
+#[cfg(not(windows))]
 fn agent_pid() -> Option<String> {
     let (ok, text) = launchctl(&["print", &agent_target()]);
     ok.then_some(())?;
     text.lines().find_map(|l| l.trim().strip_prefix("pid = ").map(str::to_string))
 }
 
+#[cfg(not(windows))]
 fn xml_escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
@@ -879,6 +961,7 @@ fn xml_escape(text: &str) -> String {
 /// `Interactive` for the app's reason: agents run builds under it. launchd
 /// starts it with an environment of its own, so `PATH` and `DRAY_HOME` ride
 /// along.
+#[cfg(not(windows))]
 fn agent_plist(serve: &Path, log: &Path, env: &[(&str, String)]) -> String {
     let pairs: String = env.iter().map(|(k, v)| format!("<key>{k}</key><string>{}</string>", xml_escape(v))).collect();
     format!(
@@ -906,6 +989,7 @@ fn agent_plist(serve: &Path, log: &Path, env: &[(&str, String)]) -> String {
 /// ran this from, and never restarts a running server. A `gui` domain job runs
 /// only while its user is logged in at the Mac, so a headless one wants
 /// automatic login.
+#[cfg(not(windows))]
 fn agent_start() -> Result<String, String> {
     may_serve()?;
     let serve = beside("dray-serve")?;
@@ -951,6 +1035,7 @@ fn agent_start() -> Result<String, String> {
 
 /// `dray server` on a Mac. Uninstall is let through with the app present:
 /// it is how a server set up before the app arrived hands over to it.
+#[cfg(not(windows))]
 fn agent_service(command: ServiceCommand) -> Result<(), String> {
     match command {
         ServiceCommand::Start => {
@@ -989,6 +1074,7 @@ fn agent_service(command: ServiceCommand) -> Result<(), String> {
 
 /// Without linger, systemd stops a user's services at their last logout and
 /// starts none at boot.
+#[cfg(not(windows))]
 fn linger() -> bool {
     let user = output("id", &["-un"]).unwrap_or_default();
     let on = || output("loginctl", &["show-user", &user, "--property=Linger", "--value"]).as_deref() == Some("yes");
@@ -1135,37 +1221,179 @@ mod tests {
 
 #[cfg(windows)]
 fn windows_install(tool: &Tool) -> Result<(), InstallError> {
-    let args: &[&str] = match tool.id {
-        "git" => &["install", "--id", "Git.Git", "--exact", "--accept-package-agreements", "--accept-source-agreements"],
-        "gh" => &["install", "--id", "GitHub.cli", "--exact", "--accept-package-agreements", "--accept-source-agreements"],
-        "claude_code" => &["install", "--id", "Anthropic.ClaudeCode", "--exact", "--accept-package-agreements", "--accept-source-agreements"],
-        _ => return Err(Manual(format!("Install {} using its vendor's Windows instructions, then run dray server install again", tool.name))),
+    // Everything winget knows. The three agents it does not distribute are
+    // still a hand-off, but the recorder and the two CLIs Dray drives itself
+    // are not.
+    let id = match tool.id {
+        "git" => "Git.Git",
+        "gh" => "GitHub.cli",
+        "claude_code" => "Anthropic.ClaudeCode",
+        "codex" => "OpenAI.Codex",
+        "ffmpeg" => "Gyan.FFmpeg",
+        _ => {
+            return Err(Manual(format!(
+                "Install {} on Windows from its vendor, then run dray server install again",
+                tool.name
+            )))
+        }
     };
     let stdin = if std::io::IsTerminal::is_terminal(&std::io::stdin()) { Stdio::inherit() } else { Stdio::null() };
-    let status = Command::new("winget.exe").args(args).stdin(stdin).status().map_err(|e| Failed(e.to_string()))?;
+    let status = Command::new("winget.exe")
+        .args(["install", "--id", id, "--exact", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements"])
+        .stdin(stdin)
+        .status()
+        .map_err(|e| Failed(e.to_string()))?;
     if status.success() { Ok(()) } else { Err(Failed(status.to_string())) }
 }
 
 #[cfg(windows)]
 fn windows_service(command: ServiceCommand) -> Result<(), String> {
-    let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
-    let script = match command {
+    match command {
         ServiceCommand::Start => {
             may_serve()?;
             let exe = beside("dray-serve")?;
             let home = std::path::absolute(dray_home()?).map_err(|e| e.to_string())?;
             std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+            let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
+            let log = home.join("server.log");
             let launcher = home.join("server.ps1");
-            let body = format!("$env:DRAY_HOME = {}\n$env:PATH = {}\n& {} *>> {}\n", quote(&home.to_string_lossy()), quote(&unit_env_path(&exe)?), quote(&exe.to_string_lossy()), quote(&home.join("server.log").to_string_lossy()));
-            std::fs::write(&launcher, body).map_err(|e| e.to_string())?;
+            // `exit` with the server's own code, so Task Scheduler's restart
+            // count sees a crash rather than the 0 PowerShell would leave.
+            let body = format!(
+                "$env:DRAY_HOME = {}\n$env:PATH = {}\n& {} *>> {}\nexit $LASTEXITCODE\n",
+                quote(&home.to_string_lossy()),
+                quote(&unit_env_path(&exe)?),
+                quote(&exe.to_string_lossy()),
+                quote(&log.to_string_lossy())
+            );
+            std::fs::write(&launcher, body).map_err(|e| format!("could not write {}: {e}", launcher.display()))?;
             let args = format!("-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{}\"", launcher.display());
-            format!("$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument {}; $t=New-ScheduledTaskTrigger -AtLogOn -User ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name); $s=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1); Register-ScheduledTask -TaskName 'Dray server' -Action $a -Trigger $t -Settings $s -Force | Out-Null; Start-ScheduledTask -TaskName 'Dray server'", quote(&args))
+            powershell(&format!(
+                "$a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument {}; \
+                 $t = New-ScheduledTaskTrigger -AtLogOn -User ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name); \
+                 $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1); \
+                 Register-ScheduledTask -TaskName 'Dray server' -Action $a -Trigger $t -Settings $s -Force | Out-Null; \
+                 Start-ScheduledTask -TaskName 'Dray server'",
+                quote(&args)
+            ))?;
+            // `Start-ScheduledTask` returns before PowerShell has even started
+            // the server. Wait for the port it writes, or a server that failed
+            // to bind would still read as started.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while server_pid(&home).is_none() {
+                if std::time::Instant::now() >= deadline {
+                    return Err(format!("The server did not start. See: {}", log.display()));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            println!("The server is running in the background.\nLog: {}", log.display());
         }
-        ServiceCommand::Status => "Get-ScheduledTask -TaskName 'Dray server' | Format-List TaskName,State".into(),
-        ServiceCommand::Uninstall => "Stop-ScheduledTask -TaskName 'Dray server' -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName 'Dray server' -Confirm:$false".into(),
-        ServiceCommand::Tunnel { state: OnOff::On } => return tunnel_on(),
-        ServiceCommand::Tunnel { state: OnOff::Off } => return tunnel_off(),
-    };
-    let status = Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &format!("$ErrorActionPreference='Stop'; {script}")]).status().map_err(|e| e.to_string())?;
-    if status.success() { Ok(()) } else { Err(format!("Windows Task Scheduler returned {status}")) }
+        ServiceCommand::Status => {
+            let home = dray_home()?;
+            let pid = server_pid(&home).ok_or("the server is not running")?;
+            println!("The server is running, pid {pid}. Log: {}", home.join("server.log").display());
+            if let Some(url) = tunnel_address()? {
+                println!("\n{}", connect_text(&url)?);
+            }
+        }
+        ServiceCommand::Uninstall => {
+            let home = dray_home()?;
+            let launcher = home.join("server.ps1");
+            let task = powershell(
+                "if (Get-ScheduledTask -TaskName 'Dray server' -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }",
+            )?;
+            if !launcher.exists() && task != "yes" {
+                println!("No background server is installed.");
+                return Ok(());
+            }
+            powershell(
+                "$t = Get-ScheduledTask -TaskName 'Dray server' -ErrorAction SilentlyContinue; \
+                 if ($null -ne $t) { \
+                   Stop-ScheduledTask -TaskName 'Dray server' -ErrorAction SilentlyContinue; \
+                   Unregister-ScheduledTask -TaskName 'Dray server' -Confirm:$false \
+                 }",
+            )?;
+            // Stopping the task ends its PowerShell launcher, not the
+            // `dray-serve` it started. That child keeps the port open and the
+            // updated binary locked, so the pid the server wrote is ended by
+            // name as well — the image check keeps a reused pid safe.
+            if let Some(pid) = server_process(&home)
+                .filter(|pid| image_name(*pid).is_some_and(|name| name.eq_ignore_ascii_case("dray-serve.exe")))
+            {
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &pid.to_string()])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while image_name(pid).is_some_and(|name| name.eq_ignore_ascii_case("dray-serve.exe")) {
+                    if std::time::Instant::now() >= deadline {
+                        return Err("the server is still running; it is still installed".into());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            if launcher.exists() {
+                std::fs::remove_file(&launcher).map_err(|e| format!("could not remove {}: {e}", launcher.display()))?;
+            }
+            println!("Removed the background server.");
+        }
+        ServiceCommand::Tunnel { state: OnOff::On } => tunnel_on()?,
+        ServiceCommand::Tunnel { state: OnOff::Off } => {
+            tunnel_off()?;
+            println!("The tunnel is down.");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn powershell(script: &str) -> Result<String, String> {
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &format!("$ErrorActionPreference = 'Stop'; {script}")])
+        .output()
+        .map_err(|e| format!("could not run PowerShell: {e}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        let said = String::from_utf8_lossy(&output.stderr);
+        let said = said.trim();
+        Err(if said.is_empty() { format!("PowerShell exited with {}", output.status) } else { said.to_string() })
+    }
+}
+
+/// The pid in `serve-port`, once its image is Dray's. The file outlives a
+/// crash (the server writes it first and never removes it), so the image name
+/// keeps a later tenant of a reused pid from reading as a server.
+#[cfg(windows)]
+fn server_process(home: &Path) -> Option<u32> {
+    let written = std::fs::read_to_string(home.join("serve-port")).ok()?;
+    let pid = written.lines().nth(2)?.parse::<u32>().ok()?;
+    let name = image_name(pid)?.to_ascii_lowercase();
+    (name == "dray-serve.exe" || name == "dray.exe").then_some(pid)
+}
+
+/// [`server_process`], and the port it names answers: a file left by a crash
+/// is not a running server.
+#[cfg(windows)]
+fn server_pid(home: &Path) -> Option<u32> {
+    let pid = server_process(home)?;
+    let written = std::fs::read_to_string(home.join("serve-port")).ok()?;
+    let port = written.lines().next()?.parse::<u16>().ok()?;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).ok()?;
+    Some(pid)
+}
+
+/// A process's image name, off `tasklist`'s CSV: `"dray-serve.exe","1234",…`.
+#[cfg(windows)]
+fn image_name(pid: u32) -> Option<String> {
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text.lines().next()?.trim();
+    let rest = line.strip_prefix('"')?;
+    Some(rest[..rest.find('"')?].to_string())
 }

@@ -274,10 +274,14 @@ pub async fn config_dir() -> Result<PathBuf> {
 }
 
 /// The `<name>` of a path under `.claude/worktrees/<name>/`, the innermost
-/// where worktrees nest.
+/// where worktrees nest. Windows spells the separators the other way, so the
+/// match is made on a slashed copy and the offset used to slice the original
+/// — one `\` becomes one `/`, so the two indexes agree.
 fn worktree_name(dir: &str) -> Option<&str> {
-    let (_, rest) = dir.rsplit_once("/.claude/worktrees/")?;
-    rest.split('/').next().filter(|name| !name.is_empty())
+    let slashed = dir.replace('\\', "/");
+    let at = slashed.rfind("/.claude/worktrees/")?;
+    let rest = &dir[at + "/.claude/worktrees/".len()..];
+    rest.split(['/', '\\']).next().filter(|name| !name.is_empty())
 }
 
 async fn make_home_app_dir() -> Result<PathBuf> {
@@ -639,14 +643,13 @@ fn project_root_of(project_path: &str) -> &str {
 /// names the repo in that case, and it is tried first anyway.
 ///
 /// A `/` separator rather than `Path::components`, because this reads paths the
-/// app itself wrote on the only platform it runs on: CEF, the app picker, the
-/// notification centre and the output mute are all macOS-only, and the release
-/// workflow builds `universal-apple-darwin` and nothing else. A Windows port
-/// has this to fix and a great deal more beside it.
+/// app itself wrote, and a slice is what callers want back. Windows paths are
+/// matched on a slashed copy for the same reason as [`worktree_name`].
 fn worktree_root_of(path: &str) -> Option<&str> {
-    let (root, name) = path.split_once("/.claude/worktrees/")?;
-    let name = name.trim_end_matches('/');
-    (!name.is_empty() && !name.contains('/')).then_some(root)
+    let at = path.replace('\\', "/").find("/.claude/worktrees/")?;
+    let name = &path[at + "/.claude/worktrees/".len()..];
+    let name = name.trim_end_matches(['/', '\\']);
+    (!name.is_empty() && !name.contains(['/', '\\'])).then_some(&path[..at])
 }
 
 impl SessionIndexItem {
@@ -2077,6 +2080,10 @@ mod tests {
         assert_eq!(worktree_name("/r/.claude/worktrees/a/.claude/worktrees/b/apps"), Some("b"));
         assert_eq!(worktree_name("/r/apps/desktop/src-tauri"), None);
         assert_eq!(worktree_name("/r/.claude/worktrees/"), None);
+        // The Windows spelling of the build path, which `CARGO_MANIFEST_DIR`
+        // carries there.
+        assert_eq!(worktree_name(r"C:\r\.claude\worktrees\opal-plum\apps\desktop\src-tauri"), Some("opal-plum"));
+        assert_eq!(worktree_name(r"C:\r\.claude\worktrees\"), None);
     }
 
     /// Another build replacing the index must be read back, or the next
@@ -3039,6 +3046,9 @@ mod tests {
             project_root_of("/home/me/.claude/worktrees/proj/subrepo"),
             "/home/me/.claude/worktrees/proj/subrepo"
         );
+        // A Windows spelling, including the verbatim prefix canonicalize adds.
+        assert_eq!(project_root_of(r"C:\repo\.claude\worktrees\caller"), r"C:\repo");
+        assert_eq!(project_root_of(r"\\?\C:\repo\.claude\worktrees\caller"), r"\\?\C:\repo");
     }
 
     /// A path is only a worktree Dray manages where `<name>` is a direct child,
@@ -3058,6 +3068,10 @@ mod tests {
         );
         assert_eq!(worktree_root_of("/repo/.claude/worktrees/"), None);
         assert_eq!(worktree_root_of("/repo"), None);
+        // Windows spells the same tree with `\`.
+        assert_eq!(worktree_root_of(r"C:\repo\.claude\worktrees\calm-owl"), Some(r"C:\repo"));
+        assert_eq!(worktree_root_of(r"C:\repo\.claude\worktrees\calm-owl\"), Some(r"C:\repo"));
+        assert_eq!(worktree_root_of(r"C:\repo\.claude\worktrees\calm-owl\sub"), None);
     }
 
     /// The caller's worktree recorded as the project is usually a *live*

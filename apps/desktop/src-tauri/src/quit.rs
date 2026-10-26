@@ -14,8 +14,10 @@
 
 use std::sync::Mutex;
 
+#[cfg(target_os = "macos")]
+use tauri::menu::AboutMetadata;
 use tauri::{
-    menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Manager, Runtime,
 };
 

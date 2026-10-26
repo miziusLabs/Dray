@@ -42,15 +42,33 @@ pub struct TabInfo {
     pub url: String,
     pub title: String,
     pub active: bool,
+    pub loading: bool,
     pub discarded: bool,
+}
+
+/// One tab as the frontend's strip reads it. The Mac's CEF tabs carry more
+/// (favicon, history arrows, an error line); a headless page has no favicon
+/// and Dray's own pane draws none of the rest.
+#[cfg(windows)]
+fn tab_json(t: TabInfo) -> Value {
+    json!({
+        "id": t.id,
+        "url": t.url,
+        "title": t.title,
+        "favicon": "",
+        "loading": t.loading,
+        "active": t.active,
+        "canGoBack": false,
+        "canGoForward": false,
+        "error": Value::Null,
+        "discarded": t.discarded,
+    })
 }
 
 /// The Windows pane reads the same browser the agent drives, without a public debug port.
 #[cfg(windows)]
 pub async fn browser_view(session_id: String) -> Result<Value, String> {
-    let tabs: Vec<Value> = tabs_of(&session_id).into_iter().map(|t| json!({
-        "id": t.id, "url": t.url, "title": t.title, "active": t.active,
-    })).collect();
+    let tabs: Vec<Value> = tabs_of(&session_id).into_iter().map(tab_json).collect();
     let mut width = 1440;
     let mut height = 900;
     let image = if let Some(tab) = active_id(&session_id) {
@@ -77,8 +95,13 @@ pub async fn browser_input(session_id: String, action: Value) -> Result<Value, S
                 "pointer" => {
                     let x = action["x"].as_f64().filter(|x| x.is_finite()).ok_or("invalid pointer")?.clamp(0.0, 16384.0);
                     let y = action["y"].as_f64().filter(|y| y.is_finite()).ok_or("invalid pointer")?.clamp(0.0, 16384.0);
+                    let button = match action["button"].as_str() {
+                        Some("right") => "right",
+                        Some("middle") => "middle",
+                        _ => "left",
+                    };
                     for kind in ["mousePressed", "mouseReleased"] {
-                        automation::cdp(tab, "Input.dispatchMouseEvent", json!({ "type": kind, "x": x, "y": y, "button": "left", "clickCount": 1 })).await?;
+                        automation::cdp(tab, "Input.dispatchMouseEvent", json!({ "type": kind, "x": x, "y": y, "button": button, "clickCount": 1 })).await?;
                     }
                 }
                 "wheel" => {
@@ -98,6 +121,60 @@ pub async fn browser_input(session_id: String, action: Value) -> Result<Value, S
             automation::run(&session_id, action).await.map(|(_, result)| result)
         }
     }
+}
+
+/// The reader's tab strip and URL bar, over the browser this server owns. The
+/// Mac answers these in the app because CEF draws there; on Windows Chromium
+/// lives in the server, so the same commands belong here.
+#[cfg(windows)]
+pub async fn browser_open(session_id: String, url: String, new_tab: bool) -> Result<(), String> {
+    open_url(&session_id, url, new_tab).await
+}
+
+/// The session's tabs, in strip order, shaped as the frontend's `BrowserTab`.
+#[cfg(windows)]
+pub fn browser_tabs(session_id: String) -> Vec<Value> {
+    tabs_of(&session_id).into_iter().map(tab_json).collect()
+}
+
+#[cfg(windows)]
+pub async fn browser_activate(session_id: String, id: i32) -> Result<(), String> {
+    activate_tab(&session_id, id).await
+}
+
+#[cfg(windows)]
+pub async fn browser_close(session_id: String, id: i32) -> Result<(), String> {
+    close_tab(&session_id, id).await
+}
+
+#[cfg(windows)]
+pub async fn browser_nav(session_id: String, action: String) -> Result<(), String> {
+    nav(&session_id, &action).await
+}
+
+/// Moves `id` to place `to` among this session's tabs, leaving every other
+/// session's where they are: `TABS` holds every session's in one list.
+#[cfg(windows)]
+pub fn browser_move(session_id: String, id: i32, to: usize) -> Vec<Value> {
+    {
+        let mut tabs = TABS.lock().unwrap();
+        if let Some(from) = tabs.iter().position(|t| t.id == id && t.session == session_id) {
+            let item = tabs.remove(from);
+            let places: Vec<usize> = (0..tabs.len()).filter(|&i| tabs[i].session == session_id).collect();
+            let at = match places.get(to) {
+                Some(&i) => i,
+                None => places.last().map_or(from, |&i| i + 1),
+            };
+            tabs.insert(at, item);
+        }
+    }
+    browser_tabs(session_id)
+}
+
+/// The server keeps no visit history to offer a client's history menu.
+#[cfg(windows)]
+pub fn browser_history(_session_id: String) -> Vec<Value> {
+    Vec::new()
 }
 
 #[cfg(windows)]
@@ -189,6 +266,7 @@ fn tabs_of(session: &str) -> Vec<TabInfo> {
             url: t.url.clone(),
             title: t.title.clone(),
             active: active == Some(t.id),
+            loading: t.loading,
             discarded: t.target.is_none() && !t.loading,
         })
         .collect()

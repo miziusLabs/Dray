@@ -135,8 +135,12 @@ function unwrapArgs(args: Rec): { args: Rec; server: ServerId | null } {
 
 /// Commands that name a session but act on this Mac — its browser tabs, its
 /// banners, the island's pick — and so never follow the session to its server.
+///
+/// The browser is `onThisMac` only on a Mac, where CEF draws in the app.
+/// Windows' headless Chromium lives in its local server instead, so there the
+/// browser is routed by `localBrowser` below rather than by the session.
 const onThisMac = (cmd: string): boolean =>
-  cmd.startsWith("browser_") || cmd === "notify_session" || cmd === "set_app_selection";
+  (!IS_WINDOWS && cmd.startsWith("browser_")) || cmd === "notify_session" || cmd === "set_app_selection";
 
 /// What the app answers itself: the browser, dictation, banners, the updater,
 /// the server list, opening apps and terminals. Every other local command goes
@@ -219,13 +223,20 @@ export const APP_COMMANDS = new Set([
 export async function invoke<T>(cmd: string, args?: Rec, server?: ServerId): Promise<T> {
   const unwrapped = unwrapArgs(args ?? {});
   const sessionId = typeof unwrapped.args.sessionId === "string" ? unwrapped.args.sessionId : null;
-  const target = server ?? unwrapped.server ?? (onThisMac(cmd) ? LOCAL : serverOfSession(sessionId));
+  // Windows' browser belongs to the local background server even when the
+  // session lives elsewhere: a remote server has no reader-facing tab strip,
+  // and the Mac's CEF is local in the same way.
+  const localBrowser = IS_WINDOWS && (cmd.startsWith("browser_") || cmd.startsWith("chromium_"));
+  const target = server ?? unwrapped.server ?? (onThisMac(cmd) || localBrowser ? LOCAL : serverOfSession(sessionId));
   // A new session's first send routes by its cwd; this is where its id learns
   // its server.
   if (sessionId && unwrapped.server) noteSession(sessionId, unwrapped.server);
   if (target === LOCAL) {
     if (browser) return remoteInvoke<T>(browser, cmd, unwrapped.args);
-    if (APP_COMMANDS.has(cmd) && !(IS_WINDOWS && cmd.startsWith("chromium_"))) return tauriInvoke<T>(cmd, unwrapped.args);
+    // Windows' `browser_*` commands are answered by the server that owns its
+    // headless Chromium, not by the app: the same split the Mac makes in the
+    // other direction. `chromium_*` moved there with them in the same commit.
+    if (APP_COMMANDS.has(cmd) && !localBrowser) return tauriInvoke<T>(cmd, unwrapped.args);
   }
   const answer = await tauriInvoke<unknown>("server_invoke", { server: target, cmd, args: unwrapped.args });
   return (QUALIFIED.has(cmd) ? qualifyRecord(answer, target) : answer) as T;

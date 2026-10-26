@@ -209,7 +209,7 @@ fn parse_proc_net(text: &str) -> Vec<(u64, u16)> {
         .collect()
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn parse_cwds(text: &str) -> HashMap<u32, PathBuf> {
     let mut map = HashMap::new();
     let mut pid = 0u32;
@@ -225,7 +225,7 @@ fn parse_cwds(text: &str) -> HashMap<u32, PathBuf> {
     map
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn parse_lsof(text: &str) -> Vec<(u32, String, u16)> {
     let mut rows = Vec::new();
     let (mut pid, mut name) = (0u32, String::new());
@@ -253,6 +253,7 @@ fn parse_lsof(text: &str) -> Vec<(u32, String, u16)> {
 mod tests {
     use super::*;
 
+    #[cfg(all(unix, not(target_os = "linux")))]
     #[test]
     fn parses_lsof_machine_format() {
         let text = "p123\ncnode\nn[::1]:1420\np456\ncpostgres\nn127.0.0.1:5432\nn[::1]:5432\np789\ncsshd\nn10.0.0.5:22\n";
@@ -286,6 +287,7 @@ mod tests {
         assert_eq!(cwd_of(vec![me]).get(&me).map(|p| resolved(p)), Some(resolved(&std::env::current_dir().unwrap())));
     }
 
+    #[cfg(all(unix, not(target_os = "linux")))]
     #[test]
     fn parses_cwds() {
         let map = parse_cwds("p123\nfcwd\nn/Users/me/proj\np456\nfcwd\nn/tmp\n");

@@ -179,6 +179,7 @@ fn set_muted(muted: bool) -> bool {
 /// Split from the spawn so it is testable, since the failure it guards is
 /// silent: a machine with no output device answers `missing value`, and taking
 /// that as "not muted" would leave the sound off on the way back out.
+#[cfg(target_os = "macos")]
 fn parse_muted(answer: &str) -> Option<bool> {
     answer.trim().parse().ok()
 }
@@ -681,6 +682,7 @@ impl Resampler {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn mute_state_parses() {
         assert_eq!(parse_muted("true"), Some(true));
@@ -689,6 +691,7 @@ mod tests {
 
     /// What a machine with no output device answers. Reading it as `false` is
     /// what would leave the sound off after the recording ended.
+    #[cfg(target_os = "macos")]
     #[test]
     fn an_unreadable_output_reads_as_nothing() {
         assert_eq!(parse_muted("missing value"), None);

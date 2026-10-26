@@ -49,29 +49,7 @@ function start() {
     }, 1000);
   }
   void listen<{ sessionId: string; tabs: BrowserTab[] }>("browser_tabs", (e) => {
-    const { sessionId, tabs } = e.payload;
-    // A tab arriving is what the new tab on screen was waiting for, whoever
-    // opened it — the URL bar, a link in the chat, a popup. It becomes that
-    // page; the other blank tabs stay where they are.
-    if (tabs.length > (tabsBySession.get(sessionId)?.length ?? 0)) {
-      // The blank that asked for it, where one did: the reader may have moved
-      // to another blank while Chromium was making the page.
-      const b = blanks.get(sessionId);
-      const from = submitted.get(sessionId) ?? b?.active ?? null;
-      submitted.delete(sessionId);
-      if (b && from !== null && b.ids.includes(from)) {
-        drafts.delete(`${sessionId}:blank:${from}`);
-        blanks.set(sessionId, {
-          ids: b.ids.filter((id) => id !== from),
-          active: b.active === from ? null : b.active,
-        });
-      }
-      openErrors.delete(sessionId);
-      opening.delete(sessionId);
-    }
-    tabsBySession.set(sessionId, tabs);
-    fetched.add(sessionId);
-    notify();
+    acceptTabs(e.payload.sessionId, e.payload.tabs);
   });
   void listen<{ sessionId: string; element: PickedElement | null }>("browser_pick", (e) => {
     picking.delete(e.payload.sessionId);
@@ -223,6 +201,52 @@ function fetchTabs(sessionId: string) {
     .catch(() => fetched.delete(sessionId));
 }
 
+/// A tab list from whichever surface saw it: the `browser_tabs` event on a
+/// Mac, or a Windows pane's `browser_view` poll, since the server there keeps
+/// no event stream of its own.
+function acceptTabs(sessionId: string, tabs: BrowserTab[]) {
+  const held = tabsBySession.get(sessionId);
+  if (held && JSON.stringify(held) === JSON.stringify(tabs)) return;
+  // A tab arriving is what the new tab on screen was waiting for, whoever
+  // opened it — the URL bar, a link in the chat, a popup. It becomes that
+  // page; the other blank tabs stay where they are.
+  if (tabs.length > (held?.length ?? 0)) {
+    // The blank that asked for it, where one did: the reader may have moved
+    // to another blank while Chromium was making the page.
+    const b = blanks.get(sessionId);
+    const from = submitted.get(sessionId) ?? b?.active ?? null;
+    submitted.delete(sessionId);
+    if (b && from !== null && b.ids.includes(from)) {
+      drafts.delete(`${sessionId}:blank:${from}`);
+      blanks.set(sessionId, {
+        ids: b.ids.filter((id) => id !== from),
+        active: b.active === from ? null : b.active,
+      });
+    }
+    openErrors.delete(sessionId);
+    opening.delete(sessionId);
+  }
+  tabsBySession.set(sessionId, tabs);
+  fetched.add(sessionId);
+  notify();
+}
+
+/// Feeds the shared strip from a surface that polls rather than listens. The
+/// Windows pane already reads its tabs with each screenshot, so the titlebar
+/// row and the pane cannot disagree about what is open.
+export function publishTabs(sessionId: string, tabs: BrowserTab[]) {
+  acceptTabs(sessionId, tabs);
+}
+
+/// Asks a Windows server for a session's tabs now. Linux and macOS have the
+/// event; Windows' headless Chromium answers a call, and a page opened from
+/// Chat has no pane mounted yet to poll it.
+function refreshTabs(sessionId: string) {
+  return invoke<BrowserTab[]>("browser_tabs", { sessionId })
+    .then((tabs) => acceptTabs(sessionId, tabs))
+    .catch(() => undefined);
+}
+
 /// `null` until the session's first read answers, so a caller acting on a
 /// tab *appearing* can tell one from the list just being learned.
 export function useBrowserTabs(sessionId: string | null): BrowserTab[] | null {
@@ -263,13 +287,20 @@ export function openInBrowser(sessionId: string, url: string, newTab = false, fr
     opening.set(sessionId, { url, blank: fromBlank ?? blanks.get(sessionId)?.active ?? null });
   }
   notify();
-  return invoke("browser_open", { sessionId, url, newTab }).catch((e: unknown) => {
-    if (submitted.get(sessionId) === fromBlank) submitted.delete(sessionId);
-    if (opening.get(sessionId)?.url === url) opening.delete(sessionId);
-    openErrors.set(sessionId, String(e));
-    notify();
-    throw e;
-  });
+  return invoke("browser_open", { sessionId, url, newTab })
+    // Windows' pane may not be mounted — a link from Chat opens a page the
+    // titlebar has to learn about before it can follow to it.
+    .then(async (answer) => {
+      if (IS_WINDOWS) await refreshTabs(sessionId);
+      return answer;
+    })
+    .catch((e: unknown) => {
+      if (submitted.get(sessionId) === fromBlank) submitted.delete(sessionId);
+      if (opening.get(sessionId)?.url === url) opening.delete(sessionId);
+      openErrors.set(sessionId, String(e));
+      notify();
+      throw e;
+    });
 }
 
 /// Marks the tab active here at once, ahead of the event saying so, or a

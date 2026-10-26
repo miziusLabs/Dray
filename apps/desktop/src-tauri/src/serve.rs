@@ -297,7 +297,7 @@ async fn shut_down(code: i32) -> ! {
         unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
         #[cfg(windows)]
         {
-            let _ = std::process::Command::new("taskkill")
+            let _ = crate::binpath::std_command("taskkill")
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
                 .output();
         }
@@ -1220,10 +1220,31 @@ async fn dispatch_mac(cmd: &str, args: Value, sink: Sink) -> Result<Value, Value
 /// Mac-only modules are not compiled here.
 async fn dispatch(cmd: &str, args: Value, sink: Sink) -> Result<Value, Value> {
     #[cfg(windows)]
-    if matches!(cmd, "browser_view" | "browser_input" | "chromium_status" | "chromium_download" | "chromium_remove") {
+    if matches!(
+        cmd,
+        "browser_view"
+            | "browser_input"
+            | "browser_open"
+            | "browser_tabs"
+            | "browser_activate"
+            | "browser_close"
+            | "browser_move"
+            | "browser_nav"
+            | "browser_history"
+            | "chromium_status"
+            | "chromium_download"
+            | "chromium_remove"
+    ) {
         return table! { cmd, args;
             browser_view(session_id: String) => crate::headless::browser_view(session_id).await;
             browser_input(session_id: String, action: Value) => crate::headless::browser_input(session_id, action).await;
+            browser_open(session_id: String, url: String, new_tab: bool) => crate::headless::browser_open(session_id, url, new_tab).await;
+            browser_tabs(session_id: String) => ok(crate::headless::browser_tabs(session_id));
+            browser_activate(session_id: String, id: i32) => crate::headless::browser_activate(session_id, id).await;
+            browser_close(session_id: String, id: i32) => crate::headless::browser_close(session_id, id).await;
+            browser_move(session_id: String, id: i32, to: usize) => ok(crate::headless::browser_move(session_id, id, to));
+            browser_nav(session_id: String, action: String) => crate::headless::browser_nav(session_id, action).await;
+            browser_history(session_id: String) => ok(crate::headless::browser_history(session_id));
             chromium_status() => ok(crate::headless::chromium_status().await);
             chromium_download() => crate::headless::chromium_download().await;
             chromium_remove() => crate::headless::chromium_remove().await;
@@ -1598,8 +1619,8 @@ mod tests {
     #[tokio::test]
     async fn unknown_and_malformed_commands_answer_err() {
         let sink = Sink::new(|_, _| {});
-        let err = dispatch("browser_open", Value::Null, sink.clone()).await.unwrap_err();
-        assert_eq!(err, json!("unknown command browser_open"));
+        let err = dispatch("no_such_command", Value::Null, sink.clone()).await.unwrap_err();
+        assert_eq!(err, json!("unknown command no_such_command"));
         let err = dispatch("stop_task", json!({ "sessionId": 1 }), sink).await.unwrap_err();
         assert!(err.as_str().unwrap().starts_with("invalid arguments to stop_task"));
     }
