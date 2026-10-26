@@ -37,6 +37,9 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+    # A cold build is ~10 minutes and the browser test downloads Chromium. A
+    # hung test would otherwise hold the runner for the six-hour default.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 

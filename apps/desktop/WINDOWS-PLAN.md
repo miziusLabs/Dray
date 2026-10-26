@@ -116,6 +116,12 @@ already taken into an error instead of a second server.
   `browser_history`, plus the existing `browser_view`, `browser_input` and
   `chromium_*`. Tabs are serialised in the frontend's `BrowserTab` shape.
   Right and middle mouse buttons are forwarded through CDP.
+- [history.rs](src/browser/history.rs) is shared with CEF now: each browser
+  passes its own root, and the headless one files an address as the tab reports
+  it, so the URL bar's suggestions and the recent list fill on Windows too.
+  `browser_devtools` and `browser_pick` answer "not available in the Windows
+  browser" rather than as unknown commands; there is no view to hang DevTools
+  beside and no overlay to pick through.
 - [WindowsBrowserPane.tsx](src/components/browser/WindowsBrowserPane.tsx) draws
   the viewport, forwards clicks, wheel and keys, and publishes each polled tab
   list. Its duplicate tab row was removed: the titlebar's `ViewTabs` strip owns
@@ -180,6 +186,13 @@ already taken into an error instead of a second server.
 - The desktop is built for `x86_64-pc-windows-msvc`; GNU is not supported. The
   README records the Visual Studio Build Tools, CMake and WebView2
   requirements.
+- [build.rs](src-tauri/build.rs) links `windows/app.manifest` into *every*
+  linkable target. Tauri's own resource step passes the manifest through
+  `rustc-link-arg-bins`, so `cargo test` built a harness without Common
+  Controls v6 and the process died before `main` with
+  `STATUS_ENTRYPOINT_NOT_FOUND` (0xc0000139). The `.rc` manifest is switched off
+  in exchange, so no target carries two. `cargo:rustc-link-arg-tests` is not an
+  answer here: it covers `tests/`, not the library's own unit-test harness.
 - [tauri.windows.conf.json](src-tauri/tauri.windows.conf.json) overrides the
   window to be opaque and decorated, bundles NSIS with
   `installMode: currentUser` (no elevation), and runs
@@ -259,7 +272,9 @@ real file and links in prose, not repository symlinks.
   upgrade and `PATH` behaviour with stubbed network calls.
 - `cargo test` in `crates/dray-proto` and `apps/cli`.
 - `cargo test --locked` in `apps/desktop/src-tauri` — all desktop unit tests on
-  MSVC, including the Windows path and worktree cases.
+  MSVC, including the Windows path and worktree cases. This is the step the
+  manifest in [build.rs](src-tauri/build.rs) exists for: without it the harness
+  could not start.
 - `cargo check --locked --no-default-features --features serve --bin dray-serve`
   — the headless build used by `dray-serve` and by servers without the app.
 - `cargo test --locked --no-default-features --features serve --lib
@@ -342,13 +357,9 @@ Run this on a clean Windows 11 user account before merging or tagging.
   emulation, and the same emulated x64 `chrome-headless-shell` works, but there
   is no native build, no ARM64 Chromium download, and no ARM64 CI leg.
 - **Browser DevTools and element pick.** The Windows pane has no DevTools
-  button and no pick-for-chat affordance. If they are wanted, they need CDP
-  implementations (`Overlay`/`DOM` for picking) rather than CEF's; until then
-  the commands should answer a clear "not available on Windows" instead of
-  `unknown command`.
-- **Browser history.** `browser_history` returns an empty list; the headless
-  profile is per-session and discarded. A visit log in the server would change
-  that, and could share the Mac's `history` store shape.
+  button and no pick-for-chat affordance, and the commands say so. If they are
+  wanted, they need CDP implementations (`Overlay`/`DOM` for picking) rather
+  than CEF's.
 - **Local server discovery.** `cwd_of` on Windows can only read Dray's own
   working directory, so a dev server started by hand in the checkout is not
   listed — only descendants of the agent are. Reading another process's PEB, or
