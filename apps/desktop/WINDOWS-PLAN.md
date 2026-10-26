@@ -255,6 +255,15 @@ kill would be ceremony around a solved problem.
 updater's installer is run by Tauri with its own flags. A console flash on
 session stop or browser launch is a bug, not cosmetic.
 
+**Windows is a reader, not a server.** Dray runs sessions on Linux and macOS
+servers; a Windows machine connects to one. Windows' OpenSSH hands the login to
+`cmd.exe`, which has no `sh`, so every remote script here would need a
+PowerShell transport — plus `install.ps1` for `install.sh`, `dray server start`
+for `dray service start`, and cmd.exe quoting throughout — and none of it can be
+exercised on the runners. `ssh::require_posix` probes the login before `survey`
+and `install` do anything else, so the dialog says so rather than reporting
+`'sh' is not recognized`. Revisit as its own piece of work.
+
 **Guidance files are files.** `AGENTS.md` and `apps/desktop/AGENTS.md` were
 symlinks in the first commit. A Windows checkout cannot create a symlink
 without Developer Mode or elevation, so `actions/checkout` failed before any
@@ -347,15 +356,6 @@ Run this on a clean Windows 11 user account before merging or tagging.
   nothing installs one build over another in CI. Add a Windows job that
   installs `/S`, records a sentinel in `%USERPROFILE%\.dray`, installs the next
   `/S`, and checks both the sentinel and that no `Dray.exe` is left running.
-- **Remote Windows servers — decided: local-only.** Dray runs sessions on
-  Linux and macOS servers. `ssh::require_posix` probes the login before
-  `survey` and `install` do anything else, so a Windows host answers
-  "a Windows machine can connect to one, but cannot be one" instead of cmd's
-  `'sh' is not recognized`. Making Windows a server target is a bigger change
-  than it looks — PowerShell transport for every remote script, `install.ps1`
-  in place of `install.sh`, `dray server start` in place of `dray service
-  start`, and the cmd.exe quoting that goes with them — and none of it can be
-  exercised on the runners. Revisit it as its own piece of work.
 
 ### Follow-ups
 
