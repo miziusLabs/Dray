@@ -641,6 +641,7 @@ fn setup_tools() -> Vec<(&'static str, &'static str, &'static str)> {
 /// Looks at a server with no Dray on it: which tools it has, its package
 /// manager, and whether this login can install git.
 pub async fn survey(target: &Target) -> Result<Survey, Failure> {
+    require_posix(target).await?;
     let tools = setup_tools();
     let bins: Vec<_> = tools.iter().map(|t| t.2).collect();
     let managers: Vec<_> = dray_proto::GIT_INSTALLS.iter().map(|g| g.0).collect();
@@ -674,6 +675,7 @@ pub async fn survey(target: &Target) -> Result<Survey, Failure> {
 /// to ask in, and `dray setup --install` with the answers instead. Each line of
 /// output goes to `line`.
 pub async fn install(target: &Target, picks: &[String], line: impl FnMut(&str)) -> Result<(), Failure> {
+    require_posix(target).await?;
     let tools = setup_tools();
     // These reach a shell.
     if let Some(bad) = picks.iter().find(|p| !tools.iter().any(|t| t.0 == p.as_str())) {
@@ -691,6 +693,41 @@ pub async fn install(target: &Target, picks: &[String], line: impl FnMut(&str)) 
     } else {
         Err(Failure::new(format!("The install on {} did not finish.", target.host()), None, false))
     }
+}
+
+/// Refuses a login that cannot run a POSIX shell, with the reason said out loud.
+///
+/// Windows' OpenSSH hands the session to `cmd.exe`, which has no `sh`, and
+/// every remote script here is a POSIX one — so a Windows host reads as a
+/// broken server instead of what it is. The probe costs one login, which only
+/// survey and install pay, and it is the exit status that decides: `255` is
+/// ssh's own refusal and keeps the useful host-key or key-permission answer,
+/// anything else after a successful login is a shell that did not echo the
+/// marker.
+async fn require_posix(target: &Target) -> Result<(), Failure> {
+    let probe = crate::binpath::command(SSH)
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .args(target.args())
+        .arg("sh -c 'echo DRAY-SSH posix'")
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| Failure::new(format!("could not run ssh: {e}"), None, true))?;
+    if String::from_utf8_lossy(&probe.stdout).contains("DRAY-SSH posix") {
+        return Ok(());
+    }
+    if probe.status.code() == Some(255) {
+        return Err(classify(&String::from_utf8_lossy(&probe.stderr), target).await);
+    }
+    Err(Failure::new(
+        format!(
+            "{} is a Windows machine. Dray runs sessions on Linux and macOS servers; a Windows \
+             machine can connect to one, but cannot be one.",
+            target.host()
+        ),
+        None,
+        true,
+    ))
 }
 
 /// Runs `script` over a login with no forward and answers whether it exited 0.

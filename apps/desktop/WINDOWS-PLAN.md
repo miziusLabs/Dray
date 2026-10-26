@@ -336,20 +336,26 @@ Run this on a clean Windows 11 user account before merging or tagging.
 
 ### Should be closed before calling Windows at parity
 
-- **Toast identity.** The toast carries `com.yogesh.dray`, but an unpackaged
+- **Toast identity.** The toast carries `com.yogesh.dray`, and an unpackaged
   Win32 app is normally only delivered if a Start-menu shortcut carries the
-  same AUMID. The NSIS template does not set it. Verify on the smoke machine;
-  if banners do not arrive, set the shortcut's `System.AppUserModel.ID` in the
-  installer hook or register the AUMID at first launch.
+  same AUMID. Tauri's NSIS template already does that
+  (`SetLnkAppUserModelId` on the Start-menu and desktop shortcuts), so the
+  installed app should be fine and a dev build should not be. Confirm on the
+  smoke machine; a per-user shortcut the reader declined to create is the one
+  case left, and registering the AUMID at first launch would cover it.
 - **Installer upgrade.** The release job builds and signs the NSIS installer but
   nothing installs one build over another in CI. Add a Windows job that
   installs `/S`, records a sentinel in `%USERPROFILE%\.dray`, installs the next
   `/S`, and checks both the sentinel and that no `Dray.exe` is left running.
-- **Remote Windows servers.** The app's "install on server" path assumes a
-  POSIX login and runs `install.sh`; Windows OpenSSH defaults to `cmd.exe`.
-  Until that path learns PowerShell, a Windows server has to be prepared by
-  hand (`dray server start`) and added by address. Decide whether Windows is a
-  supported server target for remote mode or document it as local-only.
+- **Remote Windows servers — decided: local-only.** Dray runs sessions on
+  Linux and macOS servers. `ssh::require_posix` probes the login before
+  `survey` and `install` do anything else, so a Windows host answers
+  "a Windows machine can connect to one, but cannot be one" instead of cmd's
+  `'sh' is not recognized`. Making Windows a server target is a bigger change
+  than it looks — PowerShell transport for every remote script, `install.ps1`
+  in place of `install.sh`, `dray server start` in place of `dray service
+  start`, and the cmd.exe quoting that goes with them — and none of it can be
+  exercised on the runners. Revisit it as its own piece of work.
 
 ### Follow-ups
 
