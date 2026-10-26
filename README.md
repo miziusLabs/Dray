@@ -31,7 +31,9 @@ Want to sponsor Dray? [patreon.com/yogesharc](https://patreon.com/yogesharc)
 
 You need Node with pnpm and a Rust toolchain. Some native dependencies also use CMake.
 
-For a Windows desktop build, use the `x86_64-pc-windows-msvc` Rust target. Install Visual Studio Build Tools with the Desktop development with C++ workload, CMake, and the Microsoft Edge WebView2 Runtime.
+For a Windows desktop build, use the `x86_64-pc-windows-msvc` Rust target. Install Visual Studio Build Tools with the Desktop development with C++ workload, CMake, and the Microsoft Edge WebView2 Runtime. A `windows-gnu` toolchain is not supported.
+
+If the checkout's path contains a space, point `CARGO_TARGET_DIR` at a directory without one: the resource compiler is invoked with that path unquoted, so `cargo check` fails in `windres` before your code is ever read.
 
 ```bash
 pnpm install
