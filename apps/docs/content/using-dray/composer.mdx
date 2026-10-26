@@ -79,7 +79,7 @@ The permission mode is the button furthest right among the pickers, for example 
 | Mode | Meaning |
 |---|---|
 | **Ask every time** | The agent asks before each action that needs permission. |
-| **Auto** | The default. The agent runs routine work without asking. On Claude Code this is its own auto mode: a built-in safety check approves routine actions and blocks risky ones, so cards are rare. On Codex it asks only to go beyond the project folder. On Grok it never raises a card; a blocked action fails with its reason instead. |
+| **Auto** | The default. The agent runs routine work without asking. On Claude Code this is its own auto mode: a built-in safety check approves routine actions and blocks risky ones, so cards are rare. On Grok it never raises a card; a blocked action fails with its reason instead. |
 | **Plan** | The agent plans without changing anything. |
 | **Bypass permissions** | Shown in red. Every permission check is off. |
 
@@ -88,7 +88,7 @@ Each agent offers only the modes it can honour:
 | Agent | Modes offered |
 |---|---|
 | Claude Code | All four. |
-| Codex | Ask every time, Auto, Bypass permissions. |
+| Codex | No picker. Codex always runs with Full access. |
 | Grok | Ask every time, Auto, Bypass permissions. Grok has a plan mode of its own; see [Permissions](/using-dray/permissions#approve-a-plan). |
 | fx | Ask every time, Auto. |
 | pi | No picker. pi has no permission system of its own; an extension you install decides. |
@@ -102,7 +102,7 @@ Some agents cannot take a change in the middle of a turn. There, the control dim
 | Agent | Locked while a turn runs |
 |---|---|
 | Claude Code | Effort |
-| Codex | Model, effort, permission mode, fast mode |
+| Codex | Model, effort, fast mode |
 | Grok | Permission mode |
 | fx | Provider. Model, effort and permission mode stay open and apply to the next turn. |
 | pi | Nothing |

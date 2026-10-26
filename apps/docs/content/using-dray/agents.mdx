@@ -65,13 +65,7 @@ Limits:
 OpenAI's agent. Dray asks Codex which models it has, so a model OpenAI ships appears in the picker without a Dray update. A new session starts on 6 Sol, or 6 Astra if your Codex does not list 6 Sol.
 
 - **Effort.** Max is the deepest reasoning. **Ultra**, on the models that offer it, is the deepest reasoning plus Codex handing parts of the task to helpers on its own. Every model starts on Medium.
-- **Permission modes.** Codex has two settings where most agents have one: when it asks, and what its commands may touch. Commands run in a sandbox the operating system enforces, so a write outside the allowed area fails whether or not anyone was asked.
-
-  | Dray | Codex | What happens |
-  |---|---|---|
-  | **Ask every time** | Ask for approval | Asks before acting. Commands can write in the project. |
-  | **Auto** | Approve for me | Works freely in the project. Asks only to step outside it. The default. |
-  | **Bypass permissions** | Full access | Never asks. No sandbox. |
+- **Permissions.** Codex runs with Full access. It does not ask for approval, and its commands run without a sandbox. Dray does not offer a permission control for Codex.
 
 - **Skills.** `/` lists your Codex skills. Codex's own menu commands, like `/model` or `/new`, are not listed.
 - **MCP servers** come from Codex's own configuration. Dray adds none.

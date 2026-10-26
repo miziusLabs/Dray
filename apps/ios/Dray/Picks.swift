@@ -59,7 +59,7 @@ enum Picks {
 
     /// `HONOURED`: absent means every stance applies.
     private static let honoured: [String: [String]] = [
-        "codex": ["bypassPermissions", "manual", "auto"],
+        "codex": ["bypassPermissions"],
         "pi": [],
         "fx": ["manual", "auto"],
         "grok": ["manual", "auto", "bypassPermissions"],
