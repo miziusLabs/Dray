@@ -19,6 +19,20 @@ reads:
   `![](changelog/servers.mp4)`. The file lives in `apps/web/public/changelog/`
   and is served by drayhq.com.
 
+## 0.29.8 · 2026-10-26
+
+### Improved
+
+- **Reopen a closed tab with ⌘⇧T.** It works for browser pages, files and
+  the Diff view.
+- Settings no longer has an analytics switch, and a choice saved there is
+  no longer read. Set `DRAY_NO_ANALYTICS` before starting Dray to turn
+  usage reporting off.
+
+### Fixed
+
+- The Island shows over fullscreen apps again.
+
 ## 0.29.7 · 2026-10-23
 
 ### Fixed
