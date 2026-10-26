@@ -1337,11 +1337,9 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* No right padding: the scrollbar gutter is the right-hand spacing. The
-          rows balance the track's extra width themselves with `pr-0.5`. */}
       <div
         ref={listRef}
-        className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 pl-2 pr-0"
+        className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-px overflow-y-auto pb-3 px-2"
         // Nearing the bottom opens the settled window further. Bound to the
         // container that already scrolls rather than to a sentinel row and an
         // observer, which is one more thing to mount per step.
