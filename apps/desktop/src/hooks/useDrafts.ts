@@ -1,7 +1,7 @@
 import { invoke, listen } from "@/lib/transport";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ApprovalPolicy, Effort, Harness, ModelId } from "@/types/events";
+import type { ApprovalPolicy, Attachment, Effort, Harness, ModelId } from "@/types/events";
 
 /// A task written and saved but not started: the prompt plus the composer picks
 /// it will start with. Stored whole in `~/.dray/drafts.json`, which Rust keeps
@@ -11,6 +11,7 @@ import type { ApprovalPolicy, Effort, Harness, ModelId } from "@/types/events";
 export type Draft = {
   id: string;
   prompt: string;
+  attachmentPaths?: string[];
   projectPath: string;
   harness: Harness;
   model: ModelId;
@@ -29,9 +30,12 @@ export type Draft = {
 /// reader was typing there. Never a session id, which is a bare uuid.
 export const draftKey = (id: string) => `draft:${id}`;
 
-/// What a draft's row says: its first line, or a word for none.
+/// What a draft's row says: its first line, or what it holds when there is no text.
 export function draftTitle(draft: Draft): string {
-  return draft.prompt.trim().split("\n")[0].trim() || "Empty draft";
+  const prompt = draft.prompt.trim().split("\n")[0].trim();
+  if (prompt) return prompt;
+  const count = draft.attachmentPaths?.length ?? 0;
+  return count ? `${count} attachment${count === 1 ? "" : "s"}` : "Empty draft";
 }
 
 /// How long typing settles before an open draft's text is written.
@@ -61,19 +65,39 @@ export function useDrafts(onError: (e: unknown) => void) {
   }, []);
 
   /// Answers whether the write landed; a failure is reported here already.
-  const enqueue = useCallback((command: string, args: Record<string, unknown>) => {
-    const done = queue.current.then(() =>
-      invoke<void>(command, args).then(
-        () => true,
-        (e) => {
-          errorRef.current(e);
-          return false;
-        },
-      ),
+  const run = useCallback(<T,>(work: () => Promise<T>) => {
+    const done = queue.current.then(work);
+    queue.current = done.then(
+      () => {},
+      () => {},
     );
-    queue.current = done.then(() => {});
     return done;
   }, []);
+
+  const enqueue = useCallback(
+    (command: string, args: Record<string, unknown>) =>
+      run(() =>
+        invoke<void>(command, args).then(
+          () => true,
+          (e) => {
+            errorRef.current(e);
+            return false;
+          },
+        ),
+      ),
+    [run],
+  );
+
+  const enqueueValue = useCallback(
+    <T,>(command: string, args: Record<string, unknown>) =>
+      run(() =>
+        invoke<T>(command, args).catch((e) => {
+          errorRef.current(e);
+          return null;
+        }),
+      ),
+    [run],
+  );
 
   const cancelPending = (id: string) => {
     clearTimeout(pending.current.get(id));
@@ -125,13 +149,22 @@ export function useDrafts(onError: (e: unknown) => void) {
   /// caller clears the composer on that answer, so a failed write leaves the
   /// text where the reader typed it.
   const save = useCallback(
-    async (draft: Draft) => {
+    async (draft: Draft, sourcePaths: string[] = []) => {
       cancelPending(draft.id);
-      if (!(await enqueue("save_draft", { draft }))) return false;
-      publish([...ref.current.filter((d) => d.id !== draft.id), draft]);
+      const attachments = await enqueueValue<Attachment[]>("save_draft_attachments", {
+        id: draft.id,
+        paths: sourcePaths,
+      });
+      if (!attachments) return false;
+      const saved = { ...draft, attachmentPaths: attachments.map((a) => a.path) };
+      if (!(await enqueue("save_draft", { draft: saved }))) {
+        await enqueue("delete_draft_attachments", { id: draft.id });
+        return false;
+      }
+      publish([...ref.current.filter((d) => d.id !== draft.id), saved]);
       return true;
     },
-    [publish, enqueue],
+    [publish, enqueue, enqueueValue],
   );
 
   const update = useCallback(
@@ -158,6 +191,21 @@ export function useDrafts(onError: (e: unknown) => void) {
     [enqueue],
   );
 
+  const updateAttachments = useCallback(
+    async (id: string, paths: string[]) => {
+      const attachments = await enqueueValue<Attachment[]>("save_draft_attachments", { id, paths });
+      const current = ref.current.find((d) => d.id === id);
+      if (!attachments || !current) return null;
+      const saved = { ...current, attachmentPaths: attachments.map((a) => a.path) };
+      ref.current = ref.current.map((d) => (d.id === id ? saved : d));
+      cancelPending(id);
+      if (!(await enqueue("save_draft", { draft: saved }))) return null;
+      setDrafts(ref.current);
+      return attachments;
+    },
+    [enqueue, enqueueValue],
+  );
+
   const remove = useCallback(
     (id: string) => {
       cancelPending(id);
@@ -175,10 +223,11 @@ export function useDrafts(onError: (e: unknown) => void) {
   /// clears before anyone knows whether the session started.
   const discardIfEmpty = useCallback(
     (id: string) => {
-      if (get(id)?.prompt.trim() === "") remove(id);
+      const draft = get(id);
+      if (draft?.prompt.trim() === "" && !draft.attachmentPaths?.length) remove(id);
     },
     [get, remove],
   );
 
-  return { drafts, save, update, remove, get, discardIfEmpty };
+  return { drafts, save, update, updateAttachments, remove, get, discardIfEmpty };
 }

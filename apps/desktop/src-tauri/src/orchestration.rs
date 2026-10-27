@@ -805,6 +805,7 @@ async fn create_draft(create: CreateDraft, app: &Sink) -> Result<Response> {
         fast: resolve_fast(create.fast, parent.as_ref(), harness),
         use_worktree: true,
         base: create.base,
+        attachment_paths: Vec::new(),
         created: crate::events::now_rfc3339(),
     };
     drafts::save_draft(serde_json::to_value(&draft)?).await?;
@@ -838,6 +839,7 @@ async fn scope_of(list: &ListSessions) -> Result<Option<String>> {
 async fn remove_draft(id: &str, app: &Sink) -> Result<Response> {
     let draft = find_draft(id).await?;
     drafts::take(id).await?.with_context(|| format!("no draft {id}"))?;
+    drafts::discard_attachments(id).await;
     app.emit(DRAFTS_CHANGED, ()).ok();
     Ok(Response::Draft { draft: summarize_draft(draft) })
 }
@@ -865,7 +867,13 @@ async fn start_draft(start: StartDraft, app: &Sink) -> Result<Response> {
         .with_context(|| format!("no draft {}", draft.id))?;
     app.emit(DRAFTS_CHANGED, ()).ok();
     let started = start_session(&draft, start.parent_session_id.as_deref(), app).await;
-    let Err(error) = started else { return started };
+    let error = match started {
+        Ok(response) => {
+            drafts::discard_attachments(&draft.id).await;
+            return Ok(response);
+        }
+        Err(error) => error,
+    };
     // The prompt rides the error where the draft cannot go back, so the task
     // survives in the caller's output even with the file unwritable.
     if let Err(lost) = drafts::restore(held).await {
@@ -894,7 +902,7 @@ async fn start_session(
         .send_msg(
             &session_id,
             &draft.prompt,
-            &[],
+            &draft.attachment_paths,
             &[],
             draft.harness,
             draft.model.clone(),

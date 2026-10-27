@@ -51,6 +51,8 @@ pub struct StoredDraft {
     /// branch or ref, resolved when the draft starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachment_paths: Vec<String>,
     pub created: String,
 }
 
@@ -99,11 +101,36 @@ pub async fn save_draft(draft: Value) -> Result<(), Fail> {
     Ok(write_drafts(&drafts).await?)
 }
 
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub async fn save_draft_attachments(
+    id: String,
+    paths: Vec<String>,
+) -> Result<Vec<crate::attachments::Attachment>, Fail> {
+    let _guard = DRAFTS_LOCK.lock().await;
+    if taken(&id) {
+        return Err(anyhow!("draft {id} was already taken").into());
+    }
+    Ok(crate::attachments::copy_draft_attachments(&id, &paths).await?)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub async fn delete_draft_attachments(id: String) -> Result<(), Fail> {
+    let _guard = DRAFTS_LOCK.lock().await;
+    Ok(crate::attachments::delete_draft_attachments(&id).await?)
+}
+
+pub async fn discard_attachments(id: &str) {
+    if let Err(error) = delete_draft_attachments(id.to_owned()).await {
+        eprintln!("draft attachments not deleted: {error:#}");
+    }
+}
+
 /// Removes a draft. An unknown id is not an error: the send that turns a
 /// draft into a session and the reader's own delete can both reach here.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn delete_draft(id: String) -> Result<(), Fail> {
     take(&id).await?;
+    discard_attachments(&id).await;
     Ok(())
 }
 

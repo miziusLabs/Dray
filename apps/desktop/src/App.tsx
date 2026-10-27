@@ -430,18 +430,21 @@ function App() {
     const attachments = readAttachments(trayKey);
     if (!draftProject || (!prompt.trim() && !attachments.length)) return;
     const id = crypto.randomUUID();
-    const saved = await saveDraft({
-      id,
-      prompt,
-      projectPath: draftProject,
-      harness,
-      model: modelId,
-      effort,
-      permissionMode,
-      fast,
-      useWorktree: source ? !!source.worktreeName || source.worktreeRemoved : useWorktree,
-      created: new Date().toISOString(),
-    }, attachments.map((attachment) => attachment.path));
+    const saved = await saveDraft(
+      {
+        id,
+        prompt,
+        projectPath: draftProject,
+        harness,
+        model: modelId,
+        effort,
+        permissionMode,
+        fast,
+        useWorktree: source ? !!source.worktreeName || source.worktreeRemoved : useWorktree,
+        created: new Date().toISOString(),
+      },
+      attachments.map((attachment) => attachment.path),
+    );
     if (!saved) return;
     // Only what was saved leaves: text typed while the write was out stays.
     const now = readDraft(key);
@@ -1559,6 +1562,29 @@ function App() {
   // resolves against the same directory for the same reason, and off the same
   // expression so the two can't answer for different trees.
   const composerCwd = selectedSession?.cwd ?? projectPath;
+  const composerTrayKey = attachmentKey(composerKey, composerCwd);
+  const composerAttachments = useAttachments(composerTrayKey);
+
+  useEffect(() => {
+    if (!openDraftId) return;
+    const draft = getDraft(openDraftId);
+    if (!draft) return;
+    const paths = composerAttachments.map((attachment) => attachment.path);
+    const savedPaths = draft.attachmentPaths ?? [];
+    if (
+      paths.length === savedPaths.length &&
+      paths.every((path, index) => path === savedPaths[index])
+    ) {
+      return;
+    }
+
+    void updateDraftAttachments(openDraftId, paths).then((attachments) => {
+      if (!attachments) return;
+      replaceAttachments(draftKey(openDraftId), paths, attachments);
+      if (openDraftRef.current !== openDraftId) discardIfEmpty(openDraftId);
+    });
+  }, [openDraftId, composerAttachments, getDraft, updateDraftAttachments, discardIfEmpty]);
+
   // What the `&` picker offers: the space's sessions in the repo this composer
   // is aimed at. The **space** is the same outer scope `visibleSessions` takes,
   // and for the same reason — a session another space is running must not be
@@ -2058,7 +2084,9 @@ function App() {
     let attachments: Attachment[];
     try {
       attachments = draft.attachmentPaths?.length
-        ? await invoke<Attachment[]>("read_attachments", { paths: draft.attachmentPaths })
+        ? await invoke<Attachment[]>("read_attachments", {
+            paths: draft.attachmentPaths,
+          })
         : [];
     } catch (e) {
       setError(String(e));

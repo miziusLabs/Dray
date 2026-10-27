@@ -141,6 +141,64 @@ pub async fn read_attachments(paths: Vec<String>) -> Vec<Attachment> {
     out
 }
 
+pub async fn copy_draft_attachments(id: &str, paths: &[String]) -> Result<Vec<Attachment>> {
+    let id = Uuid::parse_str(id).context("invalid draft id")?.to_string();
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let draft_dir = get_home_app_dir().await?.join("draft-attachments").join(id);
+    let mut batch = None;
+    let result = async {
+        let mut copied = Vec::with_capacity(paths.len());
+        for (index, path) in paths.iter().enumerate() {
+            if Path::new(path).starts_with(&draft_dir) {
+                copied.push(describe(path).await?);
+                continue;
+            }
+            let name = Path::new(path).file_name().context("not a file path")?;
+            let batch_dir = match batch.clone() {
+                Some(path) => path,
+                None => {
+                    let path = draft_dir.join(Uuid::new_v4().to_string());
+                    batch = Some(path.clone());
+                    path
+                }
+            };
+            let directory = batch_dir.join(index.to_string());
+            fs::create_dir_all(&directory).await?;
+            let target = directory.join(name);
+            fs::copy(path, &target)
+                .await
+                .with_context(|| format!("could not copy attachment {path}"))?;
+            let stored_path = target.to_string_lossy().into_owned();
+            copied.push(describe(&stored_path).await?);
+        }
+        Ok(copied)
+    }
+    .await;
+
+    if result.is_err() {
+        if let Some(batch) = batch {
+            let _ = fs::remove_dir_all(batch).await;
+        }
+    }
+    result
+}
+
+pub async fn delete_draft_attachments(id: &str) -> Result<()> {
+    let id = Uuid::parse_str(id).context("invalid draft id")?.to_string();
+    let path = get_home_app_dir()
+        .await?
+        .join("draft-attachments")
+        .join(id);
+    match fs::remove_dir_all(path).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).context("failed to delete draft attachments"),
+    }
+}
+
 /// What the clipboard holds, as far as the composer's paste is concerned.
 #[derive(Debug, PartialEq)]
 // Built from the macOS pasteboard alone; elsewhere a paste reads as nothing.
@@ -284,6 +342,26 @@ async fn attachments_dir(session_id: &str) -> Result<PathBuf> {
     let path = attachments_path(session_id).await?;
     fs::create_dir_all(&path).await?;
     Ok(path)
+}
+
+async fn retain_draft_file(session_id: &str, path: &str) -> Result<Option<String>> {
+    let source = Path::new(path);
+    let root = get_home_app_dir().await?.join("draft-attachments");
+    if !source.starts_with(&root) {
+        return Ok(None);
+    }
+
+    let name = source.file_name().context("not a file path")?;
+    let target_dir = attachments_dir(session_id)
+        .await?
+        .join("files")
+        .join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&target_dir).await?;
+    let target = target_dir.join(name);
+    fs::copy(source, &target)
+        .await
+        .with_context(|| format!("could not retain draft attachment {path}"))?;
+    Ok(Some(target.to_string_lossy().into_owned()))
 }
 
 /// Removes every entry of `root` older than [`PASTE_RETAIN`].
@@ -453,8 +531,8 @@ fn parse_data_url(url: &str) -> Option<(&str, &str)> {
 /// persisting the base64 on the event, would put megabytes into an append-only
 /// log that is read whole every time the session is opened.
 ///
-/// A file is *not* copied: its mention has to resolve for the model, and the
-/// point of the path is that it names the real file in the real tree.
+/// A picked file is not copied. A file held by a draft moves into the session's
+/// own directory first, since deleting the draft must not break a running task.
 /// `harness` decides how a non-image attachment is named, and the difference is
 /// whether the CLI has a parser for it. Claude Code expands `@/abs/path` into
 /// the file's contents before the model turn, with no tool call on the wire —
@@ -484,6 +562,9 @@ pub async fn prepare(
         };
 
         if !attachment.is_image {
+            let path = retain_draft_file(session_id, path)
+                .await?
+                .unwrap_or_else(|| path.clone());
             mentions.push(if harness.caps().expands_at_mentions {
                 format!("@{path}")
             } else {
