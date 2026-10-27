@@ -72,7 +72,7 @@ export default function ProjectSelector({
           className="gap-1.5 px-1.5 text-ui text-muted-foreground"
         >
           <Folder className="size-3.5 shrink-0" />
-          Select project
+          Add project
         </Button>
         {dialog}
       </>
@@ -145,7 +145,7 @@ export default function ProjectSelector({
   
           <DropdownMenuItem onSelect={onAttach} className="text-ui">
             <Folder />
-            Select project…
+            Add project…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
