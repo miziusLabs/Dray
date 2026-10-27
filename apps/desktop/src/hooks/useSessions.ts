@@ -3062,6 +3062,13 @@ const contextUsage: { used: number; max: number } | null = (() => {
         used = p.postTokens;
         usedSettled = true;
       }
+    } else if (p.type === "usage_update" && p.contextWindow) {
+      const w = p.contextWindow;
+      if (!usedSettled) {
+        used = w.usedTokens;
+        usedSettled = true;
+      }
+      max ??= w.maxTokens;
     } else if (p.type === "turn_completed" && p.usage?.contextWindow) {
       const w = p.usage.contextWindow;
       if (!usedSettled) {
