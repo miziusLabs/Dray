@@ -73,7 +73,6 @@ export const SHORTCUTS = [
   { id: "search", label: "Search sessions", group: "Sessions", chord: k("f") },
   { id: "tab.close", label: "Close tab or pane", group: "Sessions", chord: k("w") },
 
-  { id: "sidebar.toggle", label: "Toggle sidebar", group: "Panels and views", chord: k("b") },
   { id: "panel.toggle", label: "Toggle right panel", group: "Panels and views", chord: k("e") },
   { id: "panel.side", label: "Move panel to the other side", group: "Panels and views", chord: k("e", { alt: true }) },
   // The only way to the crew. It has no button anywhere, deliberately — the

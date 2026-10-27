@@ -12,7 +12,7 @@ export function DictateCard() {
         mode="Auto"
         toolbar={false}
         radius="rounded-lg"
-        value={<span className={s.words}>Persist the sidebar width, and collapse it on ⌘B.</span>}
+        value={<span className={s.words}>Summarize this session and list the next steps.</span>}
         controls={
           // The three states share one cell: the mic, the recording row and
           // the spinner that stands in for the tick while the model listens.

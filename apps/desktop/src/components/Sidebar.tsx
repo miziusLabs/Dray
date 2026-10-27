@@ -21,7 +21,6 @@ import Orb from "@/components/Orb";
 
 import PrStateIcon, { prStateLabel } from "@/components/PrStateIcon";
 import UpdateRow from "@/components/UpdateRow";
-import PanelLeftIcon from "@/components/icons/PanelLeftIcon";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -69,8 +68,7 @@ import type {
   UpdateStatus,
 } from "@/types/events";
 
-/// The sidebar's search field. Named so ⌘F can reach it from `App`: the chord
-/// has to work with the sidebar collapsed, so it lives up there, and `autoFocus`
+/// The sidebar's search field. Named so ⌘F can reach it from `App`; `autoFocus`
 /// only covers the field being *mounted* by that same press.
 export const SEARCH_INPUT_ID = "sidebar-search";
 
@@ -86,8 +84,7 @@ type SidebarProps = {
   /// Whether the search row is drawn as an input rather than as its button.
   /// Apart from the query itself, since an empty input and the button look the
   /// same and this is only about where the caret is — and owned by the caller
-  /// because ⌘F has to open it from a *collapsed* sidebar, which is not
-  /// mounted.
+  /// because the field is mounted only while the row is open.
   searchOpen: boolean;
   onSearchOpenChange: (open: boolean) => void;
   // The live status of every session the app has heard about this run. Wins over
@@ -103,7 +100,6 @@ type SidebarProps = {
   /// pull requests are read per repo and the index knows nothing about them.
   prFor: (repoPath: string, branch: string | null) => PrMark | undefined;
   selectedSessionId: string | null;
-  collapsed: boolean;
   onSelect: (sessionId: string) => void;
   /// See `SessionRow`'s own.
   onPrefetch?: (sessionId: string) => void;
@@ -609,14 +605,10 @@ function projectRuns(nests: SessionListRow[][], projects: Project[]): SessionGro
 /// The order alone, for callers that only step through it.
 ///
 /// Exported because the ⌘⇧↑/↓ shortcut walks the same sequence, and a second
-/// comparator would let the two disagree about which row is "next" — worse when
-/// the sidebar is collapsed and nothing on screen shows the order being walked.
-/// Grouped for the same reason: the shortcut has to step past a heading the way
-/// the eye does, so it takes the same project list the headings are ordered by —
-/// and it steps the pins first, because that is where the eye starts too. Live
-/// status rides along for the same reason: a session that just finished moves
-/// into its own run on screen, and a walk reading it where it used to be would
-/// step past the row the reader is looking at.
+/// comparator could make the shortcut and list disagree about which row is next.
+/// The shortcut steps past headings, so it takes the same project list as the
+/// headings. It steps pinned sessions first. Live status moves a finished
+/// session into its own visible group, so the shortcut follows it there too.
 export function sortSessions(
   items: SessionIndexItem[],
   projects: Project[] = [],
@@ -736,35 +728,6 @@ export function filterSessions(
 export function isNested(item: SessionIndexItem, items: SessionIndexItem[]): boolean {
   return Boolean(
     item.parentSessionId && items.some((i) => i.sessionId === item.parentSessionId),
-  );
-}
-
-/// Sidebar toggle. Lives outside `Sidebar` because a collapsed sidebar renders
-/// nothing at all — the button has to survive its own pane disappearing, so the
-/// app header owns it and its y position never moves.
-export function SidebarToggle({ onToggle }: { onToggle: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* Held back at rest — it's chrome, not content — and brought to full
-            strength under the cursor. */}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onToggle}
-          aria-label="Toggle sidebar"
-          // The chat tab's mark colour, open or shut: the pane itself says
-          // which, and a strength flip read backwards on a sidebar kept open.
-          className="text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <PanelLeftIcon className="size-4.5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="right">
-        Toggle Sidebar
-        <ShortcutKeys ids={["sidebar.toggle"]} />
-      </TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -964,7 +927,6 @@ export default function Sidebar({
   askingSessions,
   prFor,
   selectedSessionId,
-  collapsed,
   onSelect,
   onPrefetch,
   groups: splits,
@@ -1007,11 +969,7 @@ export default function Sidebar({
     min: SIDEBAR_MIN,
     edge: "right",
     label: "Resize the sidebar",
-    // Dropped while collapsed, which is not an unmount: this component returns
-    // `null` below with its hooks already run, so publishing on mount alone
-    // left the panel taking a sidebar's width off its own cap with no sidebar
-    // on screen.
-    pane: collapsed ? undefined : "sidebar",
+    pane: "sidebar",
   });
 
   const closeSearch = () => {
@@ -1173,10 +1131,6 @@ export default function Sidebar({
   const asideRef = useRef<HTMLElement>(null);
   // The step ticks for itself, in `App`, where the chords land too.
   useSwipe(asideRef, onStepProjectFilter);
-
-  // Collapsed is nothing at all, not a rail. The toggle moves to the app header
-  // in that state, which is the one row present either way.
-  if (collapsed) return null;
 
   return (
     <aside

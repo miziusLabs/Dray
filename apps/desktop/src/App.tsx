@@ -77,7 +77,6 @@ import Sidebar, {
   SIDEBAR_MIN,
   SEARCH_INPUT_ID,
   SettingsButton,
-  SidebarToggle,
   SpaceSwitcher,
   filterSessions,
   placeDrafts,
@@ -113,7 +112,16 @@ import { cycledModels } from "@/lib/starredModels";
 import ViewTabs, { closeActiveTab, ItemTab, type ViewTab } from "@/components/layout/ViewTabs";
 import ShortcutKeys from "@/components/ShortcutKeys";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { attachmentKey, clearAttachments, pickAttachments, restoreAttachments } from "@/hooks/useAttachments";
+import {
+  attachmentKey,
+  clearAttachments,
+  pickAttachments,
+  readAttachments,
+  removeAttachments,
+  replaceAttachments,
+  restoreAttachments,
+  useAttachments,
+} from "@/hooks/useAttachments";
 import { useCodeTheme } from "@/hooks/useCodeTheme";
 import { refreshActiveDoc, saveActiveDoc, useDocs } from "@/hooks/useDocs";
 import { closeFile, useOpenFiles } from "@/hooks/useOpenFiles";
@@ -275,11 +283,13 @@ function App() {
     drafts,
     save: saveDraft,
     update: updateDraft,
+    updateAttachments: updateDraftAttachments,
     remove: removeDraft,
     get: getDraft,
     discardIfEmpty,
   } = useDrafts((e) => setError(String(e)));
   const [openDraftId, setOpenDraftId] = useState<string | null>(null);
+  const draftOpenSeq = useRef(0);
   // The sidebar's third view beside active and settled, in memory only.
   const [draftsShown, setDraftsShown] = useState(false);
   // Read from the text listener, which registers once, and written ahead of
@@ -287,7 +297,10 @@ function App() {
   const openDraftRef = useRef(openDraftId);
   openDraftRef.current = openDraftId;
   useEffect(() => {
-    if (selectedSessionId) setOpenDraftId(null);
+    if (selectedSessionId) {
+      draftOpenSeq.current++;
+      setOpenDraftId(null);
+    }
   }, [selectedSessionId]);
   // Dray Island opens on this session when tapped over Dray's window.
   useEffect(() => {
@@ -327,8 +340,16 @@ function App() {
   useEffect(() => {
     const left = leftDraft.current;
     leftDraft.current = openDraftId;
-    if (left && left !== openDraftId) discardIfEmpty(left);
-  }, [openDraftId, discardIfEmpty]);
+    if (!left || left === openDraftId) return;
+    const draft = getDraft(left);
+    if (
+      !draft?.prompt.trim() &&
+      !draft?.attachmentPaths?.length &&
+      !readAttachments(draftKey(left)).length
+    ) {
+      discardIfEmpty(left);
+    }
+  }, [openDraftId, discardIfEmpty, getDraft]);
 
   /// The composer's send. On an open draft the draft is closed *before* the
   /// send, since the composer clears its text straight after handing it over
@@ -405,7 +426,9 @@ function App() {
     if (key && !source) return;
     const prompt = readDraft(key);
     const draftProject = source ? source.projectPath : projectPath;
-    if (!draftProject || !prompt.trim()) return;
+    const trayKey = attachmentKey(key, composerCwd);
+    const attachments = readAttachments(trayKey);
+    if (!draftProject || (!prompt.trim() && !attachments.length)) return;
     const id = crypto.randomUUID();
     const saved = await saveDraft({
       id,
@@ -418,11 +441,12 @@ function App() {
       fast,
       useWorktree: source ? !!source.worktreeName || source.worktreeRemoved : useWorktree,
       created: new Date().toISOString(),
-    });
+    }, attachments.map((attachment) => attachment.path));
     if (!saved) return;
     // Only what was saved leaves: text typed while the write was out stays.
     const now = readDraft(key);
     writeDraft(key, now.startsWith(prompt) ? now.slice(prompt.length) : now);
+    removeAttachments(trayKey, attachments.map((attachment) => attachment.path));
     pushNotice({ sessionId: id, kind: "draft-saved", label: "Saved as draft" });
     playNotification();
   };
@@ -476,7 +500,6 @@ function App() {
       ? (agents?.find((agent) => agent.harness === harness) ?? null)
       : null;
 
-  const [collapsed, setCollapsed] = useLocalStorage("ade.sidebarCollapsed", false);
   // The Browser view takes the right pane with it and gives it back on the way
   // out, since a page is somebody else's content and wants the width. The
   // sidebar is never taken: pages are tabs of the titlebar now, flipped as
@@ -954,12 +977,12 @@ function App() {
   // That case still starts shown — it fits, it is only drawn somewhere else.
   const crewPanelOpen = !!(crewAnchorId && panelOpens[crewAnchorId]) && !issuesOpen;
   const sidebarW = Math.max(SIDEBAR_MIN, usePaneWidth("sidebar"));
-  // What the sidebar is drawn at, 0 while shut: where the sheet starts.
+  // Where the sidebar ends and the sheet starts.
   const sidebarDrawn = usePaneWidth("sidebar");
   const viewportW = useViewportWidth();
   const crewFits =
     viewportW >=
-    CHAT_MIN + CREW_W + (collapsed ? 0 : sidebarW) + (crewPanelOpen ? PANEL_MIN : 0);
+    CHAT_MIN + CREW_W + sidebarW + (crewPanelOpen ? PANEL_MIN : 0);
   const crewBeside = crewFits && !(crewPanelOpen && viewportW <= CREW_STACK_WITH_PANEL_W);
   const [crewHiddenBy, setCrewHiddenBy] = useState<Record<string, boolean>>({});
   const crewHidden = !!crewAnchorId && (crewHiddenBy[crewAnchorId] ?? !crewFits);
@@ -1229,9 +1252,8 @@ function App() {
   // and a session dropping out of it as a query is typed would stop its repo
   // being polled and make the notice forget a pull request was already ready.
   const [search, setSearch] = useState("");
-  // Whether the sidebar's search row is drawn as a field. Up here rather than in
-  // the sidebar, since ⌘F has to open it from a collapsed one, which is not
-  // mounted at all.
+  // Whether the sidebar's search row is drawn as a field. Up here so ⌘F can
+  // open it from the app-level shortcut.
   const [searchOpen, setSearchOpen] = useState(false);
   const searchedSessions = useMemo(
     () => filterSessions(inSidebar(visibleSessions), search),
@@ -1505,8 +1527,7 @@ function App() {
     if (pagedForMore?.olderBefore != null) loadOlder(pagedForMore.sessionId);
   }, [pagedForMore?.sessionId, pagedForMore?.olderBefore]);
 
-  // Drops the Browser view's claim, `toggleSidebar`'s reason: a pane moved by
-  // hand is the reader's.
+  // Drops the Browser view's claim when the reader changes the pane manually.
   const togglePanel = () => {
     if (panelKey) panelHidForBrowser.current.delete(panelKey);
     setPanelOpen((prev) => !prev);
@@ -1702,9 +1723,8 @@ function App() {
         }
       : null;
 
-  // Same order the sidebar draws, so the walk matches the list even when the
-  // sidebar is collapsed and there is nothing on screen to follow — project
-  // list included, since that is what orders the groups it steps through.
+  // Same order the sidebar draws, so the walk matches the visible list and its
+  // project grouping.
   const ordered = useMemo(
     () =>
       sortSessions(
@@ -2022,6 +2042,7 @@ function App() {
   // back with it — so this is a navigation, not a dismissal. Settings cover the
   // whole window, so they close too.
   const goToSession = (go: () => void) => {
+    draftOpenSeq.current++;
     setIssuesOpen(false);
     closeSettings();
     setOpenDraftId(null);
@@ -2029,9 +2050,22 @@ function App() {
   };
 
   /// The new-task composer, carrying a draft's text and picks.
-  const openDraft = (id: string) => {
+  const openDraft = async (id: string) => {
     const draft = getDraft(id);
     if (!draft) return;
+    const request = ++draftOpenSeq.current;
+    const nav = navGen.current;
+    let attachments: Attachment[];
+    try {
+      attachments = draft.attachmentPaths?.length
+        ? await invoke<Attachment[]>("read_attachments", { paths: draft.attachmentPaths })
+        : [];
+    } catch (e) {
+      setError(String(e));
+      return;
+    }
+    if (request !== draftOpenSeq.current || nav !== navGen.current || !getDraft(id)) return;
+    restoreAttachments(draftKey(id), attachments);
     goToSession(() => {
       restoreDraftControls(draft);
       writeDraft(draftKey(id), draft.prompt);
@@ -2408,16 +2442,9 @@ function App() {
     }
   };
 
-  const toggleSidebar = () => {
-    setCollapsed((prev) => !prev);
-  };
-  useHotkey("sidebar.toggle", toggleSidebar);
-  // Takes the sidebar with it: the field lives there, and a chord that opened a
-  // search nobody can see would be worse than no chord. `autoFocus` covers the
-  // field this press mounts; the select covers the one already on screen, which
-  // is also what makes ⌘F on a query a replace rather than an append.
+  // `autoFocus` covers the field this press mounts; the select covers the one
+  // already on screen, which also makes ⌘F on a query a replace rather than append.
   useHotkey("search", () => {
-    setCollapsed(false);
     setSearchOpen(true);
     document.querySelector<HTMLInputElement>(`#${SEARCH_INPUT_ID}`)?.select();
   });
@@ -2531,7 +2558,7 @@ function App() {
       (pendingBrowserTab || !!hasBrowserTabs)) ||
     gridShown;
   useHotkey("tab.close", closeTabOrPane, { enabled: hasCloseTarget });
-  // ⌘E for the right pane against ⌘B for the left.
+  // ⌘E opens and closes the right pane.
   //
   // Bound to the raw toggle rather than to `handleTogglePanel`, deliberately:
   // that one picks a tab on the way open, which is right for a button the
@@ -2611,10 +2638,8 @@ function App() {
   });
   // ⌘1–⌘9 live in `ViewTabs`, which is drawn only where there is a row to
   // switch, so the issues page and a new task need no guard of their own.
-  // ⌘, — every macOS app's preferences chord, and the only way into settings
-  // while the sidebar is collapsed and its gear gone with it. Safe to take for
-  // `useHotkey`'s usual pair of reasons: it claims the chord, and the app's
-  // custom menu carries no Settings item to swallow the key first.
+  // ⌘, is macOS's preferences chord. The app menu has no Settings item, so
+  // this listener provides the keyboard route from anywhere in the app.
   useHotkey("settings", () => setSettingsOpen(true));
   // No notice on landing: the whole window changing is the answer.
   useHotkey("theme.next", cycleTheme);
@@ -2737,7 +2762,6 @@ function App() {
         the browser's native view down, its pane measuring zero. */}
     <div className={cn("h-full w-full", settingsOpen && "hidden")}>
     <AppShell
-      sidebarOpen={!collapsed}
       tall={tallSheet}
       // The issues page fills the column, so the centred empty-composer state
       // is wrong there even with no session selected.
@@ -2788,7 +2812,6 @@ function App() {
           // lit row would name a session that is nowhere on screen — and the
           // selection itself is kept, which is what makes coming back free.
           selectedSessionId={issuesOpen ? null : selectedSessionId}
-          collapsed={collapsed}
           // The sidebar is the reader leaving the crew, and it has to say so
           // outright rather than lean on the selection moving. A row already
           // selected — the crew member they are reading — moves nothing, so
@@ -2858,9 +2881,8 @@ function App() {
             // the sheet is what gives this row its colour.
             "relative flex h-(--titlebar-h) shrink-0 items-center gap-2 overflow-hidden px-3",
             !fullscreen && "pl-(--traffic-lights-w)",
-            // What sits before the tab row: this padding, the 28px sidebar
-            // toggle and one gap. `ViewTabs` lines its row up from it.
-            fullscreen ? "[--tabs-lead:3rem]" : "[--tabs-lead:calc(var(--traffic-lights-w)+2.25rem)]",
+            // `ViewTabs` subtracts this lead when it lines up with the sidebar.
+            fullscreen ? "[--tabs-lead:0.75rem]" : "[--tabs-lead:var(--traffic-lights-w)]",
           )}
           // `deep`, not bare: bare drags only on direct hits, so every label
           // inside this row was a dead strip in a titlebar that looks uniform.
@@ -2868,14 +2890,8 @@ function App() {
           // clickable element that carries no attribute of its own.
           data-tauri-drag-region="deep"
         >
-          {/* Always here, open or shut: the sidebar sits under this row now,
-              so the toggle no longer has a strip of its own to live in. */}
-          <SidebarToggle onToggle={toggleSidebar} />
-
-          {/* Over the sidebar's right end, out of the flow so the tabs do not
-              move. It belongs to the sidebar, so it goes when the sidebar does —
-              and on a hidden session, whose way back to its parent runs
-              through this same strip. ⌘, still opens settings there. */}
+          {/* Anchored over the sidebar's right edge so the tabs do not move.
+              A hidden session uses this strip to link back to its parent. */}
           {sidebarDrawn > 0 && !(!issuesOpen && shownSession && hiddenParent) && (
           <div
             className="absolute top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-1"
@@ -3380,7 +3396,7 @@ function App() {
           <Chat
             {...paneState(mainSessionId ?? "")}
             {...paneChat}
-            crowded={!collapsed && (panelShown || crewUp || (issuesOpen && !!pickedIssue))}
+            crowded={panelShown || crewUp || (issuesOpen && !!pickedIssue)}
             // Its own chords only while the composer is pointed here — the same
             // gate a split pane takes, since Stop and scroll-to-bottom act on
             // the session being written to.

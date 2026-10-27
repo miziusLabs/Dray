@@ -107,7 +107,7 @@ Black card was tried first, on reasoning that white veil over light page is invi
 
 **Settled `AskUserQuestion` row show only answer.** Its arguments = questions and options reader just answered on card, so `ToolCall` drop input body for it entirely. Its result keep no code box and lose mono font other results carry — it one tool result harness write as sentence not program output.
 
-**Right pane = one frame with tabs, not one panel per view.** [RightPanel](src/components/RightPanel.tsx) own `<aside>`, border, tab row; `ChangesPanel` and `SubagentPanel` = bodies rendering inside it, carry no chrome. `AppShell` have single `panel` slot, so two self-framing panels could only ever be mutually exclusive with two booleans deciding it. Tab row `h-(--titlebar-h)` and carry drag region itself. No close button: `PanelToggle` and ⌘E both close it, matching ⌘B for sidebar. Toggle exported from `RightPanel` but rendered by `App`, because pane not exist before session do and button have to outlive it.
+**Right pane = one frame with tabs, not one panel per view.** [RightPanel](src/components/RightPanel.tsx) own `<aside>`, border, tab row; `ChangesPanel` and `SubagentPanel` = bodies rendering inside it, carry no chrome. `AppShell` have single `panel` slot, so two self-framing panels could only ever be mutually exclusive with two booleans deciding it. Tab row `h-(--titlebar-h)` and carry drag region itself. No close button. `PanelToggle` and ⌘E close it. Toggle exported from `RightPanel` but rendered by `App`, because pane not exist before session do and button have to outlive it.
 
 **Changes glyph = plain foreground, not command yellow.** Yellow = app's "this is for you", colour of session standing still behind question. Turn having touched file neither warning nor thing to answer. PR glyph keep its emerald: that one say state of work.
 
@@ -253,7 +253,7 @@ Card name its subject — it and `worktree-failed` the only two that do — brea
 
 **Dialog, not alert, and `showClose` = whole difference.** Frame, overlay and both animation copied from `alert-dialog` deliberately: to reader two are same object, differing only in whether app asking question or reader opened something. Alert answered by own buttons so carry no dismiss; dialog dismissed rather than answered, and Escape alone = way out only for people who already know it there. `--popover` not `--card` on both, so both take glass on vibrancy — they float over page, and wash of own colour plus blur is what say so. [Reason above](#worktree-notice-and-confirm-dialog).
 
-**Gear in sidebar's titlebar strip, and it move in fullscreen.** Strip `justify-end` normally to clear traffic lights, `justify-start` in fullscreen where they gone. Sidebar toggle **also** drawn in app header when sidebar collapsed, so it must hold strip's outer edge in both layout and never change which end it at; gear have no second home, so gear = the one that move. Settings sit in that strip rather than filter row below, because every control in that row scope list under it and these app-wide.
+**Gear in the sidebar's titlebar strip.** The strip aligns after the traffic lights in a window and starts at the left edge in fullscreen. Settings stay there because the sidebar controls scope the list.
 
 **Row = label and reason left, control right** (`SettingRow`), **except where control wider than a switch — then it go under label, full width** (`stacked`). Beside-the-label take its width out of description, which then wrap to three ragged line and leave orphan, and dialog read as set of row that don't fit rather than list of setting. Under = also where picker want to be: option ranged along one edge, not pushed against far one. Description **not optional except where control show answer instead of telling it** — see theme row below; everywhere else it where "why is this off by default" live, and row with bare label make reader guess.
 
@@ -279,11 +279,11 @@ Card name its subject — it and `worktree-failed` the only two that do — brea
 
 ## Update row
 
-**Update row drawn only when there something to say.** Sidebar have no permanent footer; row reading "up to date" = chrome for fact nobody asked about. Show nothing while sidebar collapsed, deliberate — next check keep offer alive.
+**Update row drawn only when there is something to say.** The sidebar has no permanent footer. A row that reads 'up to date' is chrome for a fact nobody asked about, so the row appears only when an update needs attention.
 
 ## Notice cards
 
-Sidebar glow was third channel, cut. Landed in same corner as card, so it could not reach eye card wasn't already reaching, and invisible whenever sidebar collapsed. Animation and its rewiring notes live in git history (`src/styles/attention-glow.css`, removed in #279) — worth several passes to get right, so next thing wanting pulse restore it rather than redo them.
+Sidebar glow was a third channel, and it was cut. It landed in the same corner as the card, so it could not reach the eye when the card did not. Its animation and rewiring notes remain in git history (`src/styles/attention-glow.css`, removed in #279).
 
 **Card carry verb and nothing else** ([NoticeStack](src/components/NoticeStack.tsx)) — "Needs permission", "Done" — top-left, over sidebar it talk about and below traffic lights, where nothing else in app draw. No session title, no project, no icon: rail already mark row, so card repeating name spend its width saying what next glance say anyway. That leave one fact not on screen anywhere else, which is *what* is wanted. Desktop banner do opposite and have to: it land in stack beside every other app's notifications, so it name session and project or it say nothing. One `announce` build both from same label.
 

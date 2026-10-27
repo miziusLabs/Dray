@@ -638,9 +638,7 @@ function BetaUpdatesRow({
 
 /// Check for updates, and install one that has already downloaded.
 ///
-/// The same answer the menu item gives, in a place a collapsed sidebar cannot
-/// take away — `UpdateRow` lives inside `<aside>`, so "Check for Updates…" had
-/// nowhere to report to while the sidebar was shut.
+/// The same answer the menu item gives, beside the update control in `<aside>`.
 ///
 /// **One button, and its label is the whole state.** Checking, up to date,
 /// downloading and ready are four answers to one question, so a sentence under

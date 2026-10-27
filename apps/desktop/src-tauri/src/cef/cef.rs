@@ -1580,10 +1580,10 @@ fn open_devtools(browser: &Browser) {
 
 /// ⌘-chords the page keeps: editing, find, the location bar. Zoom, reload and
 /// DevTools are the browser's and handled below, since CEF implements none
-/// of Chrome's accelerators itself. Every other ⌘-chord is the app's — ⌘1,
-/// ⌘B, ⌘E, ⌘N — and is handed back to the webview, since with Chromium's view
+/// of Chrome's accelerators itself. App shortcuts such as ⌘1, ⌘E and ⌘N are
+/// forwarded to the frontend, since with Chromium's view
 /// focused a key never reaches the document `useHotkey` listens on.
-const PAGE_CHORDS: &[char] = &['c', 'v', 'x', 'a', 'z', 'f', 'l'];
+const PAGE_CHORDS: &[char] = &['b', 'c', 'v', 'x', 'a', 'z', 'f', 'l'];
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
