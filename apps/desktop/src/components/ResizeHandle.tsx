@@ -56,11 +56,10 @@ export const CHAT_MIN = 360;
 /// What each side pane is holding, and how much the chat column must keep.
 ///
 /// Published by the panes themselves rather than measured off the DOM: each is
-/// the one place that already knows its number, and a pane *unmounting* — which
-/// is what a collapsed sidebar is — is the state a query selector cannot tell
-/// from one that has not mounted yet. Module-level because the readers are
-/// siblings with nothing above them to hang it on but `App`, which would then
-/// thread it through components that have no other use for it.
+/// the one place that already knows its number, and a query selector cannot
+/// distinguish an unmounted pane from one that has not mounted yet. It lives at
+/// module scope because the readers are siblings, and threading it through
+/// `App` would pass it through components with no use for it.
 const widths: Partial<Record<Pane, number>> = {};
 let chatFloor = CHAT_MIN;
 const layoutChanged = channel<void>();
@@ -161,8 +160,7 @@ export function useResizable({
   // reader asked for, which is why the stored width is left alone.
   const width = clamp(stored);
 
-  // Published on every change and cleared on unmount, which is what a collapsed
-  // sidebar is — it returns null rather than rendering a rail.
+  // Publish the current width while the pane is mounted.
   useEffect(() => {
     if (!pane) return;
     widths[pane] = width;

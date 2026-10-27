@@ -6,9 +6,6 @@ import { EMPTY_VIEW } from "@/lib/groups";
 
 type AppShellProps = {
   sidebar: ReactNode;
-  /// The sidebar is drawn. Shut, a strip of the frame still holds the sheet
-  /// off the window's left edge.
-  sidebarOpen?: boolean;
   /// The sheet reaches up behind the header rather than starting under it —
   /// for pages with no tabs to sit in the strip. The header floats over the
   /// sheet's top, and the sheet's contents keep their place below it.
@@ -49,7 +46,6 @@ type AppShellProps = {
 /// their own margins, so there is one place to change the layout.
 export default function AppShell({
   sidebar,
-  sidebarOpen = true,
   tall = false,
   header,
   footer,
@@ -87,7 +83,6 @@ export default function AppShell({
         <div
           className={cn(
             "flex shrink-0 bg-surface-frame",
-            !sidebarOpen && "w-2",
             // The header floats over its top, so it starts below the header.
             "pt-(--titlebar-h)",
             // Light rows sat on the bare page and now sit on the frame's

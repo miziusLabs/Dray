@@ -1123,8 +1123,7 @@
        half of this plus 2 (the lights are 14pt, laid 9pt up from the inset's
        floor), so the two move together or the lights leave the row's centre. */
     --titlebar-h: 40px;
-    /* Horizontal clearance for those same lights, needed only when a pane
-       reaches the window's left edge — i.e. with the sidebar collapsed. */
+    /* Horizontal clearance for the macOS traffic lights in the titlebar. */
     --traffic-lights-w: 78px;
   }
 

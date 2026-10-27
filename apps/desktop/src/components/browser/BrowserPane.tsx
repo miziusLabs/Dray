@@ -182,7 +182,7 @@ export default function BrowserPane({
     report();
     const observer = new ResizeObserver(report);
     // A resize alone misses a move: a left panel slides without changing
-    // size when the sidebar beside it collapses or is dragged. Whatever
+    // size when the sidebar beside it is dragged. Whatever
     // moves the stage resizes one of its ancestors' siblings, so watch those.
     for (let el: Element | null = stage; el && el !== document.body; el = el.parentElement) {
       for (const sibling of el.parentElement?.children ?? []) observer.observe(sibling);

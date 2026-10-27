@@ -22,9 +22,8 @@ type UpdateRowProps = {
 ///
 /// Drawn only while there is something to say — the sidebar has no permanent
 /// footer, and a row that reads "up to date" is chrome for a fact nobody asked
-/// about. Nothing shows while the sidebar is collapsed; the next check keeps
-/// the offer alive, and an update is not urgent enough to earn a second home in
-/// the header.
+/// about. The next check keeps the offer alive, and an update is not urgent
+/// enough to earn a second home in the header.
 export default function UpdateRow({
   status,
   blocked,

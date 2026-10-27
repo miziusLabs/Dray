@@ -47,13 +47,9 @@ export default function Window({
       )}
     >
       <header className="flex h-(--titlebar-h) shrink-0 items-center pr-3">
-        {/* Over the sidebar: the traffic lights, the toggle beside them, and
-            the gear at the sidebar's far end. */}
+        {/* Traffic lights over the sidebar, with settings at its far end. */}
         <div className="flex shrink-0 items-center" style={{ width: sidebarWidth }}>
           <TrafficLights className="w-[78px] pl-[19px]" />
-          <span className="grid size-7 place-items-center opacity-80">
-            <PanelLeftIcon className="size-4.5" />
-          </span>
           <span className="ml-auto mr-2 grid size-7 place-items-center opacity-80">
             <Settings className="size-4" />
           </span>
@@ -108,9 +104,8 @@ export function TrafficLights({ className }: { className?: string }) {
   );
 }
 
-/// A rounded rectangle with its left column filled — the sidebar toggle, drawn
-/// after VS Code's. The fill is a plain rect clipped to the rounded outline, so
-/// its corners follow the border's arc instead of squaring off.
+/// A rounded rectangle with its left column filled. Clipping the fill to the
+/// outline keeps its corners on the border's arc.
 export function PanelLeftIcon({
   className,
   mirrored = false,
