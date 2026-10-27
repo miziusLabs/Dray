@@ -121,7 +121,7 @@ pub async fn delete_draft_attachments(id: String) -> Result<(), Fail> {
 
 pub async fn discard_attachments(id: &str) {
     if let Err(error) = delete_draft_attachments(id.to_owned()).await {
-        eprintln!("draft attachments not deleted: {error:#}");
+        eprintln!("draft attachments not deleted: {error:?}");
     }
 }
 
