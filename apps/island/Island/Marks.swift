@@ -312,8 +312,8 @@ private struct OpenInAppButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Text("Open in app")
-                if chord { Text("⌘⏎").foregroundStyle(.white.opacity(0.45)) }
+                Text("Open in app").foregroundStyle(.white.opacity(0.95))
+                if chord { Text("⌘⏎").foregroundStyle(.white.opacity(0.7)) }
             }
             .font(.system(size: 12, weight: .medium))
             .padding(.horizontal, 10)
