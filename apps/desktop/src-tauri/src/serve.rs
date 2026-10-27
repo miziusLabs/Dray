@@ -1311,6 +1311,9 @@ async fn dispatch(cmd: &str, args: Value, sink: Sink) -> Result<Value, Value> {
         read_attachments(paths: Vec<String>) => ok(crate::attachments::read_attachments(paths).await);
         list_drafts() => crate::drafts::list_drafts().await;
         save_draft(draft: Value) => crate::drafts::save_draft(draft).await;
+        save_draft_attachments(id: String, paths: Vec<String>) =>
+            crate::drafts::save_draft_attachments(id, paths).await;
+        delete_draft_attachments(id: String) => crate::drafts::delete_draft_attachments(id).await;
         // The island's ⌘S. Unlike `save_draft`, which the app's own autosave
         // calls on every pause in typing, it says so: nothing else tells the app.
         create_draft(draft: Value) => {

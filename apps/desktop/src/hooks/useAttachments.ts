@@ -16,8 +16,8 @@ import type { Attachment } from "@/types/events";
 /// `ReactNode`, so the two cannot pass props to each other — they share this
 /// instead, and neither has to know the other exists.
 ///
-/// Not persisted: an attachment is part of a sentence you were in the middle of,
-/// and the file it points at may not survive a restart either.
+/// Saved drafts copy their files into Dray storage. Other composer trays stay
+/// in memory until they are sent or explicitly saved as a draft.
 const bySession = new Map<string | null, Attachment[]>();
 const { emit, subscribe } = channel<void>();
 
@@ -96,6 +96,17 @@ export function removeAttachment(sessionId: string | null, path: string) {
   );
 }
 
+export function removeAttachments(sessionId: string | null, paths: string[]) {
+  if (!paths.length) return;
+  const removed = new Set(paths);
+  const current = bySession.get(sessionId);
+  if (!current) return;
+  write(
+    sessionId,
+    current.filter((attachment) => !removed.has(attachment.path)),
+  );
+}
+
 export function clearAttachments(sessionId: string | null) {
   if (!bySession.has(sessionId)) return;
   write(sessionId, EMPTY);
@@ -122,4 +133,20 @@ export function restoreAttachments(sessionId: string | null, attachments: Attach
   if (!fresh.length) return;
 
   write(sessionId, [...current, ...fresh]);
+}
+
+export function replaceAttachments(
+  sessionId: string | null,
+  sources: string[],
+  attachments: Attachment[],
+) {
+  if (!sources.length || !attachments.length) return;
+  const replacements = new Map<string, Attachment>();
+  sources.forEach((path, index) => {
+    const replacement = attachments[index];
+    if (replacement) replacements.set(path, replacement);
+  });
+  const current = bySession.get(sessionId) ?? EMPTY;
+  const next = current.map((attachment) => replacements.get(attachment.path) ?? attachment);
+  if (next.some((attachment, index) => attachment !== current[index])) write(sessionId, next);
 }
